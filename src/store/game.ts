@@ -1,11 +1,12 @@
 /**
- * Akcje gry spinające store'y (wyprawa ↔ użytkownik ↔ zadania ↔ odznaki).
+ * Akcje gry spinające store'y (wyprawa ↔ użytkownik ↔ zadania ↔ odznaki ↔ osiągnięcia).
  * Cała arytmetyka XP pochodzi z czystych funkcji w utils/xp.ts.
  */
 import * as Haptics from 'expo-haptics';
 import { Platform } from 'react-native';
 
-import type { Find, GminaChallenge, Identification, Quest, QuestProgress, Rarity, Trip } from '@/types';
+import type { AchievementUnlock, Find, GminaChallenge, Identification, Quest, QuestProgress, Rarity, Trip } from '@/types';
+import { ACHIEVEMENT_BY_ID, evaluateAchievements, newlyReached, tierKind, TIER_LABEL } from '@/utils/achievements';
 import { BADGE_RULES } from '@/utils/badges';
 import { makeId } from '@/utils/random';
 import { applyXp, computeFindXp } from '@/utils/xp';
@@ -84,11 +85,36 @@ function setQuestProgress(questId: string, progress: number, target: number): bo
   return completed;
 }
 
-/** Wypłaca XP za ukończone zadania (po ekranie Nagroda albo od razu – dystans). */
-export function grantPendingQuestRewards() {
+/* ───────────────────────── Osiągnięcia ───────────────────────── */
+
+/**
+ * Porównuje postęp (liczony z atlasu) z nagrodzonymi stopniami; nowe stopnie zapisuje jako
+ * nagrodzone i dokłada do kolejki wypłat. Zwraca odblokowane stopnie.
+ */
+export function syncAchievements(): AchievementUnlock[] {
+  const u = useUserStore.getState();
+  const states = evaluateAchievements({ atlas: u.atlas, species: catalog().species, counters: u.counters });
+  const unlocks = newlyReached(u.achievements, states);
+  if (!unlocks.length) return [];
+  const awarded = { ...u.achievements };
+  unlocks.forEach((x) => (awarded[x.id] = Math.max(awarded[x.id] ?? 0, x.tier)));
+  u.patch({ achievements: awarded, pendingAchievements: [...u.pendingAchievements, ...unlocks] });
+  return unlocks;
+}
+
+/** „Kolekcjoner · Srebro” / „Wielka trójka”. */
+export function achievementTitle(x: AchievementUnlock) {
+  const def = ACHIEVEMENT_BY_ID[x.id];
+  if (!def) return x.id;
+  return def.tiers.length > 1 ? `${def.name} · ${TIER_LABEL[tierKind(def.tiers.length, x.tier)]}` : def.name;
+}
+
+/** Wypłaca XP za ukończone zadania i zdobyte stopnie osiągnięć (po ekranie Nagroda albo od razu – dystans). */
+export function grantPendingRewards() {
   const u = useUserStore.getState();
   const pending = u.quests.pendingRewards;
-  if (!pending.length) return;
+  const achievements = u.pendingAchievements;
+  if (!pending.length && !achievements.length) return;
   const quests = allQuests();
   let level = { level: u.user.level, xp: u.user.xp };
   let total = 0;
@@ -107,11 +133,29 @@ export function grantPendingQuestRewards() {
     }
     ui.toast(`Zadanie wykonane: ${q.title} · +${q.xp} XP`, 'check_circle');
   });
+  let achievementXp = 0;
+  achievements.forEach((a) => {
+    const r = applyXp(level, a.xp);
+    level = { level: r.level, xp: r.xp };
+    ups.push(...r.levelUps);
+    achievementXp += a.xp;
+  });
+  total += achievementXp;
+  if (achievements.length) {
+    const text =
+      achievements.length === 1
+        ? `Osiągnięcie: ${achievementTitle(achievements[0])} · +${achievementXp} XP`
+        : `Zdobyto ${achievements.length} osiągnięcia · +${achievementXp} XP`;
+    // Po toastach zadań (jeden toast naraz) – osiągnięcie pokazujemy chwilę później.
+    if (pending.length) setTimeout(() => ui.toast(text, 'emoji_events'), 1300);
+    else ui.toast(text, 'emoji_events');
+  }
   u.patch({
     user: { ...u.user, level: level.level, xp: level.xp },
     badges: [...u.badges, ...unlocked.filter((b) => !u.badges.includes(b))],
     weeklyContribution: u.weeklyContribution + total,
     quests: { ...u.quests, pendingRewards: [] },
+    pendingAchievements: [],
   });
   addXpToActiveTrip(total);
   if (ups.length) {
@@ -185,7 +229,7 @@ export function addDistance(deltaKm: number) {
   const km = u.today.km + deltaKm;
   u.patch({ today: { ...u.today, km }, counters: { ...u.counters, totalKm: u.counters.totalKm + deltaKm } });
   const q = catalog().dailyQuests.find((x) => x.kind === 'distance');
-  if (q && setQuestProgress(q.id, Math.floor(km * 10) / 10, q.target)) grantPendingQuestRewards();
+  if (q && setQuestProgress(q.id, Math.floor(km * 10) / 10, q.target)) grantPendingRewards();
 }
 
 /** Zmiana przyspieszenia czasu bez „skoku” licznika. */
@@ -288,6 +332,7 @@ export function claimFind(findId: string): Find | null {
     counters.borowikiKnyszynska += 1;
   }
   if (find.rarity === 'legendarny') counters.legendaryFinds += 1;
+  if (find.xxl && find.collected) counters.xxlFinds += 1;
   const unlocked = (Object.keys(BADGE_RULES) as (keyof typeof BADGE_RULES)[]).filter((id) => {
     const rule = BADGE_RULES[id];
     return !u.badges.includes(id) && counters[rule.counter] >= rule.target;
@@ -306,6 +351,9 @@ export function claimFind(findId: string): Find | null {
     weeklyContribution: u.weeklyContribution + xp.total,
     today: { ...u.today, keys: u.today.keys.includes(key) ? u.today.keys : [...u.today.keys, key] },
   });
+
+  // Osiągnięcia z nowego stanu atlasu (XP po ekranie Nagroda).
+  const unlockedAchievements = syncAchievements();
 
   // Zadania (nagrody wypłacane po ekranie Nagroda).
   const completedQuestIds: string[] = [];
@@ -330,6 +378,7 @@ export function claimFind(findId: string): Find | null {
       levelAfter: after.level,
       xpAfter: after.xp,
       unlockedBadgeIds: unlocked,
+      unlockedAchievements,
       completedQuestIds,
       personalRecord,
     },
@@ -338,7 +387,7 @@ export function claimFind(findId: string): Find | null {
   const tripNow = tsNow.trips[trip.id];
   tsNow.upsertFind(claimed);
   tsNow.upsertTrip({ ...tripNow, findIds: [...tripNow.findIds, claimed.id], xp: tripNow.xp + xp.total });
-  if (after.levelUps.length || unlocked.length) successHaptic();
+  if (after.levelUps.length || unlocked.length || unlockedAchievements.length) successHaptic();
   return claimed;
 }
 
@@ -368,6 +417,24 @@ export function devAddXp(amount: number) {
     successHaptic();
     ui.toast(`LEVEL UP! Poziom ${r.level}`, 'celebration');
   } else ui.toast(`+${amount} XP`, 'auto_awesome');
+}
+
+/** Dev: dopisuje do atlasu losowe nieodkryte gatunki i od razu wypłaca osiągnięcia. */
+export function devDiscoverSpecies(count: number) {
+  const u = useUserStore.getState();
+  const missing = catalog().species.filter((s) => !u.atlas[s.id]);
+  if (!missing.length) {
+    ui.toast('Atlas kompletny – wszystkie gatunki z katalogu odkryte', 'celebration');
+    return;
+  }
+  const picked = [...missing].sort(() => Math.random() - 0.5).slice(0, count);
+  const now = new Date().toISOString();
+  const atlas = { ...u.atlas };
+  picked.forEach((s) => (atlas[s.id] = { count: 1, firstFoundAt: now, bestCapCm: s.typical.capCm, bestWeightG: s.typical.weightG }));
+  u.patch({ atlas });
+  const unlocks = syncAchievements();
+  ui.toast(`Odkryto: ${picked.map((s) => s.shortName).join(', ')}`, 'menu_book');
+  if (unlocks.length) setTimeout(grantPendingRewards, 1300);
 }
 
 export function devUnlockBadge(id: string) {
@@ -404,7 +471,9 @@ export function loadScenario(s: Scenario): string | null {
       user: { ...base.user, level: 1, xp: 0, streakDays: 0, tripsCount: 0, mushroomsCount: 0 },
       atlas: {},
       badges: [],
-      counters: { borowikiKnyszynska: 0, totalKm: 0, streakDays: 0, legendaryFinds: 0 },
+      counters: { borowikiKnyszynska: 0, totalKm: 0, streakDays: 0, legendaryFinds: 0, xxlFinds: 0 },
+      achievements: {},
+      pendingAchievements: [],
       weeklyContribution: 0,
     });
     return null;

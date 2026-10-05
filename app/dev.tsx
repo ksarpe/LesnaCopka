@@ -8,12 +8,14 @@ import { IconButton } from '@/components/IconButton';
 import { Screen } from '@/components/Screen';
 import { Toggle } from '@/components/Toggle';
 import { Txt } from '@/components/Txt';
+import { BackendPanel } from '@/dev/BackendPanel';
 import { useRegionStore } from '@/hooks/useRegion';
 import { useServices } from '@/services';
 import type { PermissionKind, PermissionStatus } from '@/services/types';
 import {
   addDistance,
   devAddXp,
+  devDiscoverSpecies,
   devUnlockBadge,
   loadScenario,
   resetAll,
@@ -66,6 +68,8 @@ export default function DevPanel() {
           </View>
           <IconButton icon="close" onPress={close} accessibilityLabel="Zamknij panel" />
         </View>
+
+        <BackendPanel />
 
         <Section title="Scenariusze" icon="restart_alt">
           <Chips>
@@ -222,6 +226,12 @@ export default function DevPanel() {
                   ui.toast(`Odznaka: ${b.name}`, 'military_tech');
                 }}
               />
+            ))}
+          </Chips>
+          <Label>Osiągnięcia (odkryj losowe gatunki z katalogu)</Label>
+          <Chips>
+            {[1, 3, 10].map((k) => (
+              <Chip key={k} label={`+${k} ${k === 1 ? 'gatunek' : k < 5 ? 'gatunki' : 'gatunków'}`} onPress={() => devDiscoverSpecies(k)} />
             ))}
           </Chips>
         </Section>

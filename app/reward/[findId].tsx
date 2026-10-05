@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { Platform, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withSequence, withSpring, withTiming } from 'react-native-reanimated';
 
+import { AchievementMedal } from '@/components/Achievement';
 import { BadgeCircle } from '@/components/Badge';
 import { Button3D } from '@/components/Button3D';
 import { Pill } from '@/components/Pill';
@@ -15,11 +16,12 @@ import { Txt } from '@/components/Txt';
 import { useAsync } from '@/hooks/useAsync';
 import { useCountUp } from '@/hooks/useCountUp';
 import { useServices } from '@/services';
-import { grantPendingQuestRewards } from '@/store/game';
+import { achievementTitle, grantPendingRewards } from '@/store/game';
 import { useCatalogStore } from '@/store/useCatalogStore';
 import { useTripStore } from '@/store/useTripStore';
 import { colors, rarity as rarityTokens } from '@/theme/tokens';
-import type { XpLine } from '@/types';
+import type { AchievementUnlock, XpLine } from '@/types';
+import { ACHIEVEMENT_BY_ID } from '@/utils/achievements';
 import { fmtInt, fmtWeight, gminaTitle, plural } from '@/utils/format';
 import { levelThreshold } from '@/utils/xp';
 
@@ -78,7 +80,7 @@ export default function RewardScreen() {
   const onContinue = () => {
     if (router.canDismiss()) router.dismissAll();
     router.navigate('/');
-    setTimeout(grantPendingQuestRewards, 450);
+    setTimeout(grantPendingRewards, 450);
   };
 
   return (
@@ -214,6 +216,8 @@ export default function RewardScreen() {
           </View>
         ) : null}
 
+        {reward.unlockedAchievements?.length ? <AchievementCard unlocks={reward.unlockedAchievements} /> : null}
+
         <Txt f="n7" size={13} color={colors.onDarkMuted} align="center">
           {pct.data
             ? `${pct.data.mushroomers} ${plural(pct.data.mushroomers, 'osoba znalazła', 'osoby znalazły', 'osób znalazło')} ten gatunek w gminie w tym sezonie – ${
@@ -229,6 +233,46 @@ export default function RewardScreen() {
         <Button3D title="Zbieram dalej" onDark onPress={onContinue} style={{ width: '100%' }} />
       </View>
     </Screen>
+  );
+}
+
+/** „Nowe osiągnięcie” – jak karta odznaki; XP za osiągnięcia wpada po „Zbieram dalej”. */
+function AchievementCard({ unlocks }: { unlocks: AchievementUnlock[] }) {
+  const first = unlocks[0];
+  const def = ACHIEVEMENT_BY_ID[first.id];
+  if (!def) return null;
+  const xp = unlocks.reduce((a, x) => a + x.xp, 0);
+  const more = unlocks.length - 1;
+  return (
+    <View
+      style={{
+        width: '100%',
+        backgroundColor: colors.badgeCard,
+        borderRadius: 22,
+        padding: 14,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        boxShadow: '0px 4px 0px #C8B78F',
+      }}
+    >
+      <AchievementMedal def={def} tier={first.tier} size={54} />
+      <View style={{ flex: 1 }}>
+        <Txt f="n8" size={11} color={colors.legendText} upper ls={0.08}>
+          {unlocks.length === 1 ? 'Nowe osiągnięcie' : `Nowe osiągnięcia (${unlocks.length})`}
+        </Txt>
+        <Txt f="b7" size={19}>
+          {achievementTitle(first)}
+        </Txt>
+        <Txt f="n7" size={12} color={colors.muted}>
+          {def.goal(def.tiers[first.tier - 1].target)}
+          {more > 0 ? ` · i ${more} ${plural(more, 'kolejne', 'kolejne', 'kolejnych')}` : ''}
+        </Txt>
+      </View>
+      <Txt f="b7" size={16} color={colors.primaryText}>
+        +{fmtInt(xp)}
+      </Txt>
+    </View>
   );
 }
 

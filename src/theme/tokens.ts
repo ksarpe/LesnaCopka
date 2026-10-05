@@ -98,6 +98,16 @@ export const heat = ['#E9F2DC', '#C9E2A6', '#A5CF72', '#7FB547', '#5E8F2E'] as c
 export const medals = ['#EFA831', '#D9D4CA', '#E3B58C'] as const;
 export const medalDefault = '#F1ECE2';
 
+/** Stopnie osiągnięć: tło medalu (z rankingu gmin + platyna), ikona i tekst etykiety. */
+export const tiers = {
+  braz: { color: '#E3B58C', ink: '#5A3415', text: '#9A5B2A' },
+  srebro: { color: '#D9D4CA', ink: '#3F3B33', text: '#6E685C' },
+  zloto: { color: '#EFA831', ink: '#4A3200', text: '#8A6A1E' },
+  platyna: { color: '#9FD7DE', ink: '#0F3A40', text: '#2C6B73' },
+  /** Sekretne – fiolet „epickiego”. */
+  sekret: { color: '#A56CDE', ink: '#2A0D3A', text: '#7A41AF' },
+} as const;
+
 /** Mapa okolicy (karta „Wykryto region”) – płaska, w paletach placeholderów. */
 export const mapColors = {
   land: '#F1ECDF',

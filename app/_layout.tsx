@@ -108,6 +108,8 @@ function AppStack() {
         />
         <Stack.Screen name="summary/[tripId]" options={{ gestureEnabled: false }} />
         <Stack.Screen name="species/[speciesId]" />
+        <Stack.Screen name="atlas" />
+        <Stack.Screen name="osiagniecia" />
         <Stack.Screen name="dev" options={{ presentation: 'modal' }} />
       </Stack>
     </>

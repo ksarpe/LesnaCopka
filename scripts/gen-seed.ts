@@ -9,6 +9,7 @@ import { BADGES, DAILY_QUESTS } from '../src/data/mock/game';
 import { GMINY } from '../src/data/mock/gminy';
 import type { GminaIndexFile } from '../src/geo/gminaIndex';
 import { SPECIES } from '../src/data/mock/species';
+import { ACHIEVEMENTS, tierKind, type AchievementMetric } from '../src/utils/achievements';
 import { BADGE_RULES } from '../src/utils/badges';
 
 const q = (v: string | number | boolean | null | undefined): string => {
@@ -118,6 +119,58 @@ out.push(
   '',
 );
 
+// Osiągnięcia (src/utils/achievements.ts → tabele z migracji 20261006100000_achievements.sql)
+const FIELD = { bestCapCm: 'best_cap_cm', bestWeightG: 'best_weight_g' } as const;
+function sqlMetric(m: AchievementMetric): { metric: string; params: object } {
+  switch (m.kind) {
+    case 'species':
+      return { metric: 'species', params: { ...(m.rarity && { rarity: m.rarity }), ...(m.edibility && { edibility: m.edibility }) } };
+    case 'set':
+      return { metric: 'set', params: {} };
+    case 'specimens':
+      return { metric: 'specimens', params: {} };
+    case 'maxOfSpecies':
+      return { metric: 'max_of_species', params: {} };
+    case 'speciesWithCount':
+      return { metric: 'species_with_count', params: { min: m.min } };
+    case 'lookalikePairs':
+      return { metric: 'lookalike_pairs', params: {} };
+    case 'xxlFinds':
+      return { metric: 'xxl_finds', params: {} };
+    case 'record':
+      return { metric: 'record', params: { species: m.speciesId, field: FIELD[m.field] } };
+  }
+}
+out.push('insert into public.achievements (id, category, name, icon, metric, params, secret, sort) values');
+out.push(
+  ACHIEVEMENTS.map((a, i) => {
+    const { metric, params } = sqlMetric(a.metric);
+    return `  (${q(a.id)}, ${q(a.category)}, ${q(a.name)}, ${q(a.icon)}, ${q(metric)}, ${q(JSON.stringify(params))}, ${!!a.secret}, ${i})`;
+  }).join(',\n') +
+    '\non conflict (id) do update set category = excluded.category, name = excluded.name, icon = excluded.icon,' +
+    '\n  metric = excluded.metric, params = excluded.params, secret = excluded.secret, sort = excluded.sort;',
+  '',
+);
+const tiers = ACHIEVEMENTS.flatMap((a) =>
+  a.tiers.map((t, i) => `  (${q(a.id)}, ${i + 1}, ${t.target}, ${t.xp}, ${q(tierKind(a.tiers.length, i + 1))}, ${q(a.goal(t.target))})`),
+);
+out.push('insert into public.achievement_tiers (achievement_id, tier, target, xp, medal, goal) values');
+out.push(
+  tiers.join(',\n') +
+    '\non conflict (achievement_id, tier) do update set target = excluded.target, xp = excluded.xp, medal = excluded.medal, goal = excluded.goal;',
+  '',
+);
+const members = ACHIEVEMENTS.flatMap((a) => (a.metric.kind === 'set' ? a.metric.ids.map((id) => `  (${q(a.id)}, ${q(id)})`) : []));
+out.push('insert into public.achievement_set_species (achievement_id, species_id) values');
+out.push(members.join(',\n') + '\non conflict do nothing;', '');
+out.push(
+  '-- Gracze z istniejącym atlasem: już osiągnięte stopnie bez wypłaty XP (przy pustej bazie nic nie robi).',
+  'select public.seed_achievements(id) from public.profiles;',
+  '',
+);
+
 const file = path.resolve(__dirname, '..', 'supabase', 'seed.sql');
 writeFileSync(file, out.join('\n'), 'utf8');
-console.log(`seed.sql: ${forests.length} kompleksów, ${GMINY.length} gmin, ${SPECIES.length} gatunków, ${looks.length} sobowtórów, ${BADGES.length} odznak, ${DAILY_QUESTS.length} zadań`);
+console.log(
+  `seed.sql: ${forests.length} kompleksów, ${GMINY.length} gmin, ${SPECIES.length} gatunków, ${looks.length} sobowtórów, ${BADGES.length} odznak, ${DAILY_QUESTS.length} zadań, ${ACHIEVEMENTS.length} osiągnięć (${tiers.length} stopni)`,
+);

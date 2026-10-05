@@ -13,12 +13,14 @@ export const START_USER: User = {
   homeGminaId: 'suprasl',
 };
 
-/** Liczniki postępu odznak na starcie (9 borowików → dziesiąty odblokuje „Króla Puszczy”). */
+/** Liczniki postępu odznak i osiągnięć na starcie (9 borowików → dziesiąty odblokuje „Króla Puszczy”). */
 export const START_COUNTERS = {
   borowikiKnyszynska: 9,
   totalKm: 196.4,
   streakDays: 3,
   legendaryFinds: 0,
+  /** Okazy XXL – osiągnięcie „Okazy XXL” (brąz zdobyty, srebro przy 5). */
+  xxlFinds: 3,
 };
 
 export const START_BADGES = ['ranny-ptaszek', 'km-100', 'seria-7'];

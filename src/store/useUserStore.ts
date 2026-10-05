@@ -1,9 +1,10 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-import { START_ATLAS } from '@/data/mock/species';
+import { SPECIES, START_ATLAS } from '@/data/mock/species';
 import { START_BADGES, START_COUNTERS, START_USER, START_WEEKLY_CONTRIBUTION } from '@/data/mock/users';
-import type { AtlasEntry, GminaChallenge, QuestProgress, User } from '@/types';
+import type { AchievementUnlock, AtlasEntry, GminaChallenge, QuestProgress, User } from '@/types';
+import { seedAwarded } from '@/utils/achievements';
 import { persistStorage, STORAGE_KEYS } from './storage';
 
 export type Counters = typeof START_COUNTERS;
@@ -18,6 +19,10 @@ export interface UserState {
   atlas: Record<string, AtlasEntry>;
   badges: string[];
   counters: Counters;
+  /** Osiągnięcia: liczba nagrodzonych stopni per id (postęp liczy się na bieżąco z atlasu). */
+  achievements: Record<string, number>;
+  /** Stopnie zdobyte przy znalezisku – XP wypłacane po ekranie Nagroda (jak zadania dnia). */
+  pendingAchievements: AchievementUnlock[];
   /** Zadania dnia: postęp resetuje się, gdy zmieni się data. */
   quests: { date: string; progress: Record<string, QuestProgress>; pendingRewards: string[] };
   challenges: AcceptedChallenge[];
@@ -45,11 +50,15 @@ export function initialUserState(): Omit<UserState, 'patch' | 'reset'> {
   // Rekordy osobiste do porównań „rekord osobisty”.
   atlas['borowik-szlachetny'] = { ...atlas['borowik-szlachetny'], bestCapCm: 16, bestWeightG: 520 };
   atlas['czubajka-kania'] = { ...atlas['czubajka-kania'], bestCapCm: 27, bestWeightG: 240 };
+  const counters = { ...START_COUNTERS };
   return {
     user: { ...START_USER },
     atlas,
     badges: [...START_BADGES],
-    counters: { ...START_COUNTERS },
+    counters,
+    // Gracz startowy ma już część stopni – liczą się jako nagrodzone (bez XP na wejściu).
+    achievements: seedAwarded({ atlas, species: SPECIES, counters }),
+    pendingAchievements: [],
     quests: { date: todayKey(now), progress: {}, pendingRewards: [] },
     challenges: [],
     weeklyContribution: START_WEEKLY_CONTRIBUTION,
@@ -66,6 +75,20 @@ export const useUserStore = create<UserState>()(
       patch: (p) => set(p),
       reset: (state) => set({ ...initialUserState(), ...state }),
     }),
-    { name: STORAGE_KEYS.user, storage: persistStorage, version: 1 },
+    {
+      name: STORAGE_KEYS.user,
+      storage: persistStorage,
+      version: 2,
+      // v2: osiągnięcia. Zapisany gracz dostaje stopnie zdobyte do tej pory bez wypłaty XP.
+      migrate: (persisted, version) => {
+        const s = persisted as Omit<UserState, 'patch' | 'reset'>;
+        if (version < 2) {
+          const old = (s.counters ?? {}) as Partial<Counters>;
+          const counters = { ...START_COUNTERS, ...old, xxlFinds: old.xxlFinds ?? 0 };
+          return { ...s, counters, achievements: seedAwarded({ atlas: s.atlas ?? {}, species: SPECIES, counters }), pendingAchievements: [] };
+        }
+        return s;
+      },
+    },
   ),
 );

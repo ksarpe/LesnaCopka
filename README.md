@@ -60,13 +60,15 @@ Pierwszy skan zawsze zwraca borowika szlachetnego XXL 410 g – dokładnie scena
 | 08 | Profil i atlas | `app/(tabs)/profil.tsx` | zakładka „Profil” |
 | 09 | Feed | `app/(tabs)/feed.tsx` | zakładka „Feed” |
 | – | Karta gatunku (atlas, tylko odczyt) | `app/species/[speciesId].tsx` | stack push |
+| – | Atlas gatunków (pełny, z filtrami) | `app/atlas.tsx` | stack push z Profilu („Zobacz wszystko”) |
+| – | Osiągnięcia (wszystkie, z zablokowanymi) | `app/osiagniecia.tsx` | stack push z Profilu („Zobacz wszystko”) |
 | – | Panel symulacji | `app/dev.tsx` | modal |
 
 Panel symulacji: **przytrzymaj avatar** na ekranie Start albo wejdź w Profil → ⚙ → „Panel symulacji (dev)”.
 Pozwala przełączyć źródło pozycji (GPS urządzenia / symulacja: wybrana gmina, słaby GPS ±1,5 km,
 punkt za granicą), wyłączyć GPS / sieć, ustawić zgody (lokalizacja, aparat),
 wymusić wynik skanu (gatunek, rzadkość, XXL, trujący, niska pewność), przyspieszyć czas ×10,
-dodać dystans i XP, odblokować odznakę, wczytać scenariusze (m.in. stany z makiety) i zresetować wszystko.
+dodać dystans i XP, odblokować odznakę, odkryć losowe gatunki (test osiągnięć), wczytać scenariusze (m.in. stany z makiety) i zresetować wszystko.
 
 Na webie (tylko dev) działają też linki-scenariusze, np. `http://localhost:8081/?scenario=designReward`
 albo `/?scenario=designAnalysis&low=1` – lista w `src/dev/devLinks.ts`. Linki domyślnie używają
@@ -89,6 +91,7 @@ scripts/geo/              build-gminy.ts (PRG + GUS → assets/geo), verify-gmin
 src/data/mock/            dane: gatunki, gminy, użytkownicy, feed, odznaki/zadania
 src/store/                useUserStore, useTripStore, useSimStore (persist) + game.ts (akcje gry)
 src/utils/xp.ts           logika XP/poziomów – czyste funkcje, testy w src/utils/__tests__
+src/utils/achievements.ts definicje i liczenie osiągnięć z atlasu – czyste funkcje, testy w src/utils/__tests__
 ```
 
 ## Mock → API: gdzie podmienić
@@ -117,6 +120,27 @@ Podmiana: napisz implementację `Services` (np. `src/services/api/index.ts` na `
 Stan startowy gracza (`src/store/useUserStore.ts`) jest seedowany z `src/data/mock/users.ts`;
 z backendem zastąp go odpowiedzią `GET /me` (XP, odznaki, atlas), a `src/store/game.ts`
 (liczenie XP po stronie klienta) – wywołaniem API zwracającym `Find` z rozpiską `xp`/`reward`.
+
+## Osiągnięcia
+
+Profil: **Atlas gatunków** pokazuje jeden wiersz (ostatnio odkryte) i „Zobacz wszystko” → pełny atlas
+z podsumowaniem rzadkości i filtrami. Niżej **Osiągnięcia x / Y** – trzy najbliżej następnego stopnia
+i „Zobacz wszystko” → wszystkie, w sekcjach, z zablokowanymi i sekretnymi („???”).
+
+- 24 osiągnięcia, 48 stopni (Y liczy stopnie): Kolekcja (gatunki, jadalne, rzadkie, epickie, legendy),
+  Zestawy gatunków (Wielka trójka, Borowiki i spółka, Leśne dziwy…), Bezpieczeństwo (trujące, śmiertelne,
+  pary gatunek–sobowtór), Okazy (suma okazów, okazy jednego gatunku, XXL, rekordy kani i borowika), Sekretne.
+- Stopnie: brąz → srebro → złoto → platyna (2 stopnie: srebro, złoto; 1 stopień: złoto), każdy z nagrodą XP.
+- Postęp liczy się na bieżąco z atlasu (`evaluateAchievements`), store pamięta tylko nagrodzone stopnie
+  (`useUserStore.achievements`). Stopnie zdobyte znaleziskiem pokazuje ekran Nagroda („Nowe osiągnięcie”),
+  a XP wpada po „Zbieram dalej” – jak za zadania dnia. Gracz startowy (i zapis sprzed tej wersji – migracja v2)
+  dostaje osiągnięte już stopnie bez wypłaty XP.
+- Nowe osiągnięcie = wpis w `ACHIEVEMENTS` (`src/utils/achievements.ts`) z metryką, progami i celem;
+  testy pilnują, że gatunki z zestawów istnieją w katalogu.
+- Supabase: tabele `achievements`, `achievement_tiers`, `achievement_set_species`, `user_achievements`
+  (migracja `20261006100000_achievements.sql`, słownik z `npm run db:seed`); `claim_find` nagradza stopnie
+  po stronie serwera, `achievement_progress()` zwraca postęp – szczegóły w [docs/backend.md](docs/backend.md#osiągnięcia).
+  Aplikacja na razie liczy osiągnięcia lokalnie (z Supabase pobiera tylko słowniki).
 
 ## Lokalizacja i mapa okolicy
 

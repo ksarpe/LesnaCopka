@@ -71,6 +71,11 @@ for (const f of readdirSync(migDir).filter((f) => f.endsWith('.sql')).sort()) {
 await db.exec(readFileSync(path.join(root, 'supabase', 'seed.sql'), 'utf8'));
 const counts = await one(`select (select count(*) from species) sp, (select count(*) from gminy) gm, (select count(*) from badges) b`);
 ok(Number(counts.sp) === 36 && Number(counts.gm) === 38 && Number(counts.b) === 5, 'seed: 36 gatunków, 38 gmin, 5 odznak');
+const ach = await one(
+  `select (select count(*) from achievements) a, (select count(*) from achievement_tiers) t,
+          (select count(*) from achievement_set_species) m, (select count(*) from achievements where secret) s`,
+);
+ok(Number(ach.a) === 24 && Number(ach.t) === 48 && Number(ach.s) === 2 && Number(ach.m) > 0, 'seed: 24 osiągnięcia, 48 stopni, 2 sekretne', ach);
 
 // ── Poziomy (lustro utils/xp.ts) ──
 const lv = await one('select * from level_from_total_xp(23140)');
@@ -98,6 +103,20 @@ await db.query(
   `insert into user_species (user_id, species_id, count, first_found_at, best_cap_cm, best_weight_g)
    values ($1, 'borowik-szlachetny', 14, now() - interval '1 year', 16, 520)`,
   [kuba],
+);
+await db.query(
+  `insert into finds (user_id, species_id, gmina_id, rarity, confidence, xxl, collected, status, cap_cm, weight_g, claimed_at, found_at)
+   select $1, 'podgrzybek-brunatny', 'michalowo', 'pospolity', 0.9, true, true, 'claimed', 15, 400, now() - interval '60 days', now() - interval '60 days'
+     from generate_series(1, 3)`,
+  [kuba],
+);
+await db.query('select seed_achievements($1)', [kuba]);
+const seeded = (await db.query('select achievement_id, tier from user_achievements where user_id = $1 order by 1', [kuba])).rows;
+ok(
+  JSON.stringify(seeded) === JSON.stringify([{ achievement_id: 'okazy-xxl', tier: 1 }, { achievement_id: 'specjalista', tier: 1 }]) &&
+    Number((await one(`select count(*) n from xp_events where user_id = $1`, [kuba])).n) === 0,
+  'seed_achievements: zdobyte stopnie (Specjalista, Okazy XXL) bez wypłaty XP',
+  seeded,
 );
 
 // ── Wyprawa ──
@@ -137,6 +156,10 @@ ok(
   (await one(`select count from user_species where user_id = $1 and species_id = 'borowik-szlachetny'`, [kuba])).count === 15,
   'atlas: borowik ×15',
 );
+ok(
+  Array.isArray(reward.unlockedAchievements) && reward.unlockedAchievements.length === 0,
+  'claim_find: borowik z makiety nie odblokowuje osiągnięć (4. XXL, 15 borowików)',
+);
 
 // Gatunek trujący: tylko zdjęcie, nie do koszyka.
 await admin();
@@ -158,6 +181,38 @@ await as(kuba);
 const pr = (await one('select claim_find($1) r', [poison])).r;
 ok(pr.xp.total === 70 && pr.xp.lines[0].label.startsWith('Zdjęcie gatunku trującego'), 'trujący: ½ bazy + nowy gatunek = 70 XP', pr.xp);
 ok((await fails('select claim_find($1)', [lowConf]))?.includes('low_confidence'), 'niska pewność (<60%) → brak nagrody');
+
+// ── Osiągnięcia ──
+// jsonb porządkuje klucze po swojemu – porównujemy pola, nie tekst JSON.
+const unlocks = (list) => (list ?? []).map((x) => `${x.id}:${x.tier}:${x.xp}`).join(',');
+ok(
+  unlocks(pr.unlockedAchievements) === 'znam-wroga:1:50',
+  'osiągnięcia: pierwszy gatunek trujący → „Znam wroga” (brąz, +50 XP)',
+  pr.unlockedAchievements,
+);
+const achXp = await one(`select count(*) n, sum(amount) xp, max(ref_id) ref from xp_events where user_id = $1 and source = 'achievement'`, [kuba]);
+ok(Number(achXp.n) === 1 && Number(achXp.xp) === 50 && achXp.ref === 'znam-wroga:1', 'osiągnięcia: XP w księdze (źródło achievement, ref „znam-wroga:1”)', achXp);
+ok(JSON.stringify((await one('select claim_find($1) r', [poison])).r) === JSON.stringify(pr), 'osiągnięcia: claim_find nadal idempotentny');
+ok(
+  Number((await one(`select count(*) n from xp_events where user_id = $1 and source = 'achievement'`, [kuba])).n) === 1,
+  'osiągnięcia: ponowny claim nie wypłaca XP drugi raz',
+);
+const progress = (await db.query('select * from achievement_progress()')).rows;
+const pKolekcjoner = progress.find((r) => r.achievement_id === 'kolekcjoner');
+const pWrog = progress.find((r) => r.achievement_id === 'znam-wroga');
+ok(
+  progress.length === 24 && Number(pKolekcjoner.value) === 2 && pKolekcjoner.tier === 0 && Number(pKolekcjoner.next_target) === 10 &&
+    pWrog.tier === 1 && pWrog.awarded_tier === 1 && Number(pWrog.next_target) === 3,
+  'achievement_progress(): postęp własny (Kolekcjoner 2/10, Znam wroga – brąz, dalej 3)',
+);
+ok((await fails(`insert into user_achievements (user_id, achievement_id, tier) values ($1, 'kolekcjoner', 4)`, [kuba]))?.includes('permission denied'), 'klient nie dopisze sobie osiągnięcia');
+ok((await fails('select sync_achievements($1)', [kuba]))?.includes('permission denied'), 'klient nie wywoła sync_achievements');
+ok((await fails('select seed_achievements($1)', [kuba]))?.includes('permission denied'), 'klient nie wywoła seed_achievements');
+await as(null);
+await db.exec('set role anon');
+ok((await db.query('select * from achievements')).rows.length === 24, 'anon czyta słownik osiągnięć');
+ok((await fails('select * from achievement_progress()'))?.includes('permission denied'), 'anon nie ma achievement_progress()');
+await as(kuba);
 
 // ── RLS i uprawnienia ──
 ok((await fails('update profiles set total_xp = 999999 where id = $1', [kuba]))?.includes('permission denied'), 'klient nie może zmienić sobie XP');
@@ -241,5 +296,36 @@ await as(ola);
 const up = (await one('select claim_find($1) r', [f2])).r;
 ok(up.levelAfter === 15 && up.levelBefore === 14, 'LEVEL UP: 14 → 15', up);
 ok((await one(`select count(*) n from posts where author_id = $1 and kind = 'levelup'`, [ola])).n === 1, 'LEVEL UP tworzy wpis (z opóźnieniem)');
+ok(
+  up.unlockedAchievements.some((a) => a.id === 'epicka-kolekcja' && a.tier === 1 && a.xp === 100),
+  'osiągnięcia: pierwszy gatunek epicki → „Epicka kolekcja” (brąz)',
+  up.unlockedAchievements,
+);
+
+// ── Parytet z aplikacją: atlas startowy (START_ATLAS) → te same stopnie co w src/utils/achievements.ts ──
+await admin();
+const speciesTs = readFileSync(path.join(root, 'src', 'data', 'mock', 'species.ts'), 'utf8');
+const startAtlas = [...speciesTs.match(/START_ATLAS[^=]*=\s*\{([\s\S]*?)\}/)[1].matchAll(/'([a-z-]+)':\s*(\d+)/g)].map((m) => [m[1], Number(m[2])]);
+const tester = (await one(`insert into auth.users (email, raw_user_meta_data) values ('test@example.com', '{"handle":"tester"}') returning id`)).id;
+for (const [id, count] of startAtlas) {
+  await db.query('insert into user_species (user_id, species_id, count, first_found_at) values ($1, $2, $3, now())', [tester, id, count]);
+}
+await db.query(`update user_species set best_cap_cm = 16, best_weight_g = 520 where user_id = $1 and species_id = 'borowik-szlachetny'`, [tester]);
+await db.query(`update user_species set best_cap_cm = 27, best_weight_g = 240 where user_id = $1 and species_id = 'czubajka-kania'`, [tester]);
+await db.query(
+  `insert into finds (user_id, species_id, gmina_id, rarity, confidence, xxl, collected, status, claimed_at)
+   select $1, 'podgrzybek-brunatny', 'suprasl', 'pospolity', 0.9, true, true, 'claimed', now() from generate_series(1, 3)`,
+  [tester],
+);
+await as(tester);
+const tp = (await db.query('select * from achievement_progress()')).rows;
+const val = (id) => Number(tp.find((r) => r.achievement_id === id).value);
+const earned = tp.reduce((a, r) => a + r.tier, 0);
+ok(
+  startAtlas.length === 23 && earned === 20 && val('pelny-koszyk') === 318 && val('specjalista') === 86 &&
+    val('znawca') === 14 && val('mistrz-sobowtorow') === 3 && val('parasol') === 27,
+  'parytet z aplikacją: atlas startowy → 20 / 48 stopni (318 okazów, max 86, 14 gatunków ×5, 3 pary sobowtórów)',
+  { earned, n: startAtlas.length },
+);
 
 console.log(`\n${passed} sprawdzeń OK`);

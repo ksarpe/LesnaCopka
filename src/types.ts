@@ -77,6 +77,13 @@ export interface XpBreakdown {
 
 export type FindStatus = 'pending' | 'claimed';
 
+/** Zdobyty stopień osiągnięcia (1-based) z nagrodą XP. */
+export interface AchievementUnlock {
+  id: string;
+  tier: number;
+  xp: number;
+}
+
 export interface Find {
   id: string;
   tripId: string | null;
@@ -100,6 +107,8 @@ export interface Find {
     levelAfter: number;
     xpAfter: number;
     unlockedBadgeIds: string[];
+    /** Stopnie osiągnięć zdobyte tym znaleziskiem (XP wypłacane po ekranie Nagroda). */
+    unlockedAchievements?: AchievementUnlock[];
     completedQuestIds: string[];
     personalRecord: boolean;
   };

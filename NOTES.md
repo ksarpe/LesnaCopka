@@ -107,6 +107,15 @@ Do potwierdzenia na urządzeniu: pionowe położenie tekstu z `lineHeight` = roz
 - **Porównania zrzutów z makietą** (`?scenario=…`) działają na symulowanej pozycji w Supraślu, ale
   mapa jest prawdziwa – w karcie 01 piksele różnią się od pliku celowo.
 
+- **Profil (08) – atlas i osiągnięcia.** Zamiast pełnej siatki z filtrami pod odznakami jest jeden wiersz
+  atlasu (3 ostatnio odkryte gatunki; przy < 3 dopełnione kaflami „???”) i „Zobacz wszystko” → ekran Atlasu
+  z filtrami z makiety i podsumowaniem rzadkości. Pod atlasem nowa sekcja „Osiągnięcia x / Y” w tym samym
+  stylu: 3 wiersze najbliżej następnego stopnia (postęp w obrębie stopnia, jak pasek w wierszu) i „Zobacz
+  wszystko”. Odznaki z makiety (5 kółek) zostają bez zmian – to osobny system.
+- **Osiągnięcia – wygląd.** Medal jak odznaka (kolor stopnia z palety medali rankingu + platyna), niezdobyte:
+  przerywana ramka i wyszarzona ikona, sekretne: „?”. Pasek postępu zielony jak XP; kolor stopnia tylko na medalu
+  i kropkach stopni. Tapnięcie wiersza → dialog ze wszystkimi stopniami i nagrodami.
+
 ## Stany dodatkowe (spoza makiety, w tym samym stylu)
 
 Szkielety ładowania (region, gminy, szczegóły gminy, feed, statystyki gatunku), błąd lokalizacji
