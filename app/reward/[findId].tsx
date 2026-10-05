@@ -1,0 +1,276 @@
+import * as Haptics from 'expo-haptics';
+import { router, useLocalSearchParams } from 'expo-router';
+import { useEffect, useState } from 'react';
+import { Platform, View } from 'react-native';
+import Animated, { useAnimatedStyle, useSharedValue, withSequence, withSpring, withTiming } from 'react-native-reanimated';
+
+import { BadgeCircle } from '@/components/Badge';
+import { Button3D } from '@/components/Button3D';
+import { Pill } from '@/components/Pill';
+import { Placeholder } from '@/components/Placeholder';
+import { XpBarAnimated } from '@/components/ProgressBar';
+import { Burst, Glow, Rays } from '@/components/RewardFx';
+import { Screen } from '@/components/Screen';
+import { Txt } from '@/components/Txt';
+import { useAsync } from '@/hooks/useAsync';
+import { useCountUp } from '@/hooks/useCountUp';
+import { useServices } from '@/services';
+import { grantPendingQuestRewards } from '@/store/game';
+import { useCatalogStore } from '@/store/useCatalogStore';
+import { useTripStore } from '@/store/useTripStore';
+import { colors, rarity as rarityTokens } from '@/theme/tokens';
+import type { XpLine } from '@/types';
+import { fmtInt, fmtWeight, gminaTitle, plural } from '@/utils/format';
+import { levelThreshold } from '@/utils/xp';
+
+const PHOTO = 170;
+const BAR_DELAY = 500;
+const BAR_DURATION = 1600;
+
+export default function RewardScreen() {
+  const { findId } = useLocalSearchParams<{ findId: string }>();
+  const find = useTripStore((s) => s.finds[findId]);
+  const species = useCatalogStore((s) => (find ? s.speciesById[find.speciesId] : undefined));
+  const gmina = useCatalogStore((s) => (find ? s.gminaById[find.gminaId] : undefined));
+  const badgeById = useCatalogStore((s) => s.badgeById);
+  const { stats } = useServices();
+  const pct = useAsync(
+    () => (find ? stats.getSpeciesPercentile(find.speciesId, find.gminaId, find.dimensions) : Promise.reject(new Error('brak'))),
+    [findId],
+  );
+
+  const reward = find?.reward;
+  const levelUp = !!reward && reward.levelAfter > reward.levelBefore;
+  const [leveled, setLeveled] = useState(false);
+  const pop = useSharedValue(1);
+  const popStyle = useAnimatedStyle(() => ({ transform: [{ scale: pop.value }] }));
+
+  const onCross = () => {
+    setLeveled(true);
+    pop.set(withSequence(withTiming(1.25, { duration: 160 }), withSpring(1, { damping: 7 })));
+    if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+  };
+
+  const total = useCountUp(find?.xp?.total ?? 0, 1100, 300);
+  const xpShown = useXpTicker(reward?.xpBefore ?? 0, reward?.xpAfter ?? 0, levelUp, levelThreshold(reward?.levelBefore ?? 1));
+
+  if (!find || !species || !reward || !find.xp) {
+    return (
+      <Screen bg={colors.night} statusBar="light">
+        <View style={{ padding: 20, gap: 16 }}>
+          <Txt f="b7" size={24} color={colors.onDark}>
+            Brak nagrody do pokazania
+          </Txt>
+          <Button3D title="Wróć" onDark onPress={() => router.navigate('/')} />
+        </View>
+      </Screen>
+    );
+  }
+
+  const r = rarityTokens[find.rarity];
+  const level = leveled ? reward.levelAfter : reward.levelBefore;
+  const max = levelThreshold(level);
+  const fromFrac = reward.xpBefore / levelThreshold(reward.levelBefore);
+  const toFrac = reward.xpAfter / levelThreshold(reward.levelAfter);
+  const badge = reward.unlockedBadgeIds.map((id) => badgeById[id]).find(Boolean);
+  const amount = find.dimensions.pieces ? `${find.dimensions.pieces} szt.` : fmtWeight(find.dimensions.weightG);
+
+  const onContinue = () => {
+    if (router.canDismiss()) router.dismissAll();
+    router.navigate('/');
+    setTimeout(grantPendingQuestRewards, 450);
+  };
+
+  return (
+    <Screen bg={colors.night} statusBar="light">
+      <View
+        style={{
+          minHeight: 790,
+          paddingTop: 14,
+          paddingHorizontal: 20,
+          paddingBottom: 24,
+          alignItems: 'center',
+          gap: 16,
+          overflow: 'hidden',
+        }}
+      >
+        <View style={{ position: 'absolute', left: '50%', top: 150 - 320, marginLeft: -320 }}>
+          <Rays />
+        </View>
+        <Txt f="n8" size={13} color={colors.onDarkMuted} upper ls={0.14}>
+          {find.collected ? 'Nowe znalezisko!' : 'Nowy wpis w atlasie!'}
+        </Txt>
+        <Txt f="b8" size={44} lh={1} color={r.color} upper ls={0.06}>
+          {r.label}
+        </Txt>
+        <View style={{ width: PHOTO, height: PHOTO, marginTop: 6 }}>
+          <Glow color={r.color} photoSize={PHOTO} />
+          <View
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              width: PHOTO,
+              height: PHOTO,
+              borderRadius: PHOTO / 2,
+              borderWidth: 6,
+              borderColor: r.color,
+              overflow: 'hidden',
+            }}
+          >
+            <Placeholder variant="dark" stripe={8} label="zdjęcie grzyba" style={{ flex: 1 }} />
+          </View>
+          <Burst trigger={leveled ? 1 : 0} color={colors.scanGreen} />
+        </View>
+        <View style={{ alignItems: 'center' }}>
+          <Txt f="b7" size={26} color={colors.onDark} align="center">
+            {species.name}
+          </Txt>
+          <Txt f="n7" size={14} color={colors.onDarkMuted}>
+            {amount} · {gminaTitle(gmina)}
+          </Txt>
+          {reward.personalRecord ? (
+            <Pill
+              label="Rekord osobisty!"
+              icon="emoji_events"
+              iconFilled
+              bg="rgba(239,168,49,0.18)"
+              color="#F6CF86"
+              style={{ alignSelf: 'center', marginTop: 8 }}
+            />
+          ) : null}
+        </View>
+
+        <View
+          style={{
+            width: '100%',
+            backgroundColor: 'rgba(255,255,255,0.08)',
+            borderRadius: 22,
+            paddingVertical: 14,
+            paddingHorizontal: 16,
+            gap: 9,
+          }}
+        >
+          {find.xp.lines.map((l, i) => (
+            <XpRow key={l.label} line={l} delay={300 + i * 120} />
+          ))}
+          <View style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.15)' }} />
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' }}>
+            <Txt f="n8" size={15} color={colors.onDark}>
+              Razem
+            </Txt>
+            <Txt f="b8" size={30} color={colors.xpOnDark} style={{ fontVariant: ['tabular-nums'] }}>
+              +{fmtInt(total)} XP
+            </Txt>
+          </View>
+        </View>
+
+        <View style={{ width: '100%', gap: 8 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+            <Animated.View style={popStyle}>
+              <Txt f="n8" size={13} color={leveled ? colors.xpOnDark : colors.onDark}>
+                {leveled ? `LEVEL UP! Poziom ${reward.levelAfter}` : `Poziom ${reward.levelBefore}`}
+              </Txt>
+            </Animated.View>
+            <Txt f="n8" size={13} color={colors.onDarkMuted} style={{ fontVariant: ['tabular-nums'] }}>
+              {fmtInt(xpShown(leveled))} / {fmtInt(max)} XP
+            </Txt>
+          </View>
+          <XpBarAnimated
+            from={fromFrac}
+            to={toFrac}
+            levelUp={levelUp}
+            delay={BAR_DELAY}
+            duration={BAR_DURATION}
+            onCrossLevel={onCross}
+          />
+        </View>
+
+        {badge ? (
+          <View
+            style={{
+              width: '100%',
+              backgroundColor: colors.badgeCard,
+              borderRadius: 22,
+              padding: 14,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 12,
+              boxShadow: '0px 4px 0px #C8B78F',
+            }}
+          >
+            <BadgeCircle badge={badge} size={54} iconSize={32} />
+            <View style={{ flex: 1 }}>
+              <Txt f="n8" size={11} color={colors.legendText} upper ls={0.08}>
+                Nowa odznaka
+              </Txt>
+              <Txt f="b7" size={19}>
+                {badge.name}
+              </Txt>
+              <Txt f="n7" size={12} color={colors.muted}>
+                {badge.description}
+              </Txt>
+            </View>
+          </View>
+        ) : null}
+
+        <Txt f="n7" size={13} color={colors.onDarkMuted} align="center">
+          {pct.data
+            ? `${pct.data.mushroomers} ${plural(pct.data.mushroomers, 'osoba znalazła', 'osoby znalazły', 'osób znalazło')} ten gatunek w gminie w tym sezonie – ${
+                pct.data.biggerCount === 0
+                  ? 'Twój okaz jest największy!'
+                  : `tylko ${pct.data.biggerCount} ${plural(pct.data.biggerCount, 'okaz był większy', 'okazy były większe', 'okazów było większych')}.`
+              }`
+            : pct.error
+              ? 'Porównanie z gminą pojawi się, gdy wróci zasięg.'
+              : ' '}
+        </Txt>
+
+        <Button3D title="Zbieram dalej" onDark onPress={onContinue} style={{ width: '100%' }} />
+      </View>
+    </Screen>
+  );
+}
+
+function XpRow({ line, delay }: { line: XpLine; delay: number }) {
+  const v = useCountUp(line.xp, 700, delay);
+  return (
+    <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+      <Txt f="n7" size={14} color={colors.onDark} style={{ flex: 1 }}>
+        {line.label}
+      </Txt>
+      <Txt f="n7" size={14} color={colors.onDark} style={{ fontVariant: ['tabular-nums'] }}>
+        +{v}
+      </Txt>
+    </View>
+  );
+}
+
+/** Licznik XP zsynchronizowany z paskiem (0.5 s opóźnienia, 1.6 s). */
+function useXpTicker(before: number, after: number, levelUp: boolean, thresholdBefore: number) {
+  const [t, setT] = useState(0);
+  useEffect(() => {
+    let raf = 0;
+    let start = 0;
+    const timer = setTimeout(() => {
+      const step = (ts: number) => {
+        if (!start) start = ts;
+        const p = Math.min(1, (ts - start) / BAR_DURATION);
+        setT(p);
+        if (p < 1) raf = requestAnimationFrame(step);
+      };
+      raf = requestAnimationFrame(step);
+    }, BAR_DELAY);
+    return () => {
+      clearTimeout(timer);
+      cancelAnimationFrame(raf);
+    };
+  }, [before, after, levelUp]);
+  return (leveled: boolean) => {
+    const ease = (x: number) => 1 - Math.pow(1 - x, 3);
+    if (!levelUp) return Math.round(before + (after - before) * ease(t));
+    const split = 0.45;
+    if (!leveled) return Math.round(before + (thresholdBefore - before) * Math.min(1, t / split));
+    return Math.round(after * ease(Math.max(0, (t - split) / (1 - split))));
+  };
+}
