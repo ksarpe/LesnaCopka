@@ -222,17 +222,23 @@ web3 = 30
 enable_signup = true
 # If enabled, a user will be required to confirm any email change on both the old, and new email
 # addresses. If disabled, only the new email is required to confirm.
+# Konto anonimowe nie ma starego adresu → przy zabezpieczaniu konta wystarcza jeden kod (na nowy adres).
 double_confirm_changes = true
 # If enabled, users need to confirm their email address before signing in.
-enable_confirmations = false
+# Etap 6: MUSI być true. Przy false (GOTRUE_MAILER_AUTOCONFIRM) updateUser({ email }) na koncie anonimowym
+# przypina adres od razu, bez kodu – ktoś mógłby „zająć” cudzy e-mail. Przy true GoTrue wysyła kod (email_change).
+enable_confirmations = true
 # If enabled, users will need to reauthenticate or have logged in recently to change their password.
 secure_password_change = false
 # Controls the minimum amount of time that must pass before sending another signup confirmation or password reset email.
+# Lokalnie 1 s (testy); w chmurze zostaw domyślne 60 s – „Wyślij kod ponownie” w aplikacji odczekuje tyle samo.
 max_frequency = "1s"
 # Number of characters used in the email OTP.
+# 6 cyfr – aplikacja ma pole na kod (bez linków magicznych; szablony niżej pokazują {{ .Token }}).
 otp_length = 6
 # Number of seconds before the email OTP expires (defaults to 1 hour).
-otp_expiry = 3600
+# 15 min – jak w treści e-maili.
+otp_expiry = 900
 
 # Use a production-ready SMTP server
 # [auth.email.smtp]
@@ -248,6 +254,24 @@ otp_expiry = 3600
 # [auth.email.template.invite]
 # subject = "You have been invited"
 # content_path = "./supabase/templates/invite.html"
+
+# Etap 6 – e-maile z KODEM (6 cyfr, {{ .Token }}) po polsku; aplikacja wpisuje kod (verifyOtp), linków nie używa.
+# Lokalnie podgląd w Mailpit (http://127.0.0.1:54324). W chmurze te same treści wklej w Dashboard → Authentication →
+# Email Templates (szablony z config.toml nie trafiają tam same) i ustaw własny SMTP.
+# Logowanie na innym telefonie: signInWithOtp({ email, options: { shouldCreateUser: false } }) → verifyOtp type 'email'.
+[auth.email.template.magic_link]
+subject = "{{ .Token }} – kod logowania do Grzybobrania"
+content_path = "./supabase/templates/magic_link.html"
+
+# Zabezpieczenie konta anonimowego adresem: updateUser({ email }) → verifyOtp type 'email_change'.
+[auth.email.template.email_change]
+subject = "{{ .Token }} – kod potwierdzenia adresu e-mail w Grzybobraniu"
+content_path = "./supabase/templates/email_change.html"
+
+# Adres jeszcze niepotwierdzony (signUp / signInWithOtp z shouldCreateUser: true) → verifyOtp type 'email'.
+[auth.email.template.confirmation]
+subject = "{{ .Token }} – potwierdź adres e-mail w Grzybobraniu"
+content_path = "./supabase/templates/confirmation.html"
 
 # Uncomment to customize notification email template
 # [auth.email.notification.password_changed]
@@ -385,6 +409,12 @@ deno_version = 2
 
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
+
+# Etap 6: usunięcie konta przez Admin API (service role) – NIEWDROŻONA, do chmury; opis w pliku funkcji i docs/backend.md.
+# Wymaga sesji gracza (JWT) – kasuje wyłącznie konto właściciela tokenu.
+[functions.delete-account]
+enabled = true
+verify_jwt = true
 
 [analytics]
 # Wyłączone lokalnie: na Windows wymaga wystawienia demona Dockera na tcp://localhost:2375.

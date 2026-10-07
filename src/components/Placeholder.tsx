@@ -90,15 +90,19 @@ export function Placeholder({
     const { width: w, height: h } = e.nativeEvent.layout;
     if (!size || Math.abs(size.w - w) > 0.5 || Math.abs(size.h - h) > 0.5) setSize({ w, h });
   };
+  // Obraz, którego nie da się wczytać (usunięty plik, wygasły blob: na webie) → wracają paski.
+  const [failed, setFailed] = useState<{ key: unknown } | null>(null);
+  const key = sourceKey(source);
+  const showImage = !!source && !(failed && failed.key === key);
   const pal = stripes[variant];
   return (
     <View onLayout={onLayout} style={[styles.base, { backgroundColor: pal.a }, style]}>
-      {source ? (
-        <Image source={source} style={StyleSheet.absoluteFill} resizeMode="cover" />
+      {showImage ? (
+        <Image source={source} style={StyleSheet.absoluteFill} resizeMode="cover" onError={() => setFailed({ key })} />
       ) : (
         size && <Stripes variant={variant} stripe={stripe} width={size.w} height={size.h} />
       )}
-      {label && !source ? (
+      {label && !showImage ? (
         <Txt f="mono" size={11} color={labelColor ?? pal.label} align="center" lh={1.25}>
           {label}
         </Txt>
@@ -106,6 +110,12 @@ export function Placeholder({
       {children}
     </View>
   );
+}
+
+/** Tożsamość źródła obrazu (URI albo id zasobu) – do zapamiętania błędu wczytania. */
+function sourceKey(source?: ImageSourcePropType): unknown {
+  if (source == null || typeof source === 'number') return source;
+  return Array.isArray(source) ? source[0]?.uri : source.uri;
 }
 
 const styles = StyleSheet.create({

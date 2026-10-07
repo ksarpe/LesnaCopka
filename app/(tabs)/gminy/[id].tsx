@@ -2,28 +2,35 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { View } from 'react-native';
 
 import { Button3D } from '@/components/Button3D';
+import { GminaForecastCard } from '@/components/Forecast';
+import { GminaSilhouette } from '@/components/GminaSilhouette';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { OfflineCard } from '@/components/OfflineCard';
+import { OfflineGminaCard } from '@/components/OfflineMaps';
 import { Pill } from '@/components/Pill';
 import { Placeholder } from '@/components/Placeholder';
 import { Screen } from '@/components/Screen';
 import { Bone, SkeletonCard, SkeletonRow } from '@/components/Skeleton';
+import { GminaChancesCard } from '@/components/SpeciesChances';
 import { Sheet } from '@/components/SpeciesSheet';
 import { StatTile } from '@/components/StatTile';
 import { Thumb } from '@/components/Thumb';
 import { Txt } from '@/components/Txt';
+import { missingGminy } from '@/geo';
 import { useAsync } from '@/hooks/useAsync';
 import { useTopInset } from '@/hooks/useInsets';
 import { useServices } from '@/services';
 import { acceptChallenge, toggleFollow } from '@/store/game';
+import { maybeAskNotificationsAfterFollow } from '@/store/notify';
 import { useCatalogStore } from '@/store/useCatalogStore';
 import { useSimStore } from '@/store/useSimStore';
+import { useStatsSync } from '@/store/useStatsSync';
 import { ui } from '@/store/useUiStore';
 import { useUserStore } from '@/store/useUserStore';
 import { colors, medalDefault, medals, rarity as rarityTokens, shadows } from '@/theme/tokens';
 import type { GminaStats } from '@/types';
-import { fmtInt, gminaSubtitle, gminaTitle } from '@/utils/format';
+import { fmtInt, gminaSubtitle, gminaTitle, plural } from '@/utils/format';
 
 export default function GminaScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -31,10 +38,32 @@ export default function GminaScreen() {
   const top = useTopInset();
   const gmina = useCatalogStore((s) => s.gminaById[id]);
   const network = useSimStore((s) => s.networkEnabled);
-  const data = useAsync(() => stats.getGminaStats(id), [id, network]);
+  const version = useStatsSync((s) => s.version);
+  // Tryb Supabase: serwis przyjmuje też z serwera „Obserwuj” / „Wyzwanie przyjęte” (gdy w kolejce nic na nie nie czeka).
+  const data = useAsync(() => stats.getGminaStats(id), [id, network, version]);
   const following = useUserStore((s) => s.followedGminy.includes(id));
+  // Gmina spoza katalogu (ranking innego województwa, obserwowana po restarcie) – dane z indeksu PRG.
+  const lookup = useAsync(async () => {
+    const known = useCatalogStore.getState().gminaById;
+    if (known[id]) return true;
+    const [found] = await missingGminy([id], known);
+    if (found) useCatalogStore.getState().upsertGmina(found);
+    return !!found;
+  }, [id]);
 
   const back = () => (router.canGoBack() ? router.back() : router.navigate('/gminy'));
+
+  if (!gmina && lookup.loading) {
+    return (
+      <Screen hero>
+        <Placeholder variant="hero" stripe={12} style={{ height: 230 }} />
+        <Sheet overlap={26}>
+          <Bone w="60%" h={30} />
+          <Loading />
+        </Sheet>
+      </Screen>
+    );
+  }
 
   if (!gmina) {
     return (
@@ -52,7 +81,8 @@ export default function GminaScreen() {
   const d = data.data;
   return (
     <Screen hero>
-      <Placeholder variant="hero" stripe={12} label="zdjęcie lasu gminy" style={{ height: 230 }}>
+      <Placeholder variant="hero" stripe={12} style={{ height: 230 }}>
+        <GminaSilhouette gminaId={gmina.id} top={top + 8} bottom={26 + 16} side={72} />
         <IconButton
           icon="arrow_back"
           variant="photo"
@@ -76,6 +106,8 @@ export default function GminaScreen() {
           onPress={() => {
             const on = toggleFollow(gmina.id);
             ui.toast(on ? `Obserwujesz gminę ${gmina.name}` : 'Nie obserwujesz już tej gminy', on ? 'notifications_active' : 'notifications');
+            // Pierwsze obserwowanie bez zgody systemowej → jednorazowe pytanie o powiadomienia.
+            if (on) maybeAskNotificationsAfterFollow(gmina.name);
           }}
         />
       </Placeholder>
@@ -89,7 +121,8 @@ export default function GminaScreen() {
               {gminaSubtitle(gmina)}
             </Txt>
           </View>
-          {d ? (
+          {/* Gmina bez punktów w tym tygodniu (tryb Supabase) – bez miejsca w rankingu. */}
+          {d && d.rank != null ? (
             <View
               style={{
                 backgroundColor: medals[d.rank - 1] ?? medalDefault,
@@ -105,6 +138,15 @@ export default function GminaScreen() {
             </View>
           ) : null}
         </View>
+
+        {/* Prognoza grzybowa dla punktu wewnątrz gminy (PRG) – bez sieci karta znika. */}
+        <GminaForecastCard gminaId={gmina.id} place={gminaTitle(gmina)} />
+
+        {/* Szanse na gatunki na ok. 3-godzinnej wyprawie (model src/utils/chances.ts, agregaty gminy). */}
+        <GminaChancesCard gminaId={gmina.id} place={gminaTitle(gmina)} />
+
+        {/* Cała gmina na offline (kafle z granic PRG) – postęp, „Pobrano ✓”, ponowienie. */}
+        <OfflineGminaCard gmina={gmina} />
 
         {data.error ? (
           <OfflineCard onRetry={data.reload} />
@@ -145,10 +187,17 @@ function Loading() {
 
 function Body({ gminaId, d }: { gminaId: string; d: GminaStats }) {
   const accepted = useUserStore((s) => (d.challenge ? s.challenges.some((c) => c.id === d.challenge!.id) : false));
+  // Ukończone – z serwera (tryb Supabase); mocki tego nie znają, więc tam przycisk zostaje „przyjęte”.
+  const completedLocal = useUserStore((s) => !!s.challenges.find((c) => c.id === d.challenge?.id)?.completedAt);
+  const completed = !!d.challengeCompleted || completedLocal;
   const maxPct = Math.max(...d.distribution.map((x) => x.pct));
 
   const onAccept = () => {
     if (!d.challenge) return;
+    if (completed) {
+      ui.toast('To wyzwanie masz już za sobą – gratulacje!', 'emoji_events');
+      return;
+    }
     if (accepted) {
       router.navigate('/');
       return;
@@ -161,15 +210,34 @@ function Body({ gminaId, d }: { gminaId: string; d: GminaStats }) {
   return (
     <>
       <View style={{ flexDirection: 'row', gap: 8 }}>
-        <StatTile value={fmtInt(d.mushroomers)} label="grzybiarzy" valueSize={20} labelSize={11} radius={16} padding={{ v: 10, h: 10 }} />
-        <StatTile value={fmtInt(d.mushrooms)} label="grzybów" valueSize={20} labelSize={11} radius={16} padding={{ v: 10, h: 10 }} />
-        <StatTile value={String(d.species)} label="gatunki" valueSize={20} labelSize={11} radius={16} padding={{ v: 10, h: 10 }} />
+        <StatTile value={fmtInt(d.mushroomers)} label={plural(d.mushroomers, 'grzybiarz', 'grzybiarze', 'grzybiarzy')} valueSize={20} labelSize={11} radius={16} padding={{ v: 10, h: 10 }} />
+        <StatTile value={fmtInt(d.mushrooms)} label={plural(d.mushrooms, 'grzyb', 'grzyby', 'grzybów')} valueSize={20} labelSize={11} radius={16} padding={{ v: 10, h: 10 }} />
+        <StatTile value={String(d.species)} label={plural(d.species, 'gatunek', 'gatunki', 'gatunków')} valueSize={20} labelSize={11} radius={16} padding={{ v: 10, h: 10 }} />
       </View>
 
       <View style={{ gap: 10 }}>
         <Txt f="b7" size={18}>
           Rekordy gminy
         </Txt>
+        {!d.records.length ? (
+          // Tryb Supabase: nikt jeszcze nie zebrał tu okazu w tym sezonie (mocki zawsze mają rekordy).
+          <View
+            style={{
+              backgroundColor: colors.card,
+              borderRadius: 18,
+              padding: 14,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 12,
+              boxShadow: shadows.card,
+            }}
+          >
+            <Icon name="emoji_events" size={28} color={colors.muted} />
+            <Txt f="n7" size={13} color={colors.muted} style={{ flex: 1 }}>
+              W tym sezonie nikt jeszcze nie ustanowił tu rekordu – Twój okaz może być pierwszy!
+            </Txt>
+          </View>
+        ) : null}
         {d.records.map((rec) => {
           const r = rarityTokens[rec.rarity];
           return (
@@ -206,6 +274,11 @@ function Body({ gminaId, d }: { gminaId: string; d: GminaStats }) {
         <Txt f="b7" size={18}>
           Co tu się zbiera
         </Txt>
+        {!d.distribution.length ? (
+          <Txt f="n7" size={13} color={colors.muted}>
+            Jeszcze nikt nic tu nie zebrał w tym sezonie. Zbiory pojawiają się 24 h po zakończeniu wypraw.
+          </Txt>
+        ) : null}
         {d.distribution.map((sp) => (
           <View key={sp.name} style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
             <Txt f="n7" size={13} style={{ width: 120 }}>
@@ -244,10 +317,12 @@ function Body({ gminaId, d }: { gminaId: string; d: GminaStats }) {
           </Txt>
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <Pill label={`+${d.challenge.xp} XP`} bg="rgba(255,255,255,0.12)" color={colors.onDark} padH={11} />
-            <Pill label={`Odznaka „${d.challenge.badgeName}”`} bg="rgba(255,255,255,0.12)" color={colors.onDark} padH={11} />
+            {d.challenge.badgeName ? (
+              <Pill label={`Odznaka „${d.challenge.badgeName}”`} bg="rgba(255,255,255,0.12)" color={colors.onDark} padH={11} />
+            ) : null}
           </View>
           <Button3D
-            title={accepted ? 'Wyzwanie przyjęte ✓' : 'Przyjmij wyzwanie'}
+            title={completed ? 'Wyzwanie ukończone ✓' : accepted ? 'Wyzwanie przyjęte ✓' : 'Przyjmij wyzwanie'}
             size="md"
             onDark
             onPress={onAccept}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 
-import { applyXp, BONUS, computeFindXp, isXxl, levelProgress, levelThreshold, levelTitle, RARITY_BASE } from '../xp';
+import { applyXp, BONUS, computeFindXp, isXxl, LEVEL_TITLES, levelPrestige, levelProgress, levelThreshold, levelTitle, RARITY_BASE } from '../xp';
 
 const base = {
   xxl: false,
@@ -96,6 +96,36 @@ describe('poziomy', () => {
 
   it('tytuł startowego użytkownika', () => {
     expect(levelTitle(14)).toBe('Tropiciel Borowików');
+  });
+
+  it('tytuły co 5 poziomów do 100 (21 tytułów, bez powtórzeń)', () => {
+    expect(LEVEL_TITLES).toHaveLength(21);
+    expect(LEVEL_TITLES.map((t) => t.from)).toEqual([1, ...Array.from({ length: 20 }, (_, i) => (i + 1) * 5)]);
+    expect(new Set(LEVEL_TITLES.map((t) => t.title)).size).toBe(21);
+    expect(levelTitle(1)).toBe('Początkujący Grzybiarz');
+    expect(levelTitle(4)).toBe('Początkujący Grzybiarz');
+    expect(levelTitle(20)).toBe('Strażnik Puszczy');
+    expect(levelTitle(25)).toBe('Mistrz Grzybobrania');
+    expect(levelTitle(54)).toBe('Mędrzec Lasu');
+    expect(levelTitle(90)).toBe('Legenda Lasu');
+    expect(levelTitle(100)).toBe('Arcymistrz Grzybobrania');
+    expect(levelTitle(140)).toBe('Arcymistrz Grzybobrania');
+    LEVEL_TITLES.forEach((t) => expect(t.title.length).toBeLessThanOrEqual(24));
+  });
+
+  it('krzywa liniowa bez zmian (jak level_threshold w SQL): Lv 50 ≈ 255 tys. XP, Lv 100 ≈ 1 mln', () => {
+    const totalTo = (n: number) => Array.from({ length: n - 1 }, (_, i) => levelThreshold(i + 1)).reduce((a, b) => a + b, 0);
+    expect(totalTo(14)).toBe(20800);
+    expect(totalTo(50)).toBe(100 * 49 * 52);
+    expect(totalTo(100)).toBe(100 * 99 * 102);
+    expect(levelThreshold(99)).toBe(20000);
+  });
+
+  it('prestiż odznaki poziomu: złota od 50, diamentowa od 100', () => {
+    expect(levelPrestige(49)).toBeNull();
+    expect(levelPrestige(50)).toBe('zloto');
+    expect(levelPrestige(99)).toBe('zloto');
+    expect(levelPrestige(100)).toBe('diament');
   });
 });
 

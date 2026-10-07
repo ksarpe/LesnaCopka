@@ -74,6 +74,30 @@ export function fmtAgo(iso: string, now = Date.now()): string {
   return `${d} dni temu`;
 }
 
+/** Data `YYYY-MM-DD` (dzień lokalny) albo czas ISO → północ tego dnia w czasie lokalnym. */
+function localDay(value: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  const d = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(value);
+  if (!Number.isFinite(d.getTime())) return null;
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+/** Ile dni temu (dniami kalendarzowymi): „dziś”, „wczoraj”, „5 dni temu”, „3 tyg. temu”, „2 mies. temu”. */
+export function fmtDaysAgo(value: string, now = Date.now()): string {
+  const day = localDay(value);
+  if (!day) return '';
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  // Zaokrąglenie wyrównuje zmianę czasu letniego (doba 23 / 25 h).
+  const days = Math.max(0, Math.round((today.getTime() - day.getTime()) / 86400000));
+  if (days === 0) return 'dziś';
+  if (days === 1) return 'wczoraj';
+  if (days < 14) return `${days} dni temu`;
+  if (days < 60) return `${Math.floor(days / 7)} tyg. temu`;
+  return `${Math.floor(days / 30)} mies. temu`;
+}
+
 /** Odmiana: 1 grzybiarz, 2–4 grzybiarzy… (uproszczona do potrzeb UI). */
 export function plural(n: number, one: string, few: string, many: string): string {
   if (n === 1) return one;
@@ -83,16 +107,37 @@ export function plural(n: number, one: string, few: string, many: string): strin
   return many;
 }
 
+/** „1 grzybiarz”, „3 grzybiarze”, „5 grzybiarzy”. */
+export function fmtMushroomers(n: number): string {
+  return `${fmtInt(n)} ${plural(n, 'grzybiarz', 'grzybiarze', 'grzybiarzy')}`;
+}
+
 /** Odległość w metrach: „350 m”, „1,2 km”. */
 export function fmtDistanceM(m: number): string {
   if (m < 950) return `${Math.max(10, Math.round(m / 10) * 10)} m`;
   return `${(m / 1000).toFixed(1).replace('.', ',')} km`;
 }
 
+/** Rozmiar pliku / danych (MB dziesiętne, jak w ustawieniach telefonu): „0,6 MB”, „12 MB”, „< 0,1 MB”. */
+export function fmtMB(bytes: number): string {
+  const mb = Math.max(0, bytes) / 1e6;
+  if (mb === 0) return '0 MB';
+  if (mb < 0.1) return '< 0,1 MB';
+  if (mb < 10) return `${mb.toFixed(1).replace('.', ',')} MB`;
+  return `${fmtInt(mb)} MB`;
+}
+
 /** „Gmina Supraśl” albo „Miasto Hajnówka” (gmina miejska). */
 export function gminaTitle(g: { name: string; kind?: string } | undefined): string {
   if (!g) return '';
   return `${g.kind === 'miejska' ? 'Miasto' : 'Gmina'} ${g.name}`;
+}
+
+/** Miejsce gminy w podpisie wiersza rankingu: „powiat sokólski”, „miasto na prawach powiatu”, „miasto · powiat bielski”. */
+export function placeLabel(g: { kind?: string; powiat?: string | null }): string {
+  if (!g.powiat) return g.kind === 'miejska' ? 'miasto' : 'gmina';
+  if (g.powiat[0] !== g.powiat[0].toLowerCase()) return 'miasto na prawach powiatu';
+  return g.kind === 'miejska' ? `miasto · powiat ${g.powiat}` : `powiat ${g.powiat}`;
 }
 
 /**

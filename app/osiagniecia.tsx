@@ -2,7 +2,7 @@ import { router } from 'expo-router';
 import { useMemo } from 'react';
 import { View } from 'react-native';
 
-import { AchievementRow } from '@/components/Achievement';
+import { AchievementRow, DiamondDisc } from '@/components/Achievement';
 import { Card } from '@/components/Card';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
@@ -11,16 +11,14 @@ import { Screen } from '@/components/Screen';
 import { Txt } from '@/components/Txt';
 import { useAchievements } from '@/hooks/useAchievements';
 import { colors, tiers as tierTokens } from '@/theme/tokens';
-import { ACHIEVEMENT_CATEGORIES, TIER_LABEL, tierKind, type TierKind } from '@/utils/achievements';
+import { ACHIEVEMENT_CATEGORIES, MEDAL_ORDER, TIER_LABEL, tierKind, type TierKind } from '@/utils/achievements';
 import { fmtInt } from '@/utils/format';
-
-const MEDAL_ORDER: TierKind[] = ['braz', 'srebro', 'zloto', 'platyna'];
 
 /** Wszystkie osiągnięcia (z profilu: „Zobacz wszystko”) – podsumowanie i sekcje według kategorii. */
 export default function AchievementsScreen() {
   const { states, summary } = useAchievements();
   const medals = useMemo(() => {
-    const count: Record<TierKind, number> = { braz: 0, srebro: 0, zloto: 0, platyna: 0 };
+    const count: Record<TierKind, number> = { braz: 0, srebro: 0, zloto: 0, platyna: 0, diament: 0 };
     states.forEach((s) => {
       for (let t = 1; t <= s.tier; t++) count[tierKind(s.def.tiers.length, t)]++;
     });
@@ -55,18 +53,23 @@ export default function AchievementsScreen() {
             </Txt>
           </View>
           <ProgressBar value={summary.total ? summary.earned / summary.total : 0} />
-          <View style={{ flexDirection: 'row', gap: 6 }}>
+          {/* Pięć stopni nie mieści się w jednym wierszu „kółko + liczba + nazwa” – kolumny: kółko i liczba, pod spodem nazwa. */}
+          <View style={{ flexDirection: 'row', gap: 4 }}>
             {MEDAL_ORDER.map((k) => (
-              <View key={k} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <View style={{ width: 18, height: 18, borderRadius: 9, backgroundColor: tierTokens[k].color }} />
-                <View>
+              <View key={k} style={{ flex: 1, alignItems: 'center', gap: 2 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                  {k === 'diament' ? (
+                    <DiamondDisc size={16} />
+                  ) : (
+                    <View style={{ width: 16, height: 16, borderRadius: 8, backgroundColor: tierTokens[k].color }} />
+                  )}
                   <Txt f="b7" size={15} lh={1.1}>
                     {medals[k]}
                   </Txt>
-                  <Txt f="n7" size={10} color={colors.muted}>
-                    {TIER_LABEL[k]}
-                  </Txt>
                 </View>
+                <Txt f="n7" size={10} color={colors.muted} numberOfLines={1}>
+                  {TIER_LABEL[k]}
+                </Txt>
               </View>
             ))}
           </View>

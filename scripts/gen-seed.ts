@@ -1,16 +1,20 @@
 /**
- * Generuje supabase/seed.sql ze słowników mocków (te same ID co w aplikacji).
- * Uruchom: npm run db:seed
+ * Generuje supabase/seed.sql ze słowników mocków (te same ID co w aplikacji)
+ * i wszystkich gmin z indeksu PRG (assets/geo/gminy-index.geo).
+ * Uruchom: npm run db:seed            – seed lokalny (włącza narzędzia deweloperskie: app_config.dev_tools = true)
+ *          npm run db:seed -- --cloud – seed do chmury (dev_tools = false); potem wróć do lokalnego
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { BADGES, DAILY_QUESTS } from '../src/data/mock/game';
-import { GMINY } from '../src/data/mock/gminy';
+import { BADGES, QUEST_POOL } from '../src/data/mock/game';
+import { buildGminaStats, GMINY } from '../src/data/mock/gminy';
 import type { GminaIndexFile } from '../src/geo/gminaIndex';
 import { SPECIES } from '../src/data/mock/species';
 import { ACHIEVEMENTS, tierKind, type AchievementMetric } from '../src/utils/achievements';
 import { BADGE_RULES } from '../src/utils/badges';
+import { counterSqlKey } from '../src/utils/counters';
+import { questKindToSql, questPeriod } from '../src/utils/quests';
 
 const q = (v: string | number | boolean | null | undefined): string => {
   if (v === null || v === undefined) return 'null';
@@ -26,9 +30,11 @@ const slug = (s: string) =>
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/(^-|-$)/g, '');
 
+const CLOUD = process.argv.includes('--cloud');
+
 const out: string[] = [
-  '-- WYGENEROWANE przez scripts/gen-seed.ts z src/data/mock – nie edytuj ręcznie.',
-  '-- Kody TERYT z assets/geo/gminy-index.geo (npm run geo:build); granice (boundary) uzupełnia import PRG (GUGiK).',
+  `-- WYGENEROWANE przez scripts/gen-seed.ts${CLOUD ? ' --cloud' : ''} z src/data/mock – nie edytuj ręcznie.`,
+  '-- Gminy z assets/geo/gminy-index.geo (PRG, npm run geo:build); granice (boundary) uzupełnia import PRG (GUGiK).',
   '',
 ];
 
@@ -37,6 +43,17 @@ const geoIndex = JSON.parse(
   readFileSync(path.resolve(__dirname, '..', 'assets', 'geo', 'gminy-index.geo'), 'utf8'),
 ) as GminaIndexFile;
 const terytById = new Map(geoIndex.gminy.map((row) => [row[1], row[0]]));
+const KIND = { 1: 'miejska', 2: 'wiejska', 3: 'miejsko-wiejska' } as const;
+
+// Narzędzia deweloperskie (dev_import_state, dev_reset_player) – tylko lokalnie, w chmurze NIGDY true.
+out.push(
+  CLOUD
+    ? '-- Chmura: narzędzia deweloperskie wyłączone.'
+    : '-- LOKALNIE: narzędzia deweloperskie włączone (import stanu, reset gracza). Do chmury: npm run db:seed -- --cloud.',
+  `insert into public.app_config (key, value) values ('dev_tools', '${CLOUD ? 'false' : 'true'}')`,
+  'on conflict (key) do update set value = excluded.value;',
+  '',
+);
 
 // Kompleksy leśne
 const forests = [...new Set(GMINY.map((g) => g.forest).filter((f): f is string => !!f))];
@@ -53,29 +70,66 @@ out.push(
   '',
 );
 
-// Gatunki
+// Wszystkie gminy z PRG (wykrywanie z GPS w całej Polsce → FK wypraw i znalezisk). Upsert tylko kolumn z PRG –
+// kompleks leśny, pozycja na siatce i granice gmin z danymi gry zostają.
 out.push(
-  'insert into public.species (id, atlas_no, name, latin, short_name, rarity, edibility, habitat, clustered, typical_cap_cm, typical_height_cm, typical_weight_g) values',
+  `-- ${geoIndex.gminy.length} gmin z PRG (${geoIndex.source})`,
+  'insert into public.gminy (id, teryt, name, voivodeship, powiat, kind, forest_pct) values',
+);
+out.push(
+  geoIndex.gminy
+    .map(
+      ([teryt, id, name, kind, , , forestPct]) =>
+        `  (${q(id)}, ${q(teryt)}, ${q(name)}, ${q(geoIndex.woj[teryt.slice(0, 2)])}, ${q(geoIndex.powiaty[teryt.slice(0, 4)] ?? null)}, ${q(KIND[kind])}, ${q(forestPct)})`,
+    )
+    .join(',\n') +
+    '\non conflict (id) do update set teryt = excluded.teryt, name = excluded.name, voivodeship = excluded.voivodeship,' +
+    '\n  powiat = excluded.powiat, kind = excluded.kind, forest_pct = excluded.forest_pct;',
+  '',
+);
+
+// Gatunki (treść karty: sezon, siedliska, ochrona, opis – migracja 20261013100000_species_content.sql). Upsert treści –
+// poprawki katalogu trafiają do bazy przy kolejnym seedzie; atlas_no (kolejność atlasu) tylko przy wstawieniu.
+const sqlArray = (xs: readonly (string | number)[] | undefined, type: 'numeric' | 'text') =>
+  xs?.length ? `array[${xs.map((x) => q(x)).join(', ')}]::${type}[]` : 'null';
+out.push(
+  'insert into public.species (id, atlas_no, name, latin, short_name, rarity, edibility, habitat, clustered, typical_cap_cm, typical_height_cm, typical_weight_g,',
+  '  season_weights, habitats, protection, description) values',
 );
 out.push(
   SPECIES.map(
     (s, i) =>
-      `  (${q(s.id)}, ${i + 1}, ${q(s.name)}, ${q(s.latin)}, ${q(s.shortName)}, ${q(s.rarity)}, ${q(s.edibility)}, ${q(s.habitat)}, ${!!s.clustered}, ${s.typical.capCm}, ${s.typical.heightCm}, ${s.typical.weightG})`,
-  ).join(',\n') + '\non conflict (id) do nothing;',
+      `  (${q(s.id)}, ${i + 1}, ${q(s.name)}, ${q(s.latin)}, ${q(s.shortName)}, ${q(s.rarity)}, ${q(s.edibility)}, ${q(s.habitat)}, ${!!s.clustered}, ${s.typical.capCm}, ${s.typical.heightCm}, ${s.typical.weightG},` +
+      `\n   ${sqlArray(s.seasonWeights, 'numeric')}, ${sqlArray(s.habitats, 'text')}, ${q(s.protection ?? null)}, ${q(s.description ?? null)})`,
+  ).join(',\n') +
+    '\non conflict (id) do update set name = excluded.name, latin = excluded.latin, short_name = excluded.short_name,' +
+    '\n  rarity = excluded.rarity, edibility = excluded.edibility, habitat = excluded.habitat, clustered = excluded.clustered,' +
+    '\n  typical_cap_cm = excluded.typical_cap_cm, typical_height_cm = excluded.typical_height_cm, typical_weight_g = excluded.typical_weight_g,' +
+    '\n  season_weights = excluded.season_weights, habitats = excluded.habitats, protection = excluded.protection, description = excluded.description;',
   '',
 );
 
-// Sobowtóry
+// Sobowtóry – wszystkie (Species.lookalikes; sort 0 = główny = Species.lookalike). lookalike_id tylko dla głównego:
+// para do osiągnięcia „Mistrz sobowtórów” liczona jak w aplikacji (utils/achievements.ts – Species.lookalike).
 const byName = new Map(SPECIES.map((s) => [s.name.toLowerCase().replace(/ \(.*\)$/, ''), s.id]));
-const looks = SPECIES.filter((s) => s.lookalike);
-out.push('insert into public.species_lookalikes (species_id, lookalike_name, lookalike_id, lookalike_edibility, tip) values');
+const lookRows = SPECIES.flatMap((s) =>
+  (s.lookalikes?.length ? s.lookalikes : s.lookalike ? [s.lookalike] : []).map((l, i) => ({ s, l, i })),
+);
+const looks = new Set(lookRows.map((r) => r.s.id));
+out.push('insert into public.species_lookalikes (species_id, lookalike_name, lookalike_id, lookalike_edibility, tip, sort) values');
 out.push(
-  looks
-    .map((s) => {
-      const l = s.lookalike!;
-      return `  (${q(s.id)}, ${q(l.name)}, ${q(byName.get(l.name.toLowerCase()) ?? null)}, ${q(l.edibility)}, ${q(l.tip)})`;
-    })
-    .join(',\n') + '\non conflict do nothing;',
+  lookRows
+    .map(
+      ({ s, l, i }) =>
+        `  (${q(s.id)}, ${q(l.name)}, ${q(i === 0 ? (byName.get(l.name.toLowerCase()) ?? null) : null)}, ${q(l.edibility)}, ${q(l.tip)}, ${i})`,
+    )
+    .join(',\n') +
+    '\non conflict (species_id, lookalike_name) do update set lookalike_id = excluded.lookalike_id,' +
+    '\n  lookalike_edibility = excluded.lookalike_edibility, tip = excluded.tip, sort = excluded.sort;',
+  '-- Sobowtóry usunięte z katalogu (dla gatunków z katalogu seed jest źródłem prawdy listy sobowtórów).',
+  'delete from public.species_lookalikes l',
+  ` where l.species_id in (${SPECIES.map((s) => q(s.id)).join(', ')})`,
+  `   and (l.species_id, l.lookalike_name) not in (${lookRows.map(({ s, l }) => `(${q(s.id)}, ${q(l.name)})`).join(', ')});`,
   '',
 );
 
@@ -101,21 +155,55 @@ out.push(
   '',
 );
 
-// Zadania dnia
-out.push('insert into public.quest_templates (id, kind, title, icon, icon_filled, icon_bg, icon_color, xp, target, sort) values');
+// Pula zadań (src/data/mock/game.ts → migracja 20261013110000_progression.sql): dzienne i tygodniowe, rodzaj w snake_case,
+// parametry (gatunek, miesiące sezonu, minuty, godzina). `sort` = kolejność puli – od niej zależy losowanie quests_for(),
+// identyczne z aplikacją (src/utils/quests.ts). Szablony spoza puli – nieaktywne.
+const questParams = (d: (typeof QUEST_POOL)[number]) =>
+  JSON.stringify({
+    ...(d.speciesId && { speciesId: d.speciesId }),
+    ...(d.months?.length && { months: d.months }),
+    ...(d.minutes != null && { minutes: d.minutes }),
+    ...(d.beforeHour != null && { beforeHour: d.beforeHour }),
+  });
 out.push(
-  DAILY_QUESTS.map(
+  'insert into public.quest_templates (id, kind, title, icon, icon_filled, icon_bg, icon_color, xp, target, sort, period, difficulty, params, active) values',
+);
+out.push(
+  QUEST_POOL.map(
     (d, i) =>
-      `  (${q(d.id)}, ${q(d.kind)}, ${q(d.title)}, ${q(d.icon)}, ${!!d.iconFilled}, ${q(d.iconBg)}, ${q(d.iconColor)}, ${d.xp}, ${d.target}, ${i})`,
-  ).join(',\n') + '\non conflict (id) do nothing;',
+      `  (${q(d.id)}, ${q(questKindToSql(d.kind))}, ${q(d.title)}, ${q(d.icon)}, ${!!d.iconFilled}, ${q(d.iconBg)}, ${q(d.iconColor)}, ${d.xp}, ${d.target}, ${i}, ${q(questPeriod(d))}, ${d.difficulty ?? 1}, ${q(questParams(d))}, true)`,
+  ).join(',\n') +
+    '\non conflict (id) do update set kind = excluded.kind, title = excluded.title, icon = excluded.icon, icon_filled = excluded.icon_filled,' +
+    '\n  icon_bg = excluded.icon_bg, icon_color = excluded.icon_color, xp = excluded.xp, target = excluded.target, sort = excluded.sort,' +
+    '\n  period = excluded.period, difficulty = excluded.difficulty, params = excluded.params, active = true;',
+  `update public.quest_templates set active = false where active and id <> all (array[${QUEST_POOL.map((d) => q(d.id)).join(', ')}]);`,
   '',
 );
 
-// Wyzwanie z makiety (Supraśl → szmaciak)
+// Stałe wyzwania gmin gry z makiety (buildGminaStats: gatunek, tytuł, opis, XP, odznaka – jak w aplikacji), bez końca
+// (ends_at null). Pozostałe gminy dostają wyzwanie tygodniowe na serwerze (ensure_weekly_challenge). Odznaka spoza
+// słownika → null. Gmina, która ma już stałe wyzwanie, jest pomijana (seed idempotentny).
+// Opis z makiety („Tylko N osoby znalazły go tu…”) z poprawną odmianą liczebnika i rodzaju gatunku.
+const osoby = (n: number) =>
+  n === 1 ? 'osoba znalazła' : n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 12 || n % 100 > 14) ? 'osoby znalazły' : 'osób znalazło';
+const challengeText = (text: string, speciesId: string) => {
+  const name = SPECIES.find((s) => s.id === speciesId)?.name ?? '';
+  const pronoun = /a$/.test(name.split(' ')[0]) ? 'ją' : 'go';
+  return text.replace(/^Tylko (\d+) osoby znalazły go tu/, (_, n: string) => `Tylko ${n} ${osoby(Number(n))} ${pronoun} tu`);
+};
+const challenges = GMINY.flatMap((g) => {
+  const ch = buildGminaStats(g, 0).challenge;
+  return ch ? [{ gminaId: g.id, ...ch, description: challengeText(ch.description, ch.speciesId) }] : [];
+});
 out.push(
   'insert into public.gmina_challenges (gmina_id, species_id, title, description, xp, badge_id)',
-  "select 'suprasl', 'szmaciak-galezisty', 'Znajdź szmaciaka gałęzistego', 'Tylko 4 osoby znalazły go tu w tym sezonie.', 500, 'lowca-legend'",
-  "where not exists (select 1 from public.gmina_challenges where gmina_id = 'suprasl' and species_id = 'szmaciak-galezisty');",
+  'select v.gmina_id, v.species_id, v.title, v.description, v.xp, (select b.id from public.badges b where b.id = v.badge_id)',
+  '  from (values',
+  challenges
+    .map((c) => `    (${q(c.gminaId)}, ${q(c.speciesId)}, ${q(c.title)}, ${q(c.description)}, ${c.xp}, ${q(c.badgeId)})`)
+    .join(',\n'),
+  '  ) v (gmina_id, species_id, title, description, xp, badge_id)',
+  ' where not exists (select 1 from public.gmina_challenges c where c.gmina_id = v.gmina_id and c.ends_at is null);',
   '',
 );
 
@@ -139,6 +227,11 @@ function sqlMetric(m: AchievementMetric): { metric: string; params: object } {
       return { metric: 'xxl_finds', params: {} };
     case 'record':
       return { metric: 'record', params: { species: m.speciesId, field: FIELD[m.field] } };
+    case 'counter':
+      // Licznik gracza: wartość enumu = klucz `player_metrics()` (snake_case).
+      return { metric: counterSqlKey(m.counter), params: {} };
+    case 'seasons':
+      return { metric: 'seasons', params: {} };
   }
 }
 out.push('insert into public.achievements (id, category, name, icon, metric, params, secret, sort) values');
@@ -158,11 +251,23 @@ out.push('insert into public.achievement_tiers (achievement_id, tier, target, xp
 out.push(
   tiers.join(',\n') +
     '\non conflict (achievement_id, tier) do update set target = excluded.target, xp = excluded.xp, medal = excluded.medal, goal = excluded.goal;',
+  // Stopnie ponad zdefiniowane w aplikacji (słownik zmniejszył się) – usuwane; osiągnięcia spoza listy – nieaktywne.
+  'delete from public.achievement_tiers t using (values',
+  ACHIEVEMENTS.map((a) => `  (${q(a.id)}, ${a.tiers.length})`).join(',\n'),
+  ') v (id, n) where t.achievement_id = v.id and t.tier > v.n;',
+  `update public.achievements set active = (id = any (array[${ACHIEVEMENTS.map((a) => q(a.id)).join(', ')}]));`,
   '',
 );
+// Zestawy: skład z aplikacji (rodziny rosną razem z katalogiem) – wpisy spoza zestawu usuwane.
 const members = ACHIEVEMENTS.flatMap((a) => (a.metric.kind === 'set' ? a.metric.ids.map((id) => `  (${q(a.id)}, ${q(id)})`) : []));
 out.push('insert into public.achievement_set_species (achievement_id, species_id) values');
-out.push(members.join(',\n') + '\non conflict do nothing;', '');
+out.push(members.join(',\n') + '\non conflict do nothing;');
+out.push(
+  'delete from public.achievement_set_species m where not exists (select 1 from (values',
+  members.join(',\n'),
+  ') v (achievement_id, species_id) where v.achievement_id = m.achievement_id and v.species_id = m.species_id);',
+  '',
+);
 out.push(
   '-- Gracze z istniejącym atlasem: już osiągnięte stopnie bez wypłaty XP (przy pustej bazie nic nie robi).',
   'select public.seed_achievements(id) from public.profiles;',
@@ -172,5 +277,5 @@ out.push(
 const file = path.resolve(__dirname, '..', 'supabase', 'seed.sql');
 writeFileSync(file, out.join('\n'), 'utf8');
 console.log(
-  `seed.sql: ${forests.length} kompleksów, ${GMINY.length} gmin, ${SPECIES.length} gatunków, ${looks.length} sobowtórów, ${BADGES.length} odznak, ${DAILY_QUESTS.length} zadań, ${ACHIEVEMENTS.length} osiągnięć (${tiers.length} stopni)`,
+  `seed.sql${CLOUD ? ' (chmura, dev_tools = false)' : ' (lokalny, dev_tools = true)'}: ${forests.length} kompleksów, ${GMINY.length} gmin gry + ${geoIndex.gminy.length} z PRG, ${SPECIES.length} gatunków, ${lookRows.length} sobowtórów (${looks.size} gatunków), ${BADGES.length} odznak, ${QUEST_POOL.length} zadań (${QUEST_POOL.filter((x) => questPeriod(x) === 'weekly').length} tygodniowych), ${challenges.length} wyzwań gmin, ${ACHIEVEMENTS.length} osiągnięć (${tiers.length} stopni)`,
 );

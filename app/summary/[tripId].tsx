@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Share, View } from 'react-native';
 
 import { Button3D } from '@/components/Button3D';
@@ -7,31 +7,45 @@ import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { Pill } from '@/components/Pill';
 import { Placeholder } from '@/components/Placeholder';
+import { RouteMap } from '@/components/RouteMap';
 import { Screen } from '@/components/Screen';
 import { StatTile } from '@/components/StatTile';
 import { Thumb } from '@/components/Thumb';
 import { Toggle } from '@/components/Toggle';
 import { Txt } from '@/components/Txt';
+import { approximateRoute, splitSegments } from '@/geo/track';
 import { useServices } from '@/services';
 import { ServiceError } from '@/services/types';
 import { markPublished, setHideRoute } from '@/store/game';
 import { useCatalogStore } from '@/store/useCatalogStore';
+import { useFeedSync } from '@/store/useFeedSync';
+import { useTripTrack } from '@/store/useTrackStore';
 import { useTripStore } from '@/store/useTripStore';
 import { ui } from '@/store/useUiStore';
 import { colors, rarity as rarityTokens, RARITY_ORDER, shadows } from '@/theme/tokens';
 import type { Find, Rarity } from '@/types';
-import { fmtDuration, fmtInt, fmtKm, fmtTripDate, fmtWeight, plural } from '@/utils/format';
+import { fmtDuration, fmtInt, fmtKm, fmtTripDate, fmtWeight, gminaTitle, plural } from '@/utils/format';
+import { hashString } from '@/utils/random';
 
 const RANK: Record<Rarity, number> = { pospolity: 0, rzadki: 1, epicki: 2, legendarny: 3 };
 
 export default function SummaryScreen() {
-  const { tripId } = useLocalSearchParams<{ tripId: string }>();
+  // `from=wyprawy` – otwarte z Historii wypraw: strzałka wraca do listy zamiast zamykać na Start.
+  const { tripId, from } = useLocalSearchParams<{ tripId: string; from?: string }>();
+  const fromHistory = from === 'wyprawy';
   const { feed } = useServices();
   const trip = useTripStore((s) => s.trips[tripId]);
   const allFinds = useTripStore((s) => s.finds);
   const gmina = useCatalogStore((s) => (trip ? s.gminaById[trip.gminaId] : undefined));
   const speciesById = useCatalogStore((s) => s.speciesById);
   const [publishing, setPublishing] = useState(false);
+  // Ślad tej wyprawy z pamięci (po restarcie aplikacji go nie ma → placeholder). Pokazujemy wyłącznie
+  // wersję przybliżoną – dokładnie to, co poszłoby do publikacji: bez okolic startu i mety, uproszczoną.
+  const track = useTripTrack(trip?.id);
+  const route = useMemo(
+    () => (track.length >= 2 ? approximateRoute(splitSegments(track), { seed: hashString(tripId ?? '') }) : null),
+    [track, tripId],
+  );
 
   if (!trip) {
     return (
@@ -56,14 +70,32 @@ export default function SummaryScreen() {
   const published = trip.status === 'published';
   const showRoute = !trip.hideRoute;
 
+  const gminaPill = (
+    <Pill
+      label={gmina ? gminaTitle(gmina) : 'Gmina'}
+      icon="location_on"
+      iconFilled
+      iconColor={colors.primaryText}
+      bg={colors.white}
+      color={colors.ink}
+      padH={11}
+      gap={4}
+      style={{ position: 'absolute', left: 12, top: 12 }}
+    />
+  );
+
   const close = () => {
+    if (fromHistory && router.canGoBack()) {
+      router.back();
+      return;
+    }
     if (router.canDismiss()) router.dismissAll();
     router.navigate('/');
   };
 
   const share = () =>
     Share.share({
-      message: `Wyprawa w gminie ${gmina?.name}: ${fmtKm(trip.distanceKm)}, ${collected.length} grzybów, ${speciesCount} gatunków, +${fmtInt(trip.xp)} XP 🍄 #Grzybobranie`,
+      message: `Wyprawa${gmina ? ` w gminie ${gmina.name}` : ''}: ${fmtKm(trip.distanceKm)}, ${collected.length} grzybów, ${speciesCount} gatunków, +${fmtInt(trip.xp)} XP 🍄 #Grzybobranie`,
     }).catch(() => ui.toast('Nie udało się udostępnić', 'error'));
 
   const publish = async () => {
@@ -75,6 +107,8 @@ export default function SummaryScreen() {
     try {
       const post = await feed.publishTrip(trip, { hideRoute: trip.hideRoute });
       markPublished(trip.id, post.id);
+      // Feed (zakładka mogła być już otwarta) pobierze listę od nowa – nowy wpis na górze.
+      useFeedSync.getState().markStale();
       if (router.canDismiss()) router.dismissAll();
       router.navigate('/feed');
       setTimeout(() => ui.toast('Opublikowano – znajomi zobaczą wpis za 24 h', 'schedule'), 350);
@@ -89,7 +123,7 @@ export default function SummaryScreen() {
     <Screen>
       <View style={{ paddingTop: 6, paddingHorizontal: 20, paddingBottom: 4, gap: 16 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-          <IconButton icon="close" onPress={close} accessibilityLabel="Zamknij" />
+          <IconButton icon={fromHistory ? 'arrow_back' : 'close'} onPress={close} accessibilityLabel={fromHistory ? 'Wróć' : 'Zamknij'} />
           <Txt f="b7" size={18}>
             Podsumowanie
           </Txt>
@@ -105,29 +139,34 @@ export default function SummaryScreen() {
           </Txt>
         </View>
 
-        <Placeholder
-          variant="moss"
-          stripe={10}
-          label={showRoute ? 'przybliżona trasa GPS\n(publikowana z opóźnieniem)' : 'trasa ukryta\n(publikujemy tylko gminę)'}
-          style={{ height: 170, borderRadius: 24 }}
-        >
-          <Pill
-            label={`Gmina ${gmina?.name}`}
-            icon="location_on"
-            iconFilled
-            iconColor={colors.primaryText}
-            bg={colors.white}
-            color={colors.ink}
-            padH={11}
-            gap={4}
-            style={{ position: 'absolute', left: 12, top: 12 }}
-          />
-          {!showRoute ? (
-            <View style={{ position: 'absolute', right: 12, top: 12 }}>
-              <Icon name="visibility_off" size={20} color="#6A7A55" />
-            </View>
-          ) : null}
-        </Placeholder>
+        {showRoute && route?.length ? (
+          <RouteMap segments={route} gminaTeryt={gmina?.teryt} height={170} caption="trasa przybliżona">
+            {gminaPill}
+          </RouteMap>
+        ) : (
+          <Placeholder
+            variant="moss"
+            stripe={10}
+            label={
+              !showRoute
+                ? 'trasa ukryta\n(publikujemy tylko gminę)'
+                : route
+                  ? 'przybliżona trasa GPS\n(za krótka, by ją pokazać)'
+                  : fromHistory
+                    ? // Starsza wyprawa: ślad jest tylko w pamięci, do bieżącej wyprawy (po restarcie go nie ma).
+                      'przybliżona trasa GPS\n(ślad nie jest przechowywany)'
+                    : 'przybliżona trasa GPS\n(publikowana z opóźnieniem)'
+            }
+            style={{ height: 170, borderRadius: 24 }}
+          >
+            {gminaPill}
+            {!showRoute ? (
+              <View style={{ position: 'absolute', right: 12, top: 12 }}>
+                <Icon name="visibility_off" size={20} color="#6A7A55" />
+              </View>
+            ) : null}
+          </Placeholder>
+        )}
 
         <View style={{ gap: 10 }}>
           <View style={{ flexDirection: 'row', gap: 10 }}>
@@ -178,7 +217,9 @@ export default function SummaryScreen() {
           <Icon name="shield" filled size={24} color={colors.primaryText} />
           <Txt f="n7" size={13} color={colors.primaryTintBody} style={{ flex: 1 }}>
             {showRoute
-              ? 'Publikujemy gminę i przybliżoną trasę. Twoje miejscówki zostają tajne.'
+              ? route?.length
+                ? 'Publikujemy gminę i przybliżoną trasę – bez okolic startu i mety. Twoje miejscówki zostają tajne.'
+                : 'Publikujemy gminę i przybliżoną trasę. Twoje miejscówki zostają tajne.'
               : 'Trasa ukryta – publikujemy tylko gminę. Twoje miejscówki zostają tajne.'}
           </Txt>
           <Toggle
@@ -262,7 +303,7 @@ function BestFind({ find, speciesName }: { find: Find; speciesName: string }) {
         boxShadow: shadows.card,
       }}
     >
-      <Thumb size={62} radius={16} borderColor={r.color} />
+      <Thumb size={62} radius={16} borderColor={r.color} uri={find.photoUri} />
       <View style={{ flex: 1 }}>
         <Txt f="n8" size={11} color={r.text} upper ls={0.08}>
           Najlepsze znalezisko · {r.label}

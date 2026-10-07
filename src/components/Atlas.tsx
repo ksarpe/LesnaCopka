@@ -1,27 +1,34 @@
 import { router } from 'expo-router';
-import { Pressable, View } from 'react-native';
+import { Pressable, ScrollView, View } from 'react-native';
 
 import { ui } from '@/store/useUiStore';
 import { colors, rarity as rarityTokens, shadows } from '@/theme/tokens';
 import type { AtlasEntry, Species } from '@/types';
+import { inSeason } from '@/utils/chances';
 import { Icon } from './Icon';
 import { Placeholder } from './Placeholder';
 import { isPoisonous } from './SpeciesSheet';
 import { Txt } from './Txt';
 
-export type AtlasFilter = 'all' | 'edible' | 'poison' | 'missing';
+export type AtlasFilter = 'all' | 'edible' | 'poison' | 'missing' | 'season';
 
 export const ATLAS_FILTERS: { value: AtlasFilter; label: string }[] = [
   { value: 'all', label: 'Wszystkie' },
+  { value: 'season', label: 'Teraz w sezonie' },
   { value: 'edible', label: 'Jadalne' },
   { value: 'poison', label: 'Trujące' },
   { value: 'missing', label: 'Brakujące' },
 ];
 
-export function filterAtlas(species: Species[], atlas: Record<string, AtlasEntry>, filter: AtlasFilter) {
+/** Bieżący miesiąc 1–12 (filtr i kropka „w sezonie”). */
+const currentMonth = () => new Date().getMonth() + 1;
+
+/** `season` – gatunki z wagą bieżącego miesiąca ≥ 0,5 (także nieodkryte – podpowiedź, czego szukać). */
+export function filterAtlas(species: Species[], atlas: Record<string, AtlasEntry>, filter: AtlasFilter, month = currentMonth()) {
   return species.filter((s) => {
     const have = !!atlas[s.id];
     if (filter === 'all') return true;
+    if (filter === 'season') return inSeason(s, month);
     if (filter === 'missing') return !have;
     if (filter === 'edible') return have && s.edibility === 'jadalny';
     return have && isPoisonous(s.edibility);
@@ -55,6 +62,7 @@ export function AtlasGrid({ items, atlas }: { items: Species[]; atlas: Record<st
 export function AtlasTile({ species, entry }: { species: Species; entry?: AtlasEntry }) {
   const locked = !entry;
   const poison = isPoisonous(species.edibility);
+  const season = inSeason(species, currentMonth());
   const border = locked ? colors.ringTrack : poison ? colors.danger : rarityTokens[species.rarity].color;
   let tag: { text: string; bg: string; color: string } | null = null;
   if (!locked) {
@@ -65,8 +73,11 @@ export function AtlasTile({ species, entry }: { species: Species; entry?: AtlasE
   return (
     <Pressable
       onPress={() =>
-        locked ? ui.toast('Jeszcze nieodkryty gatunek – szukaj dalej!', 'lock') : router.push(`/species/${species.id}`)
+        locked
+          ? ui.toast(season ? 'Nieodkryty gatunek – teraz jest w sezonie, szukaj!' : 'Jeszcze nieodkryty gatunek – szukaj dalej!', 'lock')
+          : router.push(`/species/${species.id}`)
       }
+      accessibilityLabel={`${locked ? 'Nieodkryty gatunek' : shortName(species.name)}${season ? ', teraz w sezonie' : ''}`}
       style={({ pressed }) => ({
         flex: 1,
         backgroundColor: colors.card,
@@ -89,6 +100,10 @@ export function AtlasTile({ species, entry }: { species: Species; entry?: AtlasE
         ) : (
           <Placeholder variant="sand" stripe={6} style={{ flex: 1 }} />
         )}
+        {season ? (
+          // Kropka „teraz w sezonie” (waga bieżącego miesiąca ≥ 0,5) – jak w pigułce filtra.
+          <View style={{ position: 'absolute', left: 6, top: 6, width: 10, height: 10, borderRadius: 5, backgroundColor: colors.primary, borderWidth: 2, borderColor: colors.white }} />
+        ) : null}
         {tag ? (
           <View
             style={{
@@ -114,10 +129,15 @@ export function AtlasTile({ species, entry }: { species: Species; entry?: AtlasE
   );
 }
 
-/** Pigułki filtrów atlasu (jak w makiecie 08). */
+/** Pigułki filtrów atlasu (jak w makiecie 08) – przewijane w poziomie (5 filtrów nie mieści się w wąskim ekranie). */
 export function AtlasFilters({ value, onChange }: { value: AtlasFilter; onChange: (f: AtlasFilter) => void }) {
   return (
-    <View style={{ flexDirection: 'row', gap: 6 }}>
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      style={{ marginHorizontal: -20, flexGrow: 0 }}
+      contentContainerStyle={{ gap: 6, paddingHorizontal: 20 }}
+    >
       {ATLAS_FILTERS.map((f) => {
         const active = f.value === value;
         return (
@@ -127,18 +147,22 @@ export function AtlasFilters({ value, onChange }: { value: AtlasFilter; onChange
             accessibilityState={{ selected: active }}
             onPress={() => onChange(f.value)}
             style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 5,
               backgroundColor: active ? colors.ink : colors.card,
               borderRadius: 999,
               paddingVertical: 6,
               paddingHorizontal: 12,
             }}
           >
+            {f.value === 'season' ? <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary }} /> : null}
             <Txt f="n8" size={13} color={active ? colors.bg : colors.ink}>
               {f.label}
             </Txt>
           </Pressable>
         );
       })}
-    </View>
+    </ScrollView>
   );
 }

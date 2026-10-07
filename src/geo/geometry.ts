@@ -107,10 +107,52 @@ export function windingNumber(x: number, y: number, r: Flat): number {
  * 0, gdy punkt jest w środku; Infinity, gdy zbiór jest pusty.
  */
 export function distanceToFilledRings(x: number, y: number, rings: Flat[]): number {
+  return nearestPointOnFilledRings(x, y, rings)?.d ?? Infinity;
+}
+
+export interface NearestPoint {
+  x: number;
+  y: number;
+  /** Odległość od punktu wejściowego (0 w środku). */
+  d: number;
+  /** Punkt wejściowy leży w środku (reguła `nonzero`) – wtedy (x, y) to on sam. */
+  inside: boolean;
+}
+
+/**
+ * Najbliższy punkt brzegu zbioru wielokątów (pierścienie z kierunkiem, reguła `nonzero`); null, gdy zbiór pusty.
+ * Wielokąty przycięte do kafli mają „szwy” na granicach kafli, ale szew leży w środku sumy wielokątów
+ * (kafle zachodzą na siebie), więc z zewnątrz najbliższy zawsze jest prawdziwy brzeg.
+ */
+export function nearestPointOnFilledRings(x: number, y: number, rings: Flat[]): NearestPoint | null {
   let wn = 0;
   for (const r of rings) wn += windingNumber(x, y, r);
-  if (wn !== 0) return 0;
+  if (wn !== 0) return { x, y, d: 0, inside: true };
   let best = Infinity;
-  for (const r of rings) best = Math.min(best, distance2ToPath(x, y, r, true));
-  return Math.sqrt(best);
+  let bx = NaN;
+  let by = NaN;
+  for (const r of rings) {
+    const n = r.length;
+    if (n < 2) continue;
+    // Pojedynczy punkt = zdegenerowany pierścień (odcinek długości 0).
+    for (let i = 0, j = n - 2; i < n; j = i, i += 2) {
+      const ax = r[j];
+      const ay = r[j + 1];
+      const dx = r[i] - ax;
+      const dy = r[i + 1] - ay;
+      const len2 = dx * dx + dy * dy;
+      let t = len2 > 0 ? ((x - ax) * dx + (y - ay) * dy) / len2 : 0;
+      if (t < 0) t = 0;
+      else if (t > 1) t = 1;
+      const px = ax + t * dx;
+      const py = ay + t * dy;
+      const d2 = (px - x) * (px - x) + (py - y) * (py - y);
+      if (d2 < best) {
+        best = d2;
+        bx = px;
+        by = py;
+      }
+    }
+  }
+  return best === Infinity ? null : { x: bx, y: by, d: Math.sqrt(best), inside: false };
 }

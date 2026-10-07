@@ -1,14 +1,17 @@
-import { router } from 'expo-router';
+import { Redirect, router } from 'expo-router';
 import type { ReactNode } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 
 import { Card } from '@/components/Card';
+import { DEV_TOOLS } from '@/config';
 import { Icon, type IconName } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { Screen } from '@/components/Screen';
 import { Toggle } from '@/components/Toggle';
 import { Txt } from '@/components/Txt';
 import { BackendPanel } from '@/dev/BackendPanel';
+import { NotificationsPanel } from '@/dev/NotificationsPanel';
+import { devSimulateWalk } from '@/dev/simWalk';
 import { useRegionStore } from '@/hooks/useRegion';
 import { useServices } from '@/services';
 import type { PermissionKind, PermissionStatus } from '@/services/types';
@@ -22,7 +25,10 @@ import {
   setTimeSpeed,
   type Scenario,
 } from '@/store/game';
+import { devShowOnboarding } from '@/store/onboarding';
 import { useCatalogStore } from '@/store/useCatalogStore';
+import { useFeedSync } from '@/store/useFeedSync';
+import { useNotificationStore } from '@/store/useNotificationStore';
 import { useSimStore } from '@/store/useSimStore';
 import { useActiveTrip } from '@/store/useTripStore';
 import { ui } from '@/store/useUiStore';
@@ -32,7 +38,13 @@ import type { Rarity } from '@/types';
 
 const CORE = ['suprasl', 'michalowo', 'hajnowka', 'narewka', 'grodek'];
 
-export default function DevPanel() {
+/** W wydaniu (bez EXPO_PUBLIC_DEV_TOOLS=1) panelu nie ma – także pod linkiem `grzybobranie://dev`. */
+export default function DevRoute() {
+  if (!DEV_TOOLS) return <Redirect href="/" />;
+  return <DevPanel />;
+}
+
+function DevPanel() {
   const services = useServices();
   const sim = useSimStore();
   const trip = useActiveTrip();
@@ -47,11 +59,26 @@ export default function DevPanel() {
   const scenario = (s: Scenario, label: string) => {
     const id = loadScenario(s);
     services.dev?.reset({ emptyFeed: s === 'newUser' });
+    useFeedSync.getState().invalidate();
     useRegionStore.getState().set({ status: 'idle', region: null });
     ui.toast(`Wczytano: ${label}`, 'restart_alt');
-    if (router.canDismiss()) router.dismissAll();
-    if (s === 'designSummary' && id) router.push(`/summary/${id}`);
-    else router.navigate('/');
+    // Po zmianie `onboarded` układ najpierw przelicza dostępne ekrany (Stack.Protected) – nawigujemy chwilę później.
+    setTimeout(() => {
+      // Nowy użytkownik → onboarding (panel /dev zastępujemy ekranem powitalnym).
+      if (!useUserStore.getState().onboarded) {
+        router.replace('/onboarding');
+        return;
+      }
+      if (router.canDismiss()) router.dismissAll();
+      if (s === 'designSummary' && id) router.push(`/summary/${id}`);
+      else router.navigate('/');
+    }, 50);
+  };
+
+  const showOnboarding = () => {
+    devShowOnboarding();
+    ui.toast('Onboarding od początku', 'waving_hand');
+    setTimeout(() => router.replace('/onboarding'), 50);
   };
 
   return (
@@ -77,7 +104,12 @@ export default function DevPanel() {
             <Chip label="Nowy użytkownik" onPress={() => scenario('newUser', 'nowy użytkownik')} />
             <Chip label="Makieta: wyprawa trwa" onPress={() => scenario('designActive', 'aktywna wyprawa z makiety')} />
             <Chip label="Makieta: podsumowanie" onPress={() => scenario('designSummary', 'podsumowanie z makiety')} />
+            <Chip label="Onboarding (bez resetu)" onPress={showOnboarding} />
           </Chips>
+          <Txt f="n6" size={12} color={colors.muted}>
+            „Nowy użytkownik” zaczyna od onboardingu (dev-link: ?scenario=newUser&onboarding=0 go pomija). Na ekranie
+            onboardingu „Pomiń (dev)” w prawym górnym rogu.
+          </Txt>
         </Section>
 
         <Section title="Lokalizacja" icon="my_location">
@@ -133,11 +165,30 @@ export default function DevPanel() {
               <PermissionRow kind="location" label="Zgoda: lokalizacja" />
             </>
           )}
-          <PermissionRow kind="camera" label="Zgoda: aparat" />
+          <Label>Aparat</Label>
+          <Chips>
+            <Chip
+              label="Aparat urządzenia"
+              active={sim.cameraSource === 'device'}
+              onPress={() => sim.set({ cameraSource: 'device' })}
+            />
+            <Chip label="Symulacja" active={sim.cameraSource === 'sim'} onPress={() => sim.set({ cameraSource: 'sim' })} />
+          </Chips>
+          {sim.cameraSource === 'device' ? (
+            <Txt f="n6" size={12} color={colors.muted}>
+              Prawdziwy podgląd w skanie 360° i zdjęcie znaleziska spustem (expo-camera). Postęp skanu i gatunek nadal
+              symulowane. Zgodę nadaje system; bez kamery (np. komputer) skan działa na placeholderze.
+            </Txt>
+          ) : (
+            <PermissionRow kind="camera" label="Zgoda: aparat" />
+          )}
         </Section>
 
         <Section title="Sieć" icon="wifi">
-          <Row label="Połączenie z siecią" hint="Offline → stany błędów w Feedzie, Gminach, Analizie i publikacji">
+          <Row
+            label="Połączenie z siecią"
+            hint="Offline → stany błędów w Feedzie, Gminach, Analizie i publikacji; mapa okolicy tylko z kafli na telefonie (mapy offline, pamięć podręczna)"
+          >
             <Toggle value={sim.networkEnabled} onChange={(v) => sim.set({ networkEnabled: v })} />
           </Row>
         </Section>
@@ -205,6 +256,21 @@ export default function DevPanel() {
               />
             ))}
           </Chips>
+          <Label>Symuluj spacer – dystans i trasa (Podsumowanie pokaże ją na mapie)</Label>
+          <Chips>
+            {[0.5, 2, 5].map((km) => (
+              <Chip
+                key={km}
+                label={`Spacer ${String(km).replace('.', ',')} km`}
+                disabled={!trip}
+                onPress={() =>
+                  devSimulateWalk(km).then((ok) =>
+                    ui.toast(ok ? `Spacer +${String(km).replace('.', ',')} km dopisany do trasy` : 'Brak punktu startu spaceru', 'route'),
+                  )
+                }
+              />
+            ))}
+          </Chips>
         </Section>
 
         <Section title="Postęp" icon="military_tech">
@@ -236,6 +302,8 @@ export default function DevPanel() {
           </Chips>
         </Section>
 
+        <NotificationsPanel />
+
         <Pressable
           onPress={() =>
             ui.confirm({
@@ -247,6 +315,9 @@ export default function DevPanel() {
               onConfirm: () => {
                 resetAll();
                 services.dev?.reset();
+                // Feed (zakładka zostaje zamontowana) pobierze wpisy, znajomych i komentarze od nowa.
+                useFeedSync.getState().invalidate();
+                useNotificationStore.getState().reset();
                 useRegionStore.getState().set({ status: 'idle', region: null });
                 if (router.canDismiss()) router.dismissAll();
                 router.navigate('/');

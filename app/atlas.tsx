@@ -83,13 +83,18 @@ export default function AtlasScreen() {
         <AtlasFilters value={filter} onChange={setFilter} />
 
         {items.length === 0 ? (
-          <StateCard
-            icon={filter === 'missing' ? 'celebration' : 'menu_book'}
-            title={found === 0 ? 'Twój atlas jest pusty' : filter === 'missing' ? 'Masz wszystkie gatunki!' : 'Brak gatunków w tej kategorii'}
-            text={found === 0 ? 'Zeskanuj pierwszego grzyba – gatunek trafi tutaj.' : 'Zmień filtr albo ruszaj do lasu.'}
-            action={found === 0 ? 'Skanuj grzyba' : undefined}
-            onAction={() => router.push('/scan')}
-          />
+          filter === 'season' ? (
+            // Zima / przedwiośnie: żaden gatunek nie ma teraz wagi sezonu ≥ 0,5.
+            <StateCard icon="eco" title="Teraz nic nie jest w pełni sezonu" text="Sezon grzybowy to głównie lipiec–październik – zajrzyj tu wiosną po smardze." />
+          ) : (
+            <StateCard
+              icon={filter === 'missing' ? 'celebration' : 'menu_book'}
+              title={found === 0 ? 'Twój atlas jest pusty' : filter === 'missing' ? 'Masz wszystkie gatunki!' : 'Brak gatunków w tej kategorii'}
+              text={found === 0 ? 'Zeskanuj pierwszego grzyba – gatunek trafi tutaj.' : 'Zmień filtr albo ruszaj do lasu.'}
+              action={found === 0 ? 'Skanuj grzyba' : undefined}
+              onAction={() => router.push('/scan')}
+            />
+          )
         ) : (
           <AtlasGrid items={items} atlas={atlas} />
         )}

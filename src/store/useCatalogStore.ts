@@ -11,6 +11,7 @@ interface CatalogState {
   gminaById: Record<string, Gmina>;
   badges: Badge[];
   badgeById: Record<string, Badge>;
+  /** Pula zadań (dzienne i tygodniowe; nazwa historyczna) – losowanie gracza: src/store/progress.ts. */
   dailyQuests: Quest[];
   totalSpecies: number;
   load: (svc: CatalogService) => Promise<void>;

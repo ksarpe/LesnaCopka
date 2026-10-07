@@ -106,14 +106,29 @@ interface Button3DProps {
   size?: 'lg' | 'md';
   /** Na ciemnym tle cień jest ciemniejszy (#4A7522). */
   onDark?: boolean;
+  /** danger = czerwony przycisk akcji nieodwracalnej (np. „Usuń konto”). */
+  tone?: 'primary' | 'danger';
   style?: StyleProp<ViewStyle>;
 }
 
-export function Button3D({ title, icon, onPress, disabled, size = 'lg', onDark, style }: Button3DProps) {
+/** Przycisk „Usuń…”: czerwień z palety (danger) i ciemniejszy cień. */
+const DANGER = { bg: colors.danger, shadow: '#A43C27', ink: colors.white, disabledBg: '#EBB7AB', disabledShadow: '#D19A8C' };
+
+export function Button3D({ title, icon, onPress, disabled, size = 'lg', onDark, tone = 'primary', style }: Button3DProps) {
   const lg = size === 'lg';
   const radius = lg ? 22 : 18;
-  const bg = disabled ? '#C9D9B4' : colors.primary;
-  const shadow = disabled ? '#AFC294' : onDark ? colors.primaryShadowOnDark : colors.primaryShadow;
+  const danger = tone === 'danger';
+  const bg = danger ? (disabled ? DANGER.disabledBg : DANGER.bg) : disabled ? '#C9D9B4' : colors.primary;
+  const shadow = danger
+    ? disabled
+      ? DANGER.disabledShadow
+      : DANGER.shadow
+    : disabled
+      ? '#AFC294'
+      : onDark
+        ? colors.primaryShadowOnDark
+        : colors.primaryShadow;
+  const ink = danger ? DANGER.ink : colors.primaryInk;
   return (
     <Press3D
       onPress={onPress}
@@ -133,8 +148,8 @@ export function Button3D({ title, icon, onPress, disabled, size = 'lg', onDark, 
         gap: 8,
       }}
     >
-      {icon ? <Icon name={icon} filled size={24} color={colors.primaryInk} /> : null}
-      <Txt f="b7" size={lg ? 20 : 18} color={colors.primaryInk} align="center">
+      {icon ? <Icon name={icon} filled size={24} color={ink} /> : null}
+      <Txt f="b7" size={lg ? 20 : 18} color={ink} align="center">
         {title}
       </Txt>
     </Press3D>

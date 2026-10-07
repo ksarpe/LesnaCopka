@@ -8,16 +8,22 @@
  *   /?scenario=designReward          04 (nagroda z makiety)
  *   /?scenario=designSummary         05 (podsumowanie z makiety)
  *   /?scenario=start&path=/gminy     dowolna ścieżka po wczytaniu scenariusza
+ *   /?scenario=newUser               onboarding (nowy gracz); &onboarding=0 – od razu Start nowego gracza
+ *   /?onboarding=1                   onboarding na bieżącym stanie (bez scenariusza); onboarding=0 – pomija go
  * Nadpisania symulacji (łączą się ze scenariuszem):
  *   src=device (prawdziwy GPS; domyślnie symulacja – powtarzalne zrzuty) · point=coarse|abroad
+ *   camSrc=device (prawdziwy aparat; domyślnie paskowany placeholder z makiety)
  *   gps=0 · net=0 · loc=denied|undetermined · cam=denied|undetermined
  *   species=<id> · rarity=<rzadkość> · xxl=1|0 · poison=1 · low=1 · xp=<XP w poziomie>
+ * Prognoza grzybowa: pozycja z symulacji nie pyta Open-Meteo – Supraśl ma stałą prognozę z makiety
+ * („Prognoza grzybowa 4/5”, „2 dni po deszczu”), patrz src/services/mock/weather.ts.
  */
 import { router } from 'expo-router';
 
 import { useRegionStore } from '@/hooks/useRegion';
 import type { Services } from '@/services/types';
 import { claimFind, createPendingFind, loadScenario, type Scenario } from '@/store/game';
+import { devShowOnboarding, devSkipOnboarding } from '@/store/onboarding';
 import { useSimStore } from '@/store/useSimStore';
 import { useUserStore } from '@/store/useUserStore';
 import type { Identification, Rarity } from '@/types';
@@ -44,15 +50,26 @@ const BASE: Record<string, Scenario> = {
 
 export async function applyDevLink(params: URLSearchParams, services: Services) {
   const scenario = params.get('scenario');
-  if (!scenario || !BASE[scenario]) return;
+  const onboarding = params.get('onboarding');
+  if (!scenario || !BASE[scenario]) {
+    if (onboarding === '1') devShowOnboarding();
+    if (onboarding === '0') devSkipOnboarding();
+    return;
+  }
   const tripId = loadScenario(BASE[scenario]);
+  // Scenariusz „Nowy użytkownik” zaczyna od onboardingu, pozostałe go pomijają – chyba że link mówi inaczej.
+  if (onboarding === '1') devShowOnboarding();
+  if (onboarding === '0') devSkipOnboarding();
   services.dev?.reset({ emptyFeed: scenario === 'newUser' });
   useRegionStore.getState().set({ status: 'idle', region: null });
 
   // Nadpisania symulacji.
   const sim = useSimStore.getState();
   const p = (k: string) => params.get(k);
-  sim.set({ locationSource: p('src') === 'device' ? 'device' : 'sim' });
+  sim.set({
+    locationSource: p('src') === 'device' ? 'device' : 'sim',
+    cameraSource: p('camSrc') === 'device' ? 'device' : 'sim',
+  });
   if (p('point') === 'coarse' || p('point') === 'abroad') sim.set({ simPoint: p('point') as 'coarse' });
   if (p('scanAt')) sim.set({ scanFreezeAt: Number(p('scanAt')) });
   if (p('gps') === '0') sim.set({ gpsEnabled: false });

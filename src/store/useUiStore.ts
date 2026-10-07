@@ -49,8 +49,41 @@ export const useUiStore = create<UiState>()((set) => ({
   closeDialog: () => set({ dialog: null }),
 }));
 
+/**
+ * Dialog z wyborem jako obietnica: wartość wybranej akcji albo null, gdy dialog zamknięto inaczej (tło, wstecz).
+ * Akcja przychodzi po zamknięciu dialogu z opóźnieniem (UiHost) – zamknięcie „bez wyboru” czekamy dłużej.
+ */
+function choose<T extends string>(opts: {
+  title: string;
+  message?: string;
+  icon?: IconName;
+  actions: { label: string; style?: DialogAction['style']; value: T | null }[];
+}): Promise<T | null> {
+  return new Promise((resolve) => {
+    let done = false;
+    let unsub = () => {};
+    const finish = (v: T | null) => {
+      if (done) return;
+      done = true;
+      unsub();
+      resolve(v);
+    };
+    useUiStore.getState().showDialog({
+      title: opts.title,
+      message: opts.message,
+      icon: opts.icon,
+      actions: opts.actions.map((a) => ({ label: a.label, style: a.style, onPress: () => finish(a.value) })),
+    });
+    const id = useUiStore.getState().dialog?.id;
+    unsub = useUiStore.subscribe((s) => {
+      if (s.dialog?.id !== id) setTimeout(() => finish(null), 600);
+    });
+  });
+}
+
 /** Skróty dla ekranów. */
 export const ui = {
+  choose,
   toast: (text: string, icon?: IconName) => useUiStore.getState().showToast(text, icon),
   soon: (what?: string) => useUiStore.getState().showToast(what ? `${what} – wkrótce` : 'Wkrótce', 'schedule'),
   confirm: (opts: {

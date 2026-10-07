@@ -1,7 +1,9 @@
-import { router } from 'expo-router';
+import { CameraView } from 'expo-camera';
+import { LinearGradient } from 'expo-linear-gradient';
+import { router, useIsFocused } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { AppState, Platform, Pressable, StyleSheet, View, type LayoutRectangle } from 'react-native';
 import Animated, {
   Easing,
   FadeIn,
@@ -10,6 +12,7 @@ import Animated, {
   withRepeat,
   withTiming,
 } from 'react-native-reanimated';
+import Svg, { Path } from 'react-native-svg';
 
 import { hapticLight } from '@/components/Button3D';
 import { Icon } from '@/components/Icon';
@@ -22,6 +25,8 @@ import { UiHost } from '@/components/UiHost';
 import { detectRegion, useRegionStore } from '@/hooks/useRegion';
 import { useBottomPadding, useTopInset } from '@/hooks/useInsets';
 import { ServiceError, useServices } from '@/services';
+import { captureFindPhoto, isCameraAvailable } from '@/services/live/camera';
+import { deleteFindPhoto } from '@/services/live/findPhotos';
 import { createPendingFind } from '@/store/game';
 import { useSimStore } from '@/store/useSimStore';
 import { ui } from '@/store/useUiStore';
@@ -41,6 +46,10 @@ type Phase = 'permission' | 'denied' | 'scanning' | 'ready' | 'analyzing' | 'err
 
 const RING = 270;
 const RING_THICK = 13.5;
+/** Kadr wewnątrz pierścienia – tam, gdzie w makiecie placeholder „grzyb w kadrze”. */
+const FRAME_INSET = 26;
+/** Gdy aparat nie zgłosi gotowości, symulowany skan i tak rusza. */
+const CAMERA_READY_TIMEOUT_MS = 5000;
 
 export default function ScanScreen() {
   const services = useServices();
@@ -48,25 +57,64 @@ export default function ScanScreen() {
   const bottom = useBottomPadding(40);
   const camPerm = useSimStore((s) => s.permissions.camera);
   const devMode = useSimStore((s) => s.devMode);
+  // Źródło obrazu na czas skanu: prawdziwy aparat albo paskowany placeholder z makiety (panel dev / dev-linki).
+  const [simCamera] = useState(() => useSimStore.getState().cameraSource === 'sim');
   const [phase, setPhase] = useState<Phase>(camPerm === 'granted' ? 'scanning' : 'permission');
   const [pct, setPct] = useState(0);
   const [parts, setParts] = useState<ScanPart[]>([]);
   const [flash, setFlash] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Aparat: zgoda, błąd podglądu (brak kamery / getUserMedia / symulator), zdjęcie już zrobione.
+  const [camGranted, setCamGranted] = useState(false);
+  const [camFailed, setCamFailed] = useState(false);
+  const [shot, setShot] = useState(false);
+  const [appActive, setAppActive] = useState(AppState.currentState !== 'background');
+  const [frame, setFrame] = useState<LayoutRectangle | null>(null);
+  const focused = useIsFocused();
   const progress = useSharedValue(0);
   const abortRef = useRef<AbortController | null>(null);
   const resultRef = useRef<ScanResult | null>(null);
   const partsRef = useRef<ScanPart[]>([]);
+  const cameraRef = useRef<CameraView>(null);
+  const readyRef = useRef(false);
+  const failedRef = useRef(false);
+  const pendingStartRef = useRef(false);
+  const readyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Skan ze zdjęciem po spuście – „Spróbuj ponownie” po błędzie sieci nie robi nowego zdjęcia. */
+  const capturedRef = useRef<ScanResult | null>(null);
+  /** Zdjęcie przekazane do znaleziska – od tej chwili sprząta je game.ts (porzucenie znaleziska). */
+  const handedOffRef = useRef(false);
+  /** Ekran zamknięty w trakcie analizy (np. „wstecz” na Androidzie) – wynik trafia do kosza. */
+  const unmountedRef = useRef(false);
+  const busyRef = useRef(false);
+
+  const liveView = !simCamera && !camFailed;
+  // Podgląd tylko na widocznym, aktywnym ekranie – w tle, po wyjściu i po zdjęciu aparat jest zwolniony.
+  const cameraOn = liveView && camGranted && !shot && focused && appActive;
+
+  useEffect(() => {
+    if (!cameraOn) readyRef.current = false;
+  }, [cameraOn]);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => setAppActive(s !== 'background'));
+    return () => sub.remove();
+  }, []);
+
+  const resetScan = useCallback(() => {
+    resultRef.current = null;
+    partsRef.current = [];
+    setPhase('scanning');
+    setPct(0);
+    setParts([]);
+    progress.set(0);
+  }, [progress]);
 
   const runScan = useCallback(() => {
     abortRef.current?.abort();
     const ctrl = new AbortController();
     abortRef.current = ctrl;
-    resultRef.current = null;
-    setPhase('scanning');
-    setPct(0);
-    setParts([]);
-    progress.set(0);
+    resetScan();
     let lastParts = 0;
     services.scan
       .startScan(
@@ -87,42 +135,173 @@ export default function ScanScreen() {
         setPhase('ready');
       })
       .catch(() => {});
-  }, [services, progress]);
+  }, [services, progress, resetScan]);
 
-  // Uprawnienie do aparatu (mockowy prompt systemowy przy pierwszym skanie).
+  /** Symulowany skan rusza, gdy podgląd jest gotowy (albo wiadomo, że go nie będzie). */
+  const startWhenReady = useCallback(() => {
+    if (readyTimerRef.current) clearTimeout(readyTimerRef.current);
+    resetScan();
+    if (simCamera || failedRef.current || readyRef.current) {
+      pendingStartRef.current = false;
+      runScan();
+      return;
+    }
+    pendingStartRef.current = true;
+    readyTimerRef.current = setTimeout(() => {
+      if (!pendingStartRef.current) return;
+      pendingStartRef.current = false;
+      runScan();
+    }, CAMERA_READY_TIMEOUT_MS);
+  }, [simCamera, resetScan, runScan]);
+
+  const flushPendingStart = useCallback(() => {
+    if (!pendingStartRef.current) return;
+    pendingStartRef.current = false;
+    if (readyTimerRef.current) clearTimeout(readyTimerRef.current);
+    runScan();
+  }, [runScan]);
+
+  const onCameraReady = useCallback(() => {
+    // Web po błędzie getUserMedia zgłasza też „gotowość” – zostajemy wtedy przy placeholderze.
+    if (failedRef.current) return;
+    readyRef.current = true;
+    flushPendingStart();
+  }, [flushPendingStart]);
+
+  // Brak kamery / błąd podglądu (np. symulator, kamera zajęta) – placeholder, a skan idzie dalej bez zdjęcia.
+  const onMountError = useCallback(() => {
+    failedRef.current = true;
+    readyRef.current = false;
+    setCamFailed(true);
+    setFlash(false);
+    flushPendingStart();
+  }, [flushPendingStart]);
+
+  const onGranted = useCallback(() => {
+    setCamGranted(true);
+    startWhenReady();
+  }, [startWhenReady]);
+
+  // Uprawnienie do aparatu: w symulacji mockowy prompt przy pierwszym skanie, z aparatem urządzenia – systemowe
+  // (bez promptu, gdy już rozstrzygnięte).
   useEffect(() => {
+    unmountedRef.current = false;
     let alive = true;
     (async () => {
-      const st = camPerm === 'undetermined' ? await services.permissions.request('camera') : camPerm;
+      // Brak kamery (web bez urządzenia albo bez https) – od razu placeholder, bez pytania o zgodę.
+      if (!simCamera && !(await isCameraAvailable())) {
+        if (!alive) return;
+        failedRef.current = true;
+        setCamFailed(true);
+        runScan();
+        return;
+      }
+      const st = simCamera && camPerm !== 'undetermined' ? camPerm : await services.permissions.request('camera');
       if (!alive) return;
-      if (st === 'granted') runScan();
+      if (st === 'granted') onGranted();
       else setPhase('denied');
     })();
     return () => {
       alive = false;
+      unmountedRef.current = true;
       abortRef.current?.abort();
+      if (readyTimerRef.current) clearTimeout(readyTimerRef.current);
+      // Zdjęcie, które nie trafiło do znaleziska (np. błąd sieci i zamknięcie skanu), nie zostaje na dysku.
+      const photo = capturedRef.current?.photoUri;
+      if (photo && !handedOffRef.current) deleteFindPhoto(photo);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Powrót z ustawień telefonu po odmowie – jeśli zgoda jest już nadana, skan rusza sam.
+  useEffect(() => {
+    if (simCamera || phase !== 'denied' || !appActive || !services.permissions.refresh) return;
+    let alive = true;
+    services.permissions
+      .refresh('camera')
+      .then((st) => {
+        if (alive && st === 'granted') onGranted();
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [simCamera, phase, appActive, services, onGranted]);
+
+  const openSettings = async () => {
+    const perms = services.permissions;
+    if (!perms.openSettings) {
+      ui.toast('Ustawienia › Grzybobranie › Aparat', 'settings');
+      return;
+    }
+    const st = await perms.openSettings('camera');
+    if (st === 'granted') onGranted();
+    else if (!simCamera && Platform.OS === 'web') {
+      ui.toast('Zezwól na aparat w ustawieniach strony (ikona obok adresu) i spróbuj ponownie', 'settings');
+    }
+  };
+
   const analyze = async () => {
-    const scan = resultRef.current ?? services.scan.capturePartial(partsRef.current);
+    if (busyRef.current) return;
+    busyRef.current = true;
     abortRef.current?.abort();
+    pendingStartRef.current = false;
     setPhase('analyzing');
     try {
+      let scan = capturedRef.current;
+      if (!scan) {
+        const base = resultRef.current ?? services.scan.capturePartial(partsRef.current);
+        // Zdjęcie spustem, gdy podgląd działa. Błąd zdjęcia nigdy nie blokuje rozpoznania.
+        const cam = cameraRef.current;
+        const photoUri = cam && readyRef.current ? await captureFindPhoto(cam) : undefined;
+        if (unmountedRef.current) {
+          if (photoUri) deleteFindPhoto(photoUri);
+          return;
+        }
+        scan = photoUri ? { ...base, photoUri } : base;
+        capturedRef.current = scan;
+        setShot(true);
+      }
       let region = useRegionStore.getState().region;
       if (!region) region = await detectRegion(services, { askPermission: false });
       const gminaId = region?.gmina.id ?? useUserStore.getState().user.homeGminaId;
       const id = await services.identify.identify(scan);
-      const find = createPendingFind(id, gminaId);
+      // Zamknięty ekran: zdjęcie skasował już cleanup, a router.replace podmieniłby ekran, na którym jest gracz.
+      if (unmountedRef.current) return;
+      const find = createPendingFind(id, gminaId, { photoUri: scan.photoUri, parts: scan.parts });
+      handedOffRef.current = true;
       router.replace(`/analysis/${find.id}`);
     } catch (e) {
+      if (unmountedRef.current) return;
       setError(e instanceof ServiceError ? e.message : 'Nie udało się rozpoznać grzyba');
       setPhase('error');
+    } finally {
+      busyRef.current = false;
     }
   };
 
+  /** „Zeskanuj od nowa” po błędzie: zdjęcie do kosza, aparat wraca. */
+  const rescan = () => {
+    const photo = capturedRef.current?.photoUri;
+    capturedRef.current = null;
+    if (photo) deleteFindPhoto(photo);
+    setShot(false);
+    startWhenReady();
+  };
+
   const canShoot = phase === 'ready' || (devMode && phase === 'scanning');
+  // Latarka: w symulacji jak w makiecie, z aparatem – tylko natywnie i przy działającym podglądzie.
+  const torchOk = simCamera || (cameraOn && Platform.OS !== 'web');
+  const camLabel = simCamera ? 'podgląd kamery' : camFailed ? 'podgląd kamery niedostępny' : ' ';
+
+  const onFlash = () => {
+    if (!torchOk) {
+      ui.toast(!simCamera && Platform.OS === 'web' ? 'Latarka niedostępna w przeglądarce' : 'Latarka niedostępna', 'flash_off');
+      return;
+    }
+    setFlash((f) => !f);
+    ui.toast(flash ? 'Latarka wyłączona' : 'Latarka włączona', 'flash_on');
+  };
 
   const onClose = () => {
     const inProgress = (phase === 'scanning' && pct > 0) || phase === 'ready';
@@ -149,7 +328,18 @@ export default function ScanScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: colors.camera }}>
       <StatusBar style="light" />
-      <Placeholder variant="camera" stripe={12} style={StyleSheet.absoluteFill} />
+      {liveView ? null : <Placeholder variant="camera" stripe={12} style={StyleSheet.absoluteFill} />}
+      {cameraOn ? (
+        <CameraView
+          ref={cameraRef}
+          style={StyleSheet.absoluteFill}
+          facing="back"
+          enableTorch={flash && Platform.OS !== 'web'}
+          onCameraReady={onCameraReady}
+          onMountError={onMountError}
+        />
+      ) : null}
+      {liveView ? <CameraScrim frame={frame} /> : null}
       <View style={{ flex: 1, paddingTop: top + 8, paddingHorizontal: 20, paddingBottom: bottom, gap: 18 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
           <IconButton icon="close" variant="dark" onPress={onClose} accessibilityLabel="Zamknij skan" />
@@ -160,20 +350,20 @@ export default function ScanScreen() {
             icon="flash_on"
             variant="dark"
             iconSize={22}
-            filled={flash}
-            active={flash}
-            onPress={() => {
-              setFlash((f) => !f);
-              ui.toast(flash ? 'Latarka wyłączona' : 'Latarka włączona', 'flash_on');
-            }}
+            filled={flash && torchOk}
+            active={flash && torchOk}
+            onPress={onFlash}
             accessibilityLabel="Latarka"
           />
         </View>
         <Txt f="mono" size={11} color={colors.cameraLabel} align="center">
-          podgląd kamery
+          {camLabel}
         </Txt>
 
-        <View style={{ width: RING, height: RING, alignSelf: 'center', marginTop: 6 }}>
+        <View
+          onLayout={(e) => setFrame(e.nativeEvent.layout)}
+          style={{ width: RING, height: RING, alignSelf: 'center', marginTop: 6 }}
+        >
           <ProgressRing
             size={RING}
             thickness={RING_THICK}
@@ -183,12 +373,24 @@ export default function ScanScreen() {
             style={StyleSheet.absoluteFill}
           />
           <ScanSweep size={RING} thickness={RING_THICK} running={phase === 'scanning' || phase === 'ready'} />
-          <Placeholder
-            variant="dark"
-            stripe={8}
-            label="grzyb w kadrze"
-            style={{ position: 'absolute', left: 26, top: 26, right: 26, bottom: 26, borderRadius: 109 }}
-          />
+          {liveView ? (
+            // Na żywym obrazie kadr jest przezroczysty – tylko cienka przerywana linia.
+            <View style={styles.frame} />
+          ) : (
+            <Placeholder
+              variant="dark"
+              stripe={8}
+              label="grzyb w kadrze"
+              style={{
+                position: 'absolute',
+                left: FRAME_INSET,
+                top: FRAME_INSET,
+                right: FRAME_INSET,
+                bottom: FRAME_INSET,
+                borderRadius: RING / 2 - FRAME_INSET,
+              }}
+            />
+          )}
           {parts.length > 0 ? (
             <Animated.View
               entering={FadeIn.duration(200)}
@@ -276,9 +478,41 @@ export default function ScanScreen() {
       </View>
 
       {phase === 'analyzing' ? <Analyzing /> : null}
-      {phase === 'denied' ? <CameraDenied /> : null}
-      {phase === 'error' ? <ScanError message={error} onRetry={analyze} onRescan={runScan} /> : null}
+      {phase === 'denied' ? <CameraDenied onOpenSettings={openSettings} /> : null}
+      {phase === 'error' ? <ScanError message={error} onRetry={analyze} onRescan={rescan} /> : null}
       <UiHost />
+    </View>
+  );
+}
+
+/** Kolor przyciemnienia nad żywym obrazem (zieleń z tła aparatu). */
+const SCRIM = '16,22,12';
+
+/**
+ * Czytelność UI na żywym obrazie: lekkie przyciemnienie poza pierścieniem (wnętrze kadru zostaje czyste)
+ * i gradienty pod nagłówkiem oraz pod procentem, częściami grzyba, podpowiedzią i spustem.
+ */
+function CameraScrim({ frame }: { frame: LayoutRectangle | null }) {
+  const r = RING / 2 - RING_THICK;
+  const cx = frame ? frame.x + frame.width / 2 : 0;
+  const cy = frame ? frame.y + frame.height / 2 : 0;
+  const hole = `M${cx - r} ${cy}a${r} ${r} 0 1 0 ${2 * r} 0a${r} ${r} 0 1 0 ${-2 * r} 0Z`;
+  return (
+    <View style={[StyleSheet.absoluteFill, { pointerEvents: 'none' }]}>
+      {frame ? (
+        <Svg width="100%" height="100%" style={StyleSheet.absoluteFill}>
+          <Path d={`M-4000 -4000H4000V4000H-4000Z${hole}`} fill={`rgb(${SCRIM})`} fillOpacity={0.3} fillRule="evenodd" />
+        </Svg>
+      ) : null}
+      <LinearGradient
+        colors={[`rgba(${SCRIM},0.6)`, `rgba(${SCRIM},0)`]}
+        style={{ position: 'absolute', left: 0, right: 0, top: 0, height: 190 }}
+      />
+      <LinearGradient
+        colors={[`rgba(${SCRIM},0)`, `rgba(${SCRIM},0.6)`, `rgba(${SCRIM},0.82)`]}
+        locations={[0, 0.35, 1]}
+        style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: '52%' }}
+      />
     </View>
   );
 }
@@ -367,7 +601,7 @@ function Analyzing() {
   );
 }
 
-function CameraDenied() {
+function CameraDenied({ onOpenSettings }: { onOpenSettings: () => void }) {
   return (
     <View style={[StyleSheet.absoluteFill, styles.overlay, { gap: 12, paddingHorizontal: 32 }]}>
       <View style={styles.bigIcon}>
@@ -379,10 +613,7 @@ function CameraDenied() {
       <Txt f="n6" size={14} color={colors.onDarkSoft} align="center">
         Skan 360° potrzebuje aparatu, żeby rozpoznać gatunek. Zdjęcia nie opuszczają telefonu bez Twojej zgody.
       </Txt>
-      <Pressable
-        onPress={() => ui.toast('Ustawienia › Grzybobranie › Aparat (symulacja: panel dev)', 'settings')}
-        style={styles.darkBtn}
-      >
+      <Pressable onPress={onOpenSettings} style={styles.darkBtn}>
         <Txt f="b7" size={17} color={colors.primaryInk}>
           Otwórz ustawienia
         </Txt>
@@ -423,6 +654,17 @@ function ScanError({ message, onRetry, onRescan }: { message: string | null; onR
 }
 
 const styles = StyleSheet.create({
+  frame: {
+    position: 'absolute',
+    left: FRAME_INSET,
+    top: FRAME_INSET,
+    right: FRAME_INSET,
+    bottom: FRAME_INSET,
+    borderRadius: RING / 2 - FRAME_INSET,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: 'rgba(244,248,236,0.55)',
+  },
   overlay: {
     backgroundColor: 'rgba(20,28,16,0.94)',
     alignItems: 'center',

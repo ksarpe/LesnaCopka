@@ -4,12 +4,15 @@ import { View } from 'react-native';
 import { Button3D } from '@/components/Button3D';
 import { Icon } from '@/components/Icon';
 import { Screen } from '@/components/Screen';
+import { SpeciesSeasonSection } from '@/components/SpeciesSeason';
 import {
   GminaSeasonCard,
   isPoisonous,
+  LookalikeList,
   PoisonBanner,
-  SafetyBanner,
+  ProtectedBanner,
   Sheet,
+  SpeciesAbout,
   SpeciesHero,
   SpeciesTags,
   SpeciesTitle,
@@ -19,9 +22,12 @@ import { Txt } from '@/components/Txt';
 import { useAsync } from '@/hooks/useAsync';
 import { useServices } from '@/services';
 import { useCatalogStore } from '@/store/useCatalogStore';
+import { useTripStore } from '@/store/useTripStore';
 import { useUserStore } from '@/store/useUserStore';
 import { colors } from '@/theme/tokens';
+import { latestSpeciesPhoto } from '@/utils/findPhoto';
 import { fmtDayMonth, fmtWeight } from '@/utils/format';
+import { speciesLookalikes } from '@/utils/species';
 
 /** Karta gatunku z atlasu – layout ekranu Analiza w trybie tylko do odczytu. */
 export default function SpeciesScreen() {
@@ -29,6 +35,8 @@ export default function SpeciesScreen() {
   const { stats } = useServices();
   const species = useCatalogStore((s) => s.speciesById[speciesId]);
   const entry = useUserStore((s) => s.atlas[speciesId]);
+  // Najnowsze zdjęcie gracza tego gatunku (z aparatu) – zamiast paskowanego placeholdera.
+  const photoUri = useTripStore((s) => latestSpeciesPhoto(s.finds, speciesId));
   const homeId = useUserStore((s) => s.user.homeGminaId);
   const gmina = useCatalogStore((s) => s.gminaById[homeId]);
   const typical = species?.typical;
@@ -60,12 +68,16 @@ export default function SpeciesScreen() {
 
   return (
     <Screen hero>
-      <SpeciesHero rarity={species.rarity} onBack={back} label="zdjęcie z Twojego atlasu" />
+      <SpeciesHero rarity={species.rarity} onBack={back} label={entry ? 'zdjęcie z Twojego atlasu' : 'zdjęcie gatunku'} photoUri={photoUri} />
       <Sheet>
         <SpeciesTitle species={species} />
         <SpeciesTags species={species} />
         {isPoisonous(species.edibility) ? <PoisonBanner deadly={species.edibility === 'smiertelny'} /> : null}
-        {species.lookalike ? <SafetyBanner lookalike={species.lookalike} /> : null}
+        {species.protection ? <ProtectedBanner protection={species.protection} /> : null}
+        <SpeciesAbout species={species} />
+        <LookalikeList lookalikes={speciesLookalikes(species)} />
+        {/* ── Sezon i występowanie (wykres sezonu + mapa gatunku w województwie) – model szans (src/utils/chances.ts). ── */}
+        <SpeciesSeasonSection species={species} />
         <StatGrid
           items={[
             { label: 'W atlasie', value: entry ? `×${entry.count}` : '—' },
@@ -74,7 +86,13 @@ export default function SpeciesScreen() {
             { label: 'Typowa wysokość', value: `${species.typical.heightCm} cm` },
           ]}
         />
-        <GminaSeasonCard gminaName={gmina?.name ?? '—'} data={pct.data} loading={pct.loading} error={!!pct.error} />
+        <GminaSeasonCard
+          gminaName={gmina?.name ?? '—'}
+          data={pct.data}
+          loading={pct.loading}
+          error={!!pct.error}
+          emptyText="Nikt jeszcze nie zebrał tu tego gatunku w tym sezonie."
+        />
         <View style={{ flexDirection: 'row', gap: 8, alignItems: 'flex-start', paddingHorizontal: 4, paddingBottom: 8 }}>
           <Icon name="menu_book" size={16} color={colors.muted} />
           <Txt f="n6" size={12} color={colors.muted} style={{ flex: 1 }}>

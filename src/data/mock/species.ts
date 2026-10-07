@@ -1,19 +1,18 @@
 import type { Species } from '@/types';
 
-/** Łączna liczba gatunków w atlasie (pozostałe „istnieją na serwerze”). */
-export const TOTAL_SPECIES = 120;
-
-const GORYCZAK = {
-  name: 'goryczak żółciowy',
-  edibility: 'niejadalny' as const,
-  tip: 'Sprawdź siateczkę na trzonie i kolor rurek.',
-};
-
 /**
- * Katalog gatunków w kolejności atlasu. Pierwsze 9 pozycji odpowiada siatce z makiety
- * (borowik, podgrzybek, kania, muchomor czerwony, pieprznik, rydz, ???, zielonawy, ???).
+ * Katalog gatunków w kolejności atlasu (120: 55 pospolitych, 35 rzadkich, 20 epickich, 10 legendarnych).
+ * Pierwsze 9 pozycji odpowiada siatce z makiety (borowik, podgrzybek, kania, muchomor czerwony, pieprznik, rydz, ???,
+ * zielonawy, ???); pierwsze 36 to gatunki sprzed rozbudowy katalogu (id zostają – atlas graczy, osiągnięcia, baza).
+ *
+ * Treść (nazwy, jadalność, sezon, siedliska, opisy, sobowtóry) sprawdzona w źródłach – docs/species-sources.md.
+ * Jadalność konserwatywna: wątpliwe / jadalne tylko po specjalnym przygotowaniu → ostrzeżenie w opisie albo „niejadalny”.
+ * Ochrona (`protection`) – rozporządzenie Ministra Środowiska z 9 października 2014 r. w sprawie ochrony gatunkowej
+ * grzybów (Dz.U. 2014 poz. 1408): gatunek chroniony nie trafia do koszyka (tylko zdjęcie, jak trujący).
+ * `lookalike` = pierwszy z `lookalikes` (zgodność; para do osiągnięcia „Mistrz sobowtórów”) – uzupełniany niżej.
+ * Baza: npm run db:seed (scripts/gen-seed.ts) → supabase/seed.sql.
  */
-export const SPECIES: Species[] = [
+const CATALOG: Species[] = [
   {
     id: 'borowik-szlachetny',
     name: 'Borowik szlachetny',
@@ -22,8 +21,23 @@ export const SPECIES: Species[] = [
     rarity: 'rzadki',
     edibility: 'jadalny',
     habitat: 'Las iglasty',
-    lookalike: GORYCZAK,
+    habitats: ['iglasty', 'mieszany', 'lisciasty'],
     typical: { capCm: 12, heightCm: 14, weightG: 320 },
+    seasonWeights: [0, 0, 0, 0, 0.1, 0.3, 0.5, 0.8, 1, 0.8, 0.2, 0],
+    description:
+      'Kapelusz jasno- do ciemnobrązowego, rurki białe, z wiekiem żółtooliwkowe. Gruby, beczułkowaty trzon z białą siateczką w górnej części. Miąższ biały, nie zmienia barwy, smak łagodny, orzechowy.',
+    lookalikes: [
+      {
+        name: 'goryczak żółciowy',
+        edibility: 'niejadalny',
+        tip: 'Goryczak ma różowawe rurki, ciemną siateczkę na trzonie i bardzo gorzki smak – borowik ma siateczkę białą.',
+      },
+      {
+        name: 'borowik usiatkowany',
+        edibility: 'jadalny',
+        tip: 'Borowik usiatkowany ma matowy, często spękany kapelusz i siateczkę na całym trzonie; rośnie latem pod dębami i bukami.',
+      },
+    ],
   },
   {
     id: 'podgrzybek-brunatny',
@@ -33,8 +47,23 @@ export const SPECIES: Species[] = [
     rarity: 'pospolity',
     edibility: 'jadalny',
     habitat: 'Las iglasty',
-    lookalike: { ...GORYCZAK, tip: 'Goryczak ma różowawe rurki i ciemną siateczkę na trzonie.' },
+    habitats: ['iglasty', 'mieszany'],
     typical: { capCm: 9, heightCm: 10, weightG: 120 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.1, 0.3, 0.6, 1, 0.9, 0.4, 0.05],
+    description:
+      'Kapelusz kasztanowobrązowy, w wilgoci lepki. Rurki kremowe do oliwkowożółtych, po uciśnięciu sinieją. Trzon jaśniejszy, prążkowany, bez siateczki; miąższ biały, lekko sinieje. Nie jeść na surowo.',
+    lookalikes: [
+      {
+        name: 'goryczak żółciowy',
+        edibility: 'niejadalny',
+        tip: 'Goryczak ma różowawe rurki, które nie sinieją, ciemną siateczkę na trzonie i gorzki smak.',
+      },
+      {
+        name: 'piaskowiec kasztanowaty',
+        edibility: 'jadalny',
+        tip: 'Piaskowiec ma kruchy, pusty w środku trzon i białe rurki, które nie sinieją.',
+      },
+    ],
   },
   {
     id: 'czubajka-kania',
@@ -44,12 +73,28 @@ export const SPECIES: Species[] = [
     rarity: 'epicki',
     edibility: 'jadalny',
     habitat: 'Polany i skraje lasu',
-    lookalike: {
-      name: 'muchomor sromotnikowy',
-      edibility: 'smiertelny',
-      tip: 'Kania ma ruchomy pierścień i wężykowaty wzór na trzonie, bez pochwy u podstawy.',
-    },
+    habitats: ['mieszany', 'laka', 'iglasty'],
     typical: { capCm: 24, heightCm: 28, weightG: 220 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.1, 0.4, 0.8, 1, 0.6, 0.1, 0],
+    description:
+      'Duży kapelusz z ciemnym garbkiem i brązowymi łuskami na jasnym tle, blaszki białe, wolne. Wysoki trzon z wężykowatym wzorem, gruby ruchomy pierścień, bulwiasta nasada bez pochwy. Zbieraj tylko duże, rozpostarte okazy – młode łatwo pomylić z muchomorami.',
+    lookalikes: [
+      {
+        name: 'muchomor sromotnikowy',
+        edibility: 'smiertelny',
+        tip: 'Kania ma ruchomy pierścień i wężykowaty wzór na trzonie; muchomor ma gładki kapelusz i workowatą pochwę u nasady.',
+      },
+      {
+        name: 'czubajeczka brązowoczerwona',
+        edibility: 'smiertelny',
+        tip: 'Czubajeczki są małe (kapelusz do ok. 5 cm) i nie mają grubego, ruchomego pierścienia – zbieraj tylko duże kanie.',
+      },
+      {
+        name: 'muchomor plamisty',
+        edibility: 'trujacy',
+        tip: 'Muchomor plamisty ma białe kosmki zamiast brązowych łusek, gładki trzon i bulwę z obrzeżeniem.',
+      },
+    ],
   },
   {
     id: 'muchomor-czerwony',
@@ -59,7 +104,23 @@ export const SPECIES: Species[] = [
     rarity: 'pospolity',
     edibility: 'trujacy',
     habitat: 'Las mieszany',
+    habitats: ['mieszany', 'iglasty', 'lisciasty'],
     typical: { capCm: 13, heightCm: 16, weightG: 180 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.1, 0.3, 0.7, 1, 0.8, 0.2, 0],
+    description:
+      'Czerwony do pomarańczowego kapelusz z białymi, łatwo zmywanymi kosmkami; blaszki białe. Biały trzon z pierścieniem i bulwą otoczoną pierścieniami brodawek. Trujący – kwas ibotenowy i muscymol wywołują zaburzenia neurologiczne.',
+    lookalikes: [
+      {
+        name: 'gołąbek wymiotny',
+        edibility: 'trujacy',
+        tip: 'Gołąbek nie ma pierścienia, bulwy ani kosmków, a jego biały trzon jest kruchy jak kreda.',
+      },
+      {
+        name: 'muchomor cesarski',
+        edibility: 'jadalny',
+        tip: 'Cesarski ma żółte blaszki, trzon i pierścień oraz białą, workowatą pochwę; w Polsce praktycznie nie rośnie.',
+      },
+    ],
   },
   {
     id: 'pieprznik-jadalny',
@@ -69,13 +130,19 @@ export const SPECIES: Species[] = [
     rarity: 'pospolity',
     edibility: 'jadalny',
     habitat: 'Las mieszany',
+    habitats: ['mieszany', 'iglasty', 'lisciasty'],
     clustered: true,
-    lookalike: {
-      name: 'lisówka pomarańczowa',
-      edibility: 'niejadalny',
-      tip: 'Kurka ma grube, rozwidlone listewki zamiast cienkich blaszek.',
-    },
     typical: { capCm: 5, heightCm: 6, weightG: 14 },
+    seasonWeights: [0, 0, 0, 0, 0.05, 0.4, 0.9, 1, 0.8, 0.4, 0.1, 0],
+    description:
+      'Cały owocnik żółty do jajowożółtego. Pod kapeluszem grube, widlasto rozgałęzione listewki zbiegające na trzon zamiast blaszek. Miąższ białawy, zwarty, zapach owocowy (morelowy), smak lekko pieprzny.',
+    lookalikes: [
+      {
+        name: 'lisówka pomarańczowa',
+        edibility: 'niejadalny',
+        tip: 'Kurka ma grube, rozwidlone listewki zamiast cienkich, gęstych blaszek; lisówka jest pomarańczowa, miękka i cienkomięsista.',
+      },
+    ],
   },
   {
     id: 'mleczaj-rydz',
@@ -85,12 +152,23 @@ export const SPECIES: Species[] = [
     rarity: 'rzadki',
     edibility: 'jadalny',
     habitat: 'Młode bory sosnowe',
-    lookalike: {
-      name: 'mleczaj wełnianka',
-      edibility: 'trujacy',
-      tip: 'Rydz wydziela pomarańczowe mleczko; wełnianka – białe i ma kosmaty brzeg.',
-    },
+    habitats: ['iglasty'],
     typical: { capCm: 8, heightCm: 6, weightG: 90 },
+    seasonWeights: [0, 0, 0, 0, 0, 0, 0.1, 0.5, 1, 0.9, 0.3, 0],
+    description:
+      'Pomarańczowy kapelusz z ciemniejszymi, koncentrycznymi strefami, z czasem z zielonymi plamami. Po przełamaniu wydziela marchewkowe mleczko, które zielenieje. Trzon z dołeczkami. Rośnie pod sosnami, na piaszczystych glebach.',
+    lookalikes: [
+      {
+        name: 'mleczaj wełnianka',
+        edibility: 'trujacy',
+        tip: 'Rydz wydziela pomarańczowe mleczko; wełnianka – białe i piekące, ma też kosmaty, podwinięty brzeg kapelusza.',
+      },
+      {
+        name: 'mleczaj świerkowy',
+        edibility: 'jadalny',
+        tip: 'Mleczaj świerkowy rośnie pod świerkami, ma trzon bez dołeczków, a jego mleczko szybko czerwienieje.',
+      },
+    ],
   },
   {
     id: 'szmaciak-galezisty',
@@ -100,7 +178,23 @@ export const SPECIES: Species[] = [
     rarity: 'legendarny',
     edibility: 'jadalny',
     habitat: 'U podstawy sosen',
+    habitats: ['iglasty', 'drewno'],
     typical: { capCm: 30, heightCm: 20, weightG: 1400 },
+    seasonWeights: [0, 0, 0, 0, 0, 0, 0.2, 0.7, 1, 0.7, 0.2, 0],
+    description:
+      'Kremowy do jasnoochrowego, kalafiorowaty owocnik z mocno pofałdowanych, kędzierzawych płatów z ząbkowanymi brzegami. Rośnie u nasady sosen lub na ich korzeniach. Zbieraj tylko młode, jasne okazy i dokładnie oczyść z piasku.',
+    lookalikes: [
+      {
+        name: 'siedzuń dębowy',
+        edibility: 'jadalny',
+        tip: 'Siedzuń dębowy jest bledszy, ma szerokie, płaskie płaty i rośnie przy jodłach, świerkach lub dębach; jest pod ochroną.',
+      },
+      {
+        name: 'żagwica listkowata',
+        edibility: 'jadalny',
+        tip: 'Żagwica ma szarobrązowe, języczkowate kapelusiki z porami od spodu i rośnie przy dębach.',
+      },
+    ],
   },
   {
     id: 'muchomor-zielonawy',
@@ -110,7 +204,28 @@ export const SPECIES: Species[] = [
     rarity: 'rzadki',
     edibility: 'smiertelny',
     habitat: 'Lasy liściaste',
+    habitats: ['lisciasty', 'mieszany', 'park'],
     typical: { capCm: 9, heightCm: 12, weightG: 90 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.1, 0.4, 0.8, 1, 0.7, 0.2, 0],
+    description:
+      'Kapelusz oliwkowozielony do białawego, gładki, z promienistymi włókienkami. Blaszki zawsze białe, trzon z pierścieniem i workowatą pochwą u nasady. Amatoksyny – objawy dopiero po 8–16 h, potem niewydolność wątroby. Śmiertelny już w małej ilości.',
+    lookalikes: [
+      {
+        name: 'gołąbek zielonawy',
+        edibility: 'jadalny',
+        tip: 'Gołąbek ma kruchy trzon bez pierścienia i pochwy oraz spękaną w poletka skórkę kapelusza.',
+      },
+      {
+        name: 'gąska zielonka',
+        edibility: 'niejadalny',
+        tip: 'Gąska ma żółte blaszki i żółty trzon, bez pierścienia i pochwy u nasady.',
+      },
+      {
+        name: 'pieczarka polna',
+        edibility: 'jadalny',
+        tip: 'Pieczarka ma różowe, potem czekoladowe blaszki i nie ma pochwy – białe blaszki u dorosłego grzyba to alarm.',
+      },
+    ],
   },
   {
     id: 'smardz-jadalny',
@@ -120,12 +235,29 @@ export const SPECIES: Species[] = [
     rarity: 'epicki',
     edibility: 'jadalny',
     habitat: 'Wiosną, łęgi',
-    lookalike: {
-      name: 'piestrzenica kasztanowata',
-      edibility: 'smiertelny',
-      tip: 'Smardz ma pusty w środku owocnik i regularne komory na kapeluszu.',
-    },
+    habitats: ['lisciasty', 'park', 'laka'],
     typical: { capCm: 6, heightCm: 10, weightG: 60 },
+    seasonWeights: [0, 0, 0.1, 0.8, 1, 0.2, 0, 0, 0, 0, 0, 0],
+    protection: 'czesciowa',
+    description:
+      'Kapelusz jajowaty, żółto- do ochrowobrązowego, z nieregularnymi komorami jak plaster miodu, zrośnięty z trzonem. Cały owocnik pusty w środku. Rośnie wiosną w łęgach, często pod jesionami. Nie jeść na surowo. Gatunek pod ochroną częściową – nie zbieraj.',
+    lookalikes: [
+      {
+        name: 'piestrzenica kasztanowata',
+        edibility: 'smiertelny',
+        tip: 'Smardz ma regularne komory i jest całkowicie pusty; piestrzenica ma mózgowato pofałdowany kapelusz i jamki w środku.',
+      },
+      {
+        name: 'smardz stożkowaty',
+        edibility: 'jadalny',
+        tip: 'Smardz stożkowaty ma ciemniejszy, spiczasty kapelusz z równoległymi, podłużnymi żeberkami.',
+      },
+      {
+        name: 'naparstniczka czeska',
+        edibility: 'trujacy',
+        tip: 'Naparstniczka ma kapelusz przyrośnięty tylko na szczycie i watowaty miąższ w trzonie; smardz jest zrośnięty i cały pusty.',
+      },
+    ],
   },
   {
     id: 'maslak-zwyczajny',
@@ -135,7 +267,18 @@ export const SPECIES: Species[] = [
     rarity: 'pospolity',
     edibility: 'jadalny',
     habitat: 'Bory sosnowe',
+    habitats: ['iglasty'],
     typical: { capCm: 8, heightCm: 7, weightG: 70 },
+    seasonWeights: [0, 0, 0, 0, 0.1, 0.4, 0.6, 0.8, 1, 0.9, 0.4, 0.05],
+    description:
+      'Kapelusz czekoladowobrązowy, śliski i błyszczący, skórka łatwo schodzi. Rurki drobne, żółte. Na trzonie wyraźny, błoniasty pierścień, białawy do fioletowawego. Rośnie pod młodymi sosnami; przed przyrządzeniem zdejmij skórkę.',
+    lookalikes: [
+      {
+        name: 'maślak ziarnisty',
+        edibility: 'jadalny',
+        tip: 'Maślak ziarnisty nie ma pierścienia, a młode pory wydzielają mleczne kropelki.',
+      },
+    ],
   },
   {
     id: 'kozlarz-babka',
@@ -145,7 +288,23 @@ export const SPECIES: Species[] = [
     rarity: 'pospolity',
     edibility: 'jadalny',
     habitat: 'Pod brzozami',
+    habitats: ['lisciasty', 'mieszany'],
     typical: { capCm: 9, heightCm: 13, weightG: 110 },
+    seasonWeights: [0, 0, 0, 0, 0.05, 0.4, 0.7, 0.9, 1, 0.6, 0.1, 0],
+    description:
+      'Kapelusz szarobrązowy do brązowego, rurki białawe, potem szarobrązowe. Smukły, biały trzon pokryty ciemnymi, szorstkimi łuseczkami. Miąższ biały, nie zmienia barwy lub lekko różowieje. Rośnie tylko pod brzozami; najlepsze są młode okazy.',
+    lookalikes: [
+      {
+        name: 'koźlarz grabowy',
+        edibility: 'jadalny',
+        tip: 'Koźlarz grabowy rośnie pod grabami, ma pomarszczony kapelusz, a jego miąższ szybko szarzeje i czernieje.',
+      },
+      {
+        name: 'goryczak żółciowy',
+        edibility: 'niejadalny',
+        tip: 'Goryczak ma na trzonie siateczkę zamiast łuseczek, różowawe rurki i gorzki smak.',
+      },
+    ],
   },
   {
     id: 'kozlarz-czerwony',
@@ -155,7 +314,18 @@ export const SPECIES: Species[] = [
     rarity: 'rzadki',
     edibility: 'jadalny',
     habitat: 'Pod osikami',
+    habitats: ['lisciasty', 'mieszany'],
     typical: { capCm: 12, heightCm: 15, weightG: 190 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.3, 0.7, 1, 0.9, 0.4, 0.05, 0],
+    description:
+      'Kapelusz pomarańczowoczerwony do ceglastego, rurki białawe. Trzon białawy z łuseczkami najpierw białymi, potem rdzawobrązowymi. Miąższ na przekroju szarzeje i ciemnieje do fioletowoczarnego. Rośnie pod osikami. Nie jeść na surowo.',
+    lookalikes: [
+      {
+        name: 'koźlarz pomarańczowożółty',
+        edibility: 'jadalny',
+        tip: 'Koźlarz pomarańczowożółty rośnie pod brzozami i od początku ma czarne łuseczki na trzonie.',
+      },
+    ],
   },
   {
     id: 'soplowka-jezowata',
@@ -165,7 +335,19 @@ export const SPECIES: Species[] = [
     rarity: 'legendarny',
     edibility: 'jadalny',
     habitat: 'Stare buki i dęby',
+    habitats: ['drewno', 'lisciasty'],
     typical: { capCm: 20, heightCm: 15, weightG: 600 },
+    seasonWeights: [0, 0, 0, 0, 0, 0, 0.1, 0.4, 0.8, 1, 0.6, 0.2],
+    protection: 'scisla',
+    description:
+      'Biały do kremowego, kulisty owocnik bez kapelusza, pokryty gęstymi, zwisającymi kolcami długości 2–6 cm. Rośnie na ranach żywych i martwych buków oraz dębów; w Polsce bardzo rzadki. Gatunek pod ochroną ścisłą – nie zrywaj.',
+    lookalikes: [
+      {
+        name: 'soplówka bukowa',
+        edibility: 'jadalny',
+        tip: 'Soplówka bukowa jest rozgałęziona jak koral, a krótsze kolce zwisają rzędami z gałązek.',
+      },
+    ],
   },
   {
     id: 'gaska-zielonka',
@@ -175,7 +357,23 @@ export const SPECIES: Species[] = [
     rarity: 'pospolity',
     edibility: 'niejadalny',
     habitat: 'Piaszczyste bory',
+    habitats: ['iglasty'],
     typical: { capCm: 8, heightCm: 7, weightG: 60 },
+    seasonWeights: [0, 0, 0, 0, 0, 0, 0, 0.05, 0.4, 1, 0.9, 0.3],
+    description:
+      'Kapelusz żółtozielony do oliwkowego, często oblepiony piaskiem; blaszki siarkowożółte, trzon żółty, miąższ biały. Rośnie w piaszczystych borach sosnowych, późną jesienią. Nie zaleca się jej jedzenia – notowano ciężkie zatrucia z rozpadem mięśni (rabdomioliza).',
+    lookalikes: [
+      {
+        name: 'gąska siarkowa',
+        edibility: 'trujacy',
+        tip: 'Gąska siarkowa ma żółty miąższ, rzadkie blaszki i nieprzyjemny zapach gazu (karbidu).',
+      },
+      {
+        name: 'muchomor zielonawy',
+        edibility: 'smiertelny',
+        tip: 'Muchomor ma białe blaszki, pierścień i pochwę u nasady trzonu; zielonka ma żółte blaszki i trzon bez pierścienia.',
+      },
+    ],
   },
   {
     id: 'opienka-miodowa',
@@ -185,8 +383,24 @@ export const SPECIES: Species[] = [
     rarity: 'pospolity',
     edibility: 'jadalny',
     habitat: 'Pnie i korzenie',
+    habitats: ['drewno', 'lisciasty', 'mieszany'],
     clustered: true,
     typical: { capCm: 6, heightCm: 9, weightG: 25 },
+    seasonWeights: [0, 0, 0, 0, 0, 0, 0, 0.2, 0.8, 1, 0.6, 0.1],
+    description:
+      'Rośnie kępami na pniach i korzeniach. Kapelusz miodowożółty do brązowego z ciemnymi łuseczkami w środku, blaszki białawe, na trzonie białożółty pierścień. Jadalna tylko po dokładnym obgotowaniu (pierwszą wodę wylać) – surowa lub niedogotowana jest trująca.',
+    lookalikes: [
+      {
+        name: 'hełmówka jadowita',
+        edibility: 'smiertelny',
+        tip: 'Hełmówka jest drobniejsza, ma gładki, wodnisty kapelusz bez łusek, rdzawobrązowe blaszki i wysyp zarodników.',
+      },
+      {
+        name: 'maślanka wiązkowa',
+        edibility: 'trujacy',
+        tip: 'Maślanka ma siarkowożółty kapelusz, zielonkawe, potem ciemne blaszki, brak pierścienia i gorzki smak.',
+      },
+    ],
   },
   {
     id: 'piestrzenica-kasztanowata',
@@ -196,7 +410,23 @@ export const SPECIES: Species[] = [
     rarity: 'rzadki',
     edibility: 'smiertelny',
     habitat: 'Wiosną, bory',
+    habitats: ['iglasty', 'mieszany'],
     typical: { capCm: 8, heightCm: 9, weightG: 70 },
+    seasonWeights: [0, 0, 0.2, 1, 0.8, 0.1, 0, 0, 0, 0, 0, 0],
+    description:
+      'Kapelusz kasztanowo- do czarnobrązowego, nieregularny, mózgowato pofałdowany; wnętrze z jamkami, trzon krótki, białawy. Zawiera gyromitrynę – gotowanie ani suszenie nie usuwają jej niezawodnie, a opary też trują. Uszkadza wątrobę i nerki, może zabić.',
+    lookalikes: [
+      {
+        name: 'smardz jadalny',
+        edibility: 'jadalny',
+        tip: 'Smardz ma regularne komory jak plaster miodu i jest całkowicie pusty w środku; piestrzenica jest pofałdowana jak mózg.',
+      },
+      {
+        name: 'smardz stożkowaty',
+        edibility: 'jadalny',
+        tip: 'Smardz stożkowaty ma spiczasty kapelusz z równoległymi żeberkami i pusty trzon.',
+      },
+    ],
   },
   {
     id: 'purchawka-chropowata',
@@ -206,7 +436,23 @@ export const SPECIES: Species[] = [
     rarity: 'pospolity',
     edibility: 'jadalny',
     habitat: 'Ściółka leśna',
+    habitats: ['mieszany', 'iglasty', 'lisciasty'],
     typical: { capCm: 4, heightCm: 6, weightG: 30 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.2, 0.5, 0.9, 1, 0.7, 0.3, 0.05],
+    description:
+      'Gruszkowaty, biały owocnik pokryty stożkowatymi brodawkami, które łatwo odpadają, zostawiając siateczkę. Jadalne tylko młode okazy, białe i jednolite w środku. Zawsze przetnij wzdłuż – zarys kapelusza i blaszek oznacza młodego muchomora.',
+    lookalikes: [
+      {
+        name: 'tęgoskór pospolity',
+        edibility: 'trujacy',
+        tip: 'Tęgoskór ma grubą, twardą, łuseczkowatą skórkę i od początku ciemnofioletowoczarne wnętrze.',
+      },
+      {
+        name: 'muchomor zielonawy',
+        edibility: 'smiertelny',
+        tip: 'Na przekroju „jaja” muchomora widać zarys kapelusza, blaszek i trzonu; purchawka jest w środku jednolicie biała.',
+      },
+    ],
   },
   {
     id: 'golabek-zielonawy',
@@ -216,12 +462,23 @@ export const SPECIES: Species[] = [
     rarity: 'rzadki',
     edibility: 'jadalny',
     habitat: 'Buczyny i dąbrowy',
-    lookalike: {
-      name: 'muchomor zielonawy',
-      edibility: 'smiertelny',
-      tip: 'Gołąbek nie ma pierścienia ani pochwy u podstawy trzonu.',
-    },
+    habitats: ['lisciasty', 'mieszany'],
     typical: { capCm: 10, heightCm: 8, weightG: 110 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.2, 0.7, 1, 0.7, 0.2, 0, 0],
+    description:
+      'Kapelusz szarozielony do niebieskawozielonego, matowy, ze skórką spękaną w drobne poletka. Blaszki białe do kremowych, kruche; trzon biały, bez pierścienia i pochwy. Miąższ biały, łagodny, o orzechowym zapachu.',
+    lookalikes: [
+      {
+        name: 'muchomor zielonawy',
+        edibility: 'smiertelny',
+        tip: 'Gołąbek nie ma pierścienia ani pochwy u podstawy trzonu – zawsze wyjmij grzyb w całości i sprawdź nasadę.',
+      },
+      {
+        name: 'gołąbek modrozielony',
+        edibility: 'jadalny',
+        tip: 'Gołąbek modrozielony ma gładką, trawiastozieloną skórkę bez spękań i rośnie zwykle pod brzozami.',
+      },
+    ],
   },
   {
     id: 'zagwica-listkowata',
@@ -231,7 +488,24 @@ export const SPECIES: Species[] = [
     rarity: 'epicki',
     edibility: 'jadalny',
     habitat: 'U podstawy dębów',
+    habitats: ['lisciasty', 'drewno', 'park'],
     typical: { capCm: 25, heightCm: 18, weightG: 900 },
+    seasonWeights: [0, 0, 0, 0, 0, 0, 0.1, 0.6, 1, 0.6, 0.1, 0],
+    protection: 'czesciowa',
+    description:
+      'Duża rozeta z licznych szarobrązowych, języczkowatych kapelusików na rozgałęzionym trzonie; od spodu drobne, białe pory. Rośnie u nasady starych dębów, rzadziej grabów. Gatunek pod ochroną częściową – nie zbieraj.',
+    lookalikes: [
+      {
+        name: 'szmaciak gałęzisty',
+        edibility: 'jadalny',
+        tip: 'Szmaciak ma kędzierzawe, kremowe płaty bez porów i rośnie zwykle u sosen.',
+      },
+      {
+        name: 'żagiew wielogłowa',
+        edibility: 'jadalny',
+        tip: 'Żagiew wielogłowa ma jaśniejsze, okrągłe kapelusiki przyrośnięte centralnie do gałązek trzonu.',
+      },
+    ],
   },
   {
     id: 'goryczak-zolciowy',
@@ -241,8 +515,23 @@ export const SPECIES: Species[] = [
     rarity: 'pospolity',
     edibility: 'niejadalny',
     habitat: 'Las iglasty',
-    lookalike: { name: 'borowik szlachetny', edibility: 'jadalny', tip: 'Goryczak ma różowe rurki i ciemną siateczkę.' },
+    habitats: ['iglasty', 'mieszany'],
     typical: { capCm: 10, heightCm: 11, weightG: 150 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.2, 0.6, 1, 0.9, 0.4, 0.05, 0],
+    description:
+      'Kapelusz jasnobrązowy, rurki najpierw białe, potem różowe. Trzon z wyraźną, ciemnobrązową siateczką. Miąższ biały, nie zmienia barwy, bardzo gorzki – nawet jeden owocnik psuje całą potrawę.',
+    lookalikes: [
+      {
+        name: 'borowik szlachetny',
+        edibility: 'jadalny',
+        tip: 'Borowik ma białą siateczkę na trzonie, białe lub oliwkowe (nie różowe) rurki i łagodny smak.',
+      },
+      {
+        name: 'koźlarz babka',
+        edibility: 'jadalny',
+        tip: 'Koźlarz ma na trzonie ciemne łuseczki, nie siateczkę, i białawe rurki.',
+      },
+    ],
   },
   {
     id: 'borowik-ceglastopory',
@@ -252,12 +541,23 @@ export const SPECIES: Species[] = [
     rarity: 'rzadki',
     edibility: 'jadalny',
     habitat: 'Bory świerkowe',
-    lookalike: {
-      name: 'borowik szatański',
-      edibility: 'trujacy',
-      tip: 'Szatan ma biały kapelusz i siateczkę na trzonie – ceglastopory jest kropkowany.',
-    },
+    habitats: ['iglasty', 'mieszany', 'lisciasty'],
     typical: { capCm: 12, heightCm: 12, weightG: 250 },
+    seasonWeights: [0, 0, 0, 0, 0.1, 0.4, 0.6, 0.9, 1, 0.7, 0.2, 0],
+    description:
+      'Kapelusz ciemnobrązowy, zamszowy; pory czerwone. Żółty trzon gęsto pokryty czerwonymi kropkami, bez siateczki. Miąższ żółty, po przekrojeniu natychmiast granatowieje. Jadalny tylko dobrze ugotowany – nie jeść na surowo.',
+    lookalikes: [
+      {
+        name: 'borowik szatański',
+        edibility: 'trujacy',
+        tip: 'Szatański ma białoszary kapelusz i czerwoną siateczkę na trzonie; ceglastopory ma ciemny kapelusz i kropkowany trzon.',
+      },
+      {
+        name: 'borowik ponury',
+        edibility: 'jadalny',
+        tip: 'Borowik ponury ma na trzonie wyraźną siateczkę, a miąższ nad rurkami czerwoną warstwę.',
+      },
+    ],
   },
   {
     id: 'muchomor-plamisty',
@@ -267,7 +567,18 @@ export const SPECIES: Species[] = [
     rarity: 'pospolity',
     edibility: 'trujacy',
     habitat: 'Lasy mieszane',
+    habitats: ['lisciasty', 'mieszany', 'iglasty'],
     typical: { capCm: 9, heightCm: 11, weightG: 90 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.3, 0.6, 1, 0.9, 0.4, 0.05, 0],
+    description:
+      'Kapelusz szarobrązowy z drobnymi, białymi kosmkami i prążkowanym brzegiem. Pierścień gładki, nieprążkowany; bulwa z wyraźnym obrzeżeniem („skarpetka”). Miąższ biały, nie czerwienieje. Silnie trujący – kwas ibotenowy i muscymol, zatrucia bywają ciężkie.',
+    lookalikes: [
+      {
+        name: 'muchomor czerwonawy',
+        edibility: 'jadalny',
+        tip: 'Czerwonawy ma prążkowany pierścień, różowawe plamy i miąższ czerwieniejący po uszkodzeniu.',
+      },
+    ],
   },
   {
     id: 'borowik-krolewski',
@@ -277,7 +588,24 @@ export const SPECIES: Species[] = [
     rarity: 'legendarny',
     edibility: 'jadalny',
     habitat: 'Ciepłe buczyny',
+    habitats: ['lisciasty'],
     typical: { capCm: 14, heightCm: 12, weightG: 380 },
+    seasonWeights: [0, 0, 0, 0, 0.1, 0.4, 0.9, 1, 0.6, 0.1, 0, 0],
+    protection: 'scisla',
+    description:
+      'Kapelusz różowoczerwony do purpurowego, rurki i pory jaskrawożółte, nie sinieją. Trzon żółty z drobną żółtą siateczką, miąższ żółty, niezmienny. W Polsce skrajnie rzadki – pod dębami i bukami na glebach wapiennych. Gatunek pod ochroną ścisłą – nie zrywaj.',
+    lookalikes: [
+      {
+        name: 'borowik szatański',
+        edibility: 'trujacy',
+        tip: 'Szatański ma białoszary kapelusz, czerwone pory i siniejący miąższ.',
+      },
+      {
+        name: 'borowik żółtobrązowy',
+        edibility: 'jadalny',
+        tip: 'Borowik żółtobrązowy ma brązowy kapelusz, a jego miąższ nad rurkami sinieje.',
+      },
+    ],
   },
   {
     id: 'plachetka-zwyczajna',
@@ -287,7 +615,18 @@ export const SPECIES: Species[] = [
     rarity: 'pospolity',
     edibility: 'jadalny',
     habitat: 'Bory sosnowe',
+    habitats: ['iglasty', 'mieszany'],
     typical: { capCm: 9, heightCm: 11, weightG: 80 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.05, 0.3, 0.8, 1, 0.6, 0.1, 0],
+    description:
+      'Kapelusz ochrowożółty, promieniście pomarszczony, u młodych oprószony srebrzystym, szronowatym nalotem. Blaszki gliniaste, potem rdzawobrązowe; na trzonie wyraźny, błoniasty pierścień. Łatwo ją pomylić z trującymi zasłonakami – zbieraj tylko pewne okazy.',
+    lookalikes: [
+      {
+        name: 'zasłonak rudawy',
+        edibility: 'smiertelny',
+        tip: 'Zasłonaki zamiast błoniastego pierścienia mają pajęczynowatą zasnówkę; płachetka ma prawdziwy, trwały pierścień.',
+      },
+    ],
   },
   {
     id: 'czernidlak-kolpakowaty',
@@ -297,7 +636,18 @@ export const SPECIES: Species[] = [
     rarity: 'pospolity',
     edibility: 'jadalny',
     habitat: 'Łąki i pobocza',
+    habitats: ['laka', 'park'],
     typical: { capCm: 5, heightCm: 15, weightG: 50 },
+    seasonWeights: [0, 0, 0, 0.1, 0.4, 0.3, 0.3, 0.6, 1, 0.9, 0.3, 0],
+    description:
+      'Biały, walcowaty kapelusz z odstającymi łuskami i ochrowym szczytem. Blaszki białe, potem różowe i czarne – stary owocnik rozpływa się w czarny płyn. Jadalne tylko młode, całkowicie białe okazy, przyrządzone od razu po zbiorze.',
+    lookalikes: [
+      {
+        name: 'czernidłak pospolity',
+        edibility: 'trujacy',
+        tip: 'Czernidłak pospolity ma szary, gładki kapelusz bez łusek; spożyty z alkoholem wywołuje zatrucie.',
+      },
+    ],
   },
   {
     id: 'zaslonak-rudy',
@@ -307,7 +657,23 @@ export const SPECIES: Species[] = [
     rarity: 'epicki',
     edibility: 'smiertelny',
     habitat: 'Lasy liściaste',
+    habitats: ['lisciasty', 'mieszany'],
     typical: { capCm: 6, heightCm: 8, weightG: 35 },
+    seasonWeights: [0, 0, 0, 0, 0, 0, 0, 0.6, 1, 0.8, 0.2, 0],
+    description:
+      'Kapelusz rudopomarańczowy do rdzawobrązowego, suchy, matowy; blaszki rzadkie, rdzawopomarańczowe; trzon żółtawy z rdzawymi włókienkami; zapach rzodkwi. Orellanina niszczy nerki, a objawy pojawiają się po kilku dniach, nawet do 2–3 tygodni – nie zbieraj rudych zasłonaków.',
+    lookalikes: [
+      {
+        name: 'zasłonak rudawy',
+        edibility: 'smiertelny',
+        tip: 'Zasłonak rudawy rośnie w borach świerkowych, ma ostry garbek i żółte pasy zasnówki na trzonie – równie śmiertelny.',
+      },
+      {
+        name: 'pieprznik jadalny',
+        edibility: 'jadalny',
+        tip: 'Kurka ma grube, rozwidlone listewki zamiast blaszek i nigdy nie daje rdzawego wysypu zarodników.',
+      },
+    ],
   },
   {
     id: 'sarniak-dachowkowaty',
@@ -317,7 +683,18 @@ export const SPECIES: Species[] = [
     rarity: 'rzadki',
     edibility: 'jadalny',
     habitat: 'Bory świerkowe',
+    habitats: ['iglasty'],
     typical: { capCm: 15, heightCm: 8, weightG: 260 },
+    seasonWeights: [0, 0, 0, 0, 0, 0, 0.2, 0.7, 1, 0.7, 0.2, 0],
+    description:
+      'Duży, brązowy kapelusz z wklęśniętym środkiem, pokryty grubymi, odstającymi łuskami ułożonymi dachówkowato. Od spodu szarobrązowe kolce zamiast blaszek. Jadalne są tylko młode okazy i wyłącznie po ugotowaniu – na surowo trujący.',
+    lookalikes: [
+      {
+        name: 'sarniak szorstki',
+        edibility: 'niejadalny',
+        tip: 'Sarniak szorstki ma drobniejsze, przylegające łuski, niebieskozieloną podstawę trzonu i jest bardzo gorzki.',
+      },
+    ],
   },
   {
     id: 'maslak-sitarz',
@@ -327,8 +704,19 @@ export const SPECIES: Species[] = [
     rarity: 'pospolity',
     edibility: 'jadalny',
     habitat: 'Bory sosnowe',
+    habitats: ['iglasty'],
     clustered: true,
     typical: { capCm: 6, heightCm: 5, weightG: 40 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.1, 0.3, 0.7, 1, 0.9, 0.3, 0],
+    description:
+      'Kapelusz ochrowy do rdzawobrązowego, lepki w wilgoci. Pory duże, kanciaste, przypominają sito; trzon bez pierścienia. Rośnie gromadnie pod sosnami na suchych piaskach, często razem z klejówką różową. Po ugotowaniu różowofioletowieje.',
+    lookalikes: [
+      {
+        name: 'maślak pstry',
+        edibility: 'jadalny',
+        tip: 'Maślak pstry ma drobne pory i suchy, drobnołuseczkowaty kapelusz; jego miąższ lekko sinieje.',
+      },
+    ],
   },
   {
     id: 'kozlarz-pomaranczowozolty',
@@ -338,7 +726,18 @@ export const SPECIES: Species[] = [
     rarity: 'rzadki',
     edibility: 'jadalny',
     habitat: 'Pod brzozami',
+    habitats: ['lisciasty', 'mieszany', 'torfowisko'],
     typical: { capCm: 13, heightCm: 16, weightG: 210 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.3, 0.7, 1, 0.9, 0.4, 0.05, 0],
+    description:
+      'Kapelusz pomarańczowożółty, ze skórką zwisającą na brzegu. Trzon białawy, gęsto pokryty czarnymi łuseczkami. Miąższ po przekrojeniu różowofioletowy, potem czarny, u nasady zielononiebieski. Rośnie pod brzozami; nie jeść na surowo.',
+    lookalikes: [
+      {
+        name: 'koźlarz czerwony',
+        edibility: 'jadalny',
+        tip: 'Koźlarz czerwony rośnie pod osikami, a łuseczki na trzonie ma najpierw białe, potem rdzawe – nigdy czarne.',
+      },
+    ],
   },
   {
     id: 'lejkowiec-dety',
@@ -348,18 +747,40 @@ export const SPECIES: Species[] = [
     rarity: 'rzadki',
     edibility: 'jadalny',
     habitat: 'Buczyny',
+    habitats: ['lisciasty', 'mieszany'],
     clustered: true,
     typical: { capCm: 5, heightCm: 8, weightG: 12 },
+    seasonWeights: [0, 0, 0, 0, 0, 0, 0.2, 0.7, 1, 0.8, 0.3, 0],
+    description:
+      'Owocnik w kształcie lejka lub trąbki, pusty aż do podstawy, ciemnoszary do czarnego. Zewnętrzna strona gładka lub lekko pomarszczona, szarawa, bez blaszek. Rośnie gromadnie w liściach buków i dębów; świetny do suszenia.',
+    lookalikes: [
+      {
+        name: 'lejkowiec zatokowy',
+        edibility: 'jadalny',
+        tip: 'Lejkowiec zatokowy jest jaśniejszy, szarobrązowy, ma pofalowany brzeg i nie jest pusty aż do podstawy.',
+      },
+    ],
   },
   {
     id: 'mleczaj-smaczny',
     name: 'Mleczaj smaczny',
-    latin: 'Lactarius volemus',
+    latin: 'Lactifluus volemus',
     shortName: 'mleczaj',
     rarity: 'rzadki',
     edibility: 'jadalny',
     habitat: 'Lasy mieszane',
+    habitats: ['mieszany', 'lisciasty', 'iglasty'],
     typical: { capCm: 10, heightCm: 9, weightG: 120 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.2, 0.6, 1, 0.8, 0.3, 0, 0],
+    description:
+      'Kapelusz pomarańczowobrązowy, matowy, zamszowy; blaszki kremowe. Po uszkodzeniu wypływa obfite, białe, łagodne mleczko, a uszkodzone miejsca brązowieją. Charakterystyczny zapach śledzi, zwłaszcza u starszych okazów.',
+    lookalikes: [
+      {
+        name: 'mleczaj pomarańczowy',
+        edibility: 'niejadalny',
+        tip: 'Mleczaj pomarańczowy jest mniejszy, ma skąpe, gorzkawe mleczko i nie pachnie śledziem.',
+      },
+    ],
   },
   {
     id: 'siedzun-sosnowy',
@@ -368,8 +789,25 @@ export const SPECIES: Species[] = [
     shortName: 'siedzuń',
     rarity: 'epicki',
     edibility: 'jadalny',
-    habitat: 'Stare sosny',
+    habitat: 'U nasady jodeł',
+    habitats: ['iglasty', 'drewno', 'mieszany'],
     typical: { capCm: 22, heightCm: 16, weightG: 700 },
+    seasonWeights: [0, 0, 0, 0, 0, 0, 0.1, 0.6, 1, 0.7, 0.1, 0],
+    protection: 'czesciowa',
+    description:
+      'Kalafiorowaty owocnik z szerokich, płaskich, słomkowożółtych płatów, mniej kędzierzawy niż szmaciak; rośnie u nasady jodeł i świerków. S. nemecii bywa łączony z siedzuniem dębowym (S. brevipes), więc traktujemy go jak gatunek pod ochroną częściową – nie zbieraj.',
+    lookalikes: [
+      {
+        name: 'szmaciak gałęzisty',
+        edibility: 'jadalny',
+        tip: 'Szmaciak ma mocno kędzierzawe, kremowe płaty z ząbkami i rośnie zwykle przy sosnach.',
+      },
+      {
+        name: 'siedzuń dębowy',
+        edibility: 'jadalny',
+        tip: 'Siedzuń dębowy (S. brevipes) ma bardzo podobne, płaskie płaty; wiele źródeł uznaje oba za ten sam gatunek.',
+      },
+    ],
   },
   {
     id: 'borowik-szatanski',
@@ -379,7 +817,24 @@ export const SPECIES: Species[] = [
     rarity: 'epicki',
     edibility: 'trujacy',
     habitat: 'Wapienne buczyny',
+    habitats: ['lisciasty'],
     typical: { capCm: 18, heightCm: 12, weightG: 450 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.2, 0.7, 1, 0.6, 0.1, 0, 0],
+    protection: 'scisla',
+    description:
+      'Masywny, z białoszarym kapeluszem i czerwonymi porami. Bulwiasty trzon żółty u góry, karminowy niżej, z czerwoną siateczką; miąższ słabo sinieje, stare okazy cuchną padliną. Trujący także po ugotowaniu. Gatunek pod ochroną ścisłą – nie zrywaj.',
+    lookalikes: [
+      {
+        name: 'borowik ceglastopory',
+        edibility: 'jadalny',
+        tip: 'Ceglastopory ma ciemnobrązowy kapelusz i trzon w czerwone kropki, bez siateczki; miąższ mocno granatowieje.',
+      },
+      {
+        name: 'borowik ponury',
+        edibility: 'jadalny',
+        tip: 'Borowik ponury ma oliwkowobrązowy kapelusz i czerwoną warstwę miąższu tuż nad rurkami.',
+      },
+    ],
   },
   {
     id: 'lakowka-ametystowa',
@@ -389,8 +844,24 @@ export const SPECIES: Species[] = [
     rarity: 'pospolity',
     edibility: 'jadalny',
     habitat: 'Lasy mieszane',
+    habitats: ['lisciasty', 'mieszany', 'iglasty'],
     clustered: true,
     typical: { capCm: 4, heightCm: 6, weightG: 8 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.1, 0.3, 0.8, 1, 0.8, 0.3, 0],
+    description:
+      'Cały owocnik intensywnie fioletowy; po wyschnięciu kapelusz blednie, ale grube, rzadkie blaszki zostają fioletowe. Trzon włóknisty. Drobna i mało wydajna; kumuluje arsen z gleby, więc nie zbieraj jej z terenów skażonych.',
+    lookalikes: [
+      {
+        name: 'grzybówka fioletowawa',
+        edibility: 'trujacy',
+        tip: 'Grzybówka ma cienkie, gęstsze blaszki, kruchy trzon i zapach rzodkwi; zawiera muskarynę.',
+      },
+      {
+        name: 'strzępiak ziemistoblaszkowy',
+        edibility: 'trujacy',
+        tip: 'Strzępiak ma ziemistobrązowe (nie fioletowe) blaszki, jedwabisty kapelusz z garbkiem i nieprzyjemny zapach.',
+      },
+    ],
   },
   {
     id: 'gaska-siarkowa',
@@ -398,21 +869,2094 @@ export const SPECIES: Species[] = [
     latin: 'Tricholoma sulphureum',
     shortName: 'gąska',
     rarity: 'pospolity',
-    edibility: 'niejadalny',
+    edibility: 'trujacy',
     habitat: 'Lasy liściaste',
+    habitats: ['lisciasty', 'mieszany', 'iglasty'],
     typical: { capCm: 6, heightCm: 7, weightG: 40 },
+    seasonWeights: [0, 0, 0, 0, 0, 0, 0.1, 0.5, 1, 0.9, 0.3, 0],
+    description:
+      'Cała siarkowożółta: kapelusz, rzadkie, grube blaszki, trzon i miąższ. Ma silny, nieprzyjemny zapach gazu świetlnego (karbidu). Trująca – wywołuje dolegliwości żołądkowo-jelitowe; nie myl jej z gąską zielonką, która pachnie mąką.',
+    lookalikes: [
+      {
+        name: 'gąska zielonka',
+        edibility: 'niejadalny',
+        tip: 'Zielonka ma biały miąższ, gęstsze blaszki i przyjemny, mączny zapach.',
+      },
+    ],
   },
   {
     id: 'strzepiak-ceglasty',
     name: 'Strzępiak ceglasty',
-    latin: 'Inocybe erubescens',
+    latin: 'Inosperma erubescens',
     shortName: 'strzępiak',
     rarity: 'rzadki',
     edibility: 'smiertelny',
     habitat: 'Parki i buczyny',
+    habitats: ['lisciasty', 'park'],
     typical: { capCm: 6, heightCm: 8, weightG: 30 },
+    seasonWeights: [0, 0, 0, 0, 0.4, 1, 0.7, 0.4, 0.2, 0.05, 0, 0],
+    description:
+      'Kapelusz stożkowaty, włóknisty, na brzegu często popękany, najpierw biały, z wiekiem i po uszkodzeniu ceglastoczerwony. Blaszki białawe, potem oliwkowobrązowe. Duża dawka muskaryny: pot, ślinotok, spadek ciśnienia, duszność – możliwy zgon.',
+    lookalikes: [
+      {
+        name: 'gąska majowa',
+        edibility: 'jadalny',
+        tip: 'Gąska majowa ma gęste, białe blaszki, biały wysyp zarodników, mączny zapach i nie czerwienieje po uszkodzeniu.',
+      },
+    ],
+  },
+  {
+    id: 'podgrzybek-zlotawy',
+    name: 'Podgrzybek złotawy',
+    latin: 'Xerocomellus chrysenteron',
+    shortName: 'podgrzybek',
+    rarity: 'pospolity',
+    edibility: 'jadalny',
+    habitat: 'Lasy mieszane',
+    habitats: ['mieszany', 'lisciasty', 'iglasty'],
+    typical: { capCm: 6, heightCm: 7, weightG: 45 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.2, 0.5, 0.8, 1, 0.8, 0.2, 0],
+    description:
+      'Oliwkowobrązowy, zamszowy kapelusz w suche dni pęka w poletka, odsłaniając czerwonawy miąższ w szczelinach. Rurki żółte do oliwkowych, po uciśnięciu sinieją; trzon żółty u góry, czerwonawy u dołu. Szybko robaczywieje – zbieraj młode.',
+    lookalikes: [
+      {
+        name: 'goryczak żółciowy',
+        edibility: 'niejadalny',
+        tip: 'Goryczak ma różowawe rurki, ciemną siateczkę na trzonie i bardzo gorzki smak.',
+      },
+      {
+        name: 'podgrzybek zajączek',
+        edibility: 'jadalny',
+        tip: 'Zajączek ma jaskrawożółte, duże pory i kapelusz bez czerwonawych pęknięć.',
+      },
+    ],
+  },
+  {
+    id: 'podgrzybek-zajaczek',
+    name: 'Podgrzybek zajączek',
+    latin: 'Xerocomus subtomentosus',
+    shortName: 'podgrzybek',
+    rarity: 'pospolity',
+    edibility: 'jadalny',
+    habitat: 'Lasy mieszane',
+    habitats: ['mieszany', 'lisciasty', 'iglasty'],
+    typical: { capCm: 7, heightCm: 8, weightG: 60 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.3, 0.6, 0.9, 1, 0.6, 0.1, 0],
+    description:
+      'Kapelusz oliwkowobrązowy, zamszowy, w suszę pęka, ale bez czerwieni w szczelinach. Rurki jaskrawożółte, duże i kanciaste, po uciśnięciu lekko sinieją; u podstawy trzonu biała grzybnia. Smaczny, młode nadają się do marynat.',
+    lookalikes: [
+      {
+        name: 'goryczak żółciowy',
+        edibility: 'niejadalny',
+        tip: 'Goryczak ma różowawe rurki, ciemną siateczkę na trzonie i bardzo gorzki smak.',
+      },
+      {
+        name: 'podgrzybek złotawy',
+        edibility: 'jadalny',
+        tip: 'Złotawy ma kapelusz pękający z czerwonawym miąższem w szczelinach i czerwonawy dół trzonu.',
+      },
+    ],
+  },
+  {
+    id: 'maslak-pstry',
+    name: 'Maślak pstry',
+    latin: 'Suillus variegatus',
+    shortName: 'maślak',
+    rarity: 'pospolity',
+    edibility: 'jadalny',
+    habitat: 'Bory sosnowe',
+    habitats: ['iglasty'],
+    typical: { capCm: 8, heightCm: 8, weightG: 90 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.1, 0.3, 0.7, 1, 0.9, 0.3, 0],
+    description:
+      'Kapelusz żółtooliwkowy do rdzawego, drobno kosmkowaty i suchy (śliski tylko w deszcz); trzon bez pierścienia. Drobne, oliwkowobrązowe rurki po uciśnięciu lekko sinieją, miąższ pachnie igliwiem. Dobry do marynat.',
+    lookalikes: [
+      {
+        name: 'maślak sitarz',
+        edibility: 'jadalny',
+        tip: 'Sitarz ma duże, kanciaste pory, cieńszy trzon i nie pachnie igliwiem.',
+      },
+    ],
+  },
+  {
+    id: 'maslak-zolty',
+    name: 'Maślak żółty',
+    latin: 'Suillus grevillei',
+    shortName: 'maślak',
+    rarity: 'pospolity',
+    edibility: 'jadalny',
+    habitat: 'Pod modrzewiami',
+    habitats: ['iglasty', 'mieszany', 'park'],
+    typical: { capCm: 8, heightCm: 9, weightG: 70 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.2, 0.5, 0.9, 1, 0.7, 0.2, 0],
+    description:
+      'Złotożółty do pomarańczowego, śluzowaty i błyszczący kapelusz; rośnie wyłącznie pod modrzewiami. Rurki żółte, po uciśnięciu brązowieją; na trzonie białawożółty pierścień. Przed przyrządzeniem warto zdjąć śliską skórkę.',
+    lookalikes: [
+      {
+        name: 'maślak zwyczajny',
+        edibility: 'jadalny',
+        tip: 'Maślak zwyczajny ma brązowy kapelusz, fioletowawy pierścień i rośnie pod sosnami.',
+      },
+      {
+        name: 'maślak ziarnisty',
+        edibility: 'jadalny',
+        tip: 'Ziarnisty nie ma pierścienia, a jego pory wydzielają mleczne kropelki; rośnie pod sosnami.',
+      },
+    ],
+  },
+  {
+    id: 'maslak-ziarnisty',
+    name: 'Maślak ziarnisty',
+    latin: 'Suillus granulatus',
+    shortName: 'maślak',
+    rarity: 'pospolity',
+    edibility: 'jadalny',
+    habitat: 'Młode bory sosnowe',
+    habitats: ['iglasty', 'park'],
+    typical: { capCm: 7, heightCm: 6, weightG: 55 },
+    seasonWeights: [0, 0, 0, 0, 0.1, 0.4, 0.6, 0.8, 1, 0.8, 0.3, 0],
+    description:
+      'Kapelusz rdzawobrązowy do żółtoochrowego, lepki; brak pierścienia. Żółte pory młodych okazów wydzielają białe kropelki mleczka, które zasychają w brązowe ziarenka na szczycie trzonu. Smaczny, ale u nielicznych osób wywołuje rozstrój żołądka.',
+    lookalikes: [
+      {
+        name: 'maślak zwyczajny',
+        edibility: 'jadalny',
+        tip: 'Maślak zwyczajny ma pierścień na trzonie, a jego pory nie wydzielają mlecznych kropli.',
+      },
+    ],
+  },
+  {
+    id: 'kozlarz-grabowy',
+    name: 'Koźlarz grabowy',
+    latin: 'Leccinellum pseudoscabrum',
+    shortName: 'koźlarz',
+    rarity: 'pospolity',
+    edibility: 'jadalny',
+    habitat: 'Pod grabami',
+    habitats: ['lisciasty', 'mieszany'],
+    typical: { capCm: 9, heightCm: 11, weightG: 110 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.4, 0.7, 1, 0.9, 0.5, 0, 0],
+    description:
+      'Kapelusz oliwkowo- do ciemnobrązowego, nierówny, pomarszczony, w suszę spękany; rośnie pod grabami i leszczyną. Trzon pokryty czarniawymi łuseczkami. Miąższ po przekrojeniu różowieje, potem szarofioletowieje i czernieje – to normalne.',
+    lookalikes: [
+      {
+        name: 'goryczak żółciowy',
+        edibility: 'niejadalny',
+        tip: 'Goryczak ma różowawe rurki, siateczkę zamiast łuseczek na trzonie i gorzki smak.',
+      },
+      {
+        name: 'koźlarz babka',
+        edibility: 'jadalny',
+        tip: 'Babka rośnie pod brzozami, ma gładki kapelusz, a jej miąższ prawie nie zmienia barwy.',
+      },
+    ],
+  },
+  {
+    id: 'krowiak-podwiniety',
+    name: 'Krowiak podwinięty',
+    latin: 'Paxillus involutus',
+    shortName: 'krowiak',
+    rarity: 'pospolity',
+    edibility: 'trujacy',
+    habitat: 'Wszystkie typy lasów',
+    habitats: ['mieszany', 'lisciasty', 'iglasty'],
+    typical: { capCm: 9, heightCm: 6, weightG: 80 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.3, 0.6, 0.9, 1, 0.8, 0.3, 0],
+    description:
+      'Brązowy kapelusz z mocno podwiniętym, filcowatym brzegiem; gęste, zbiegające blaszki po dotknięciu brązowieją. Dawniej jadany, dziś uznany za groźny: wielokrotne spożycie może wywołać zespół krowiaka (rozpad krwinek) – znane są zgony. Nie zbieraj.',
+    lookalikes: [
+      {
+        name: 'krowiak olszowy',
+        edibility: 'trujacy',
+        tip: 'Krowiak olszowy jest mniejszy, ma łuseczkowaty kapelusz i rośnie tylko pod olszami – też go nie zbieraj.',
+      },
+    ],
+  },
+  {
+    id: 'krowiak-aksamitny',
+    name: 'Krowiak aksamitny',
+    latin: 'Tapinella atrotomentosa',
+    shortName: 'krowiak',
+    rarity: 'pospolity',
+    edibility: 'niejadalny',
+    habitat: 'Pniaki iglaste',
+    habitats: ['drewno', 'iglasty'],
+    typical: { capCm: 14, heightCm: 7, weightG: 200 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.1, 0.3, 0.8, 1, 0.7, 0.2, 0],
+    description:
+      'Duży, brązowy kapelusz z podwiniętym brzegiem; rośnie na pniakach i korzeniach sosen i świerków. Gruby, krótki trzon pokrywa czarnobrązowy, aksamitny kutner; blaszki żółtawe, zbiegające. Bardzo gorzki – niejadalny.',
+    lookalikes: [
+      {
+        name: 'krowiak podwinięty',
+        edibility: 'trujacy',
+        tip: 'Krowiak podwinięty rośnie na ziemi i ma gładki trzon bez czarnego, aksamitnego kutnera.',
+      },
+    ],
+  },
+  {
+    id: 'gaska-nieksztaltna',
+    name: 'Gąska niekształtna',
+    latin: 'Tricholoma portentosum',
+    shortName: 'gąska',
+    rarity: 'pospolity',
+    edibility: 'jadalny',
+    habitat: 'Bory sosnowe',
+    habitats: ['iglasty', 'mieszany'],
+    typical: { capCm: 7, heightCm: 8, weightG: 60 },
+    seasonWeights: [0, 0, 0, 0, 0, 0, 0, 0, 0.3, 1, 0.9, 0.3],
+    description:
+      'Szary kapelusz z ciemnymi, wrośniętymi, promienistymi włókienkami, często z żółtawym lub fioletowym odcieniem; blaszki białe do szarożółtawych, trzon biały, zapach mączny. Późnojesienny grzyb borów – zbieraj tylko pewne okazy.',
+    lookalikes: [
+      {
+        name: 'muchomor zielonawy',
+        edibility: 'smiertelny',
+        tip: 'Muchomor ma pierścień i bulwę w pochwie u podstawy; gąska nie ma ani pierścienia, ani pochwy.',
+      },
+      {
+        name: 'gąska tygrysia',
+        edibility: 'trujacy',
+        tip: 'Tygrysia ma szare, koncentryczne łuski na kapeluszu (bez czarnych włókienek) i rośnie w lasach liściastych na wapieniu.',
+      },
+    ],
+  },
+  {
+    id: 'gasowka-fioletowawa',
+    name: 'Gąsówka fioletowawa',
+    latin: 'Collybia nuda',
+    shortName: 'gąsówka',
+    rarity: 'pospolity',
+    edibility: 'jadalny',
+    habitat: 'Ściółka i kompost',
+    habitats: ['mieszany', 'lisciasty', 'park'],
+    typical: { capCm: 9, heightCm: 7, weightG: 80 },
+    seasonWeights: [0, 0, 0, 0.1, 0.1, 0, 0, 0, 0.3, 0.9, 1, 0.4],
+    description:
+      'Cały owocnik fioletowy: kapelusz z wiekiem brązowieje, blaszki gęste, fioletowe, trzon z bulwką. Wysyp zarodników różowawy, zapach przyjemny, korzenny. Jadalna wyłącznie po dokładnym ugotowaniu – na surowo trująca, nie jeść na surowo.',
+    lookalikes: [
+      {
+        name: 'zasłonak koźli',
+        edibility: 'trujacy',
+        tip: 'Zasłonaki mają rdzawobrązowy wysyp zarodników i pajęczynową zasnówkę; zasłonak koźli przykro pachnie.',
+      },
+    ],
+  },
+  {
+    id: 'lejkowka-szarawa',
+    name: 'Lejkówka szarawa',
+    latin: 'Clitocybe nebularis',
+    shortName: 'lejkówka',
+    rarity: 'pospolity',
+    edibility: 'trujacy',
+    habitat: 'Ściółka, lasy bukowe',
+    habitats: ['lisciasty', 'mieszany', 'iglasty'],
+    typical: { capCm: 11, heightCm: 9, weightG: 120 },
+    seasonWeights: [0, 0, 0, 0, 0, 0, 0, 0.05, 0.5, 1, 0.8, 0.2],
+    description:
+      'Duży, mięsisty, szary kapelusz z białawym nalotem, kremowe, lekko zbiegające blaszki i jasny, maczugowaty trzon; silny, mdły zapach. Dawniej jadana, dziś odradzana – wielu osobom wywołuje zatrucia żołądkowo-jelitowe, zawiera nebularynę.',
+    lookalikes: [
+      {
+        name: 'dzwonkówka trująca',
+        edibility: 'trujacy',
+        tip: 'Dzwonkówka ma żółtawe, potem różowe, niezbiegające blaszki i różowy wysyp zarodników.',
+      },
+    ],
+  },
+  {
+    id: 'lejkowka-jadowita',
+    name: 'Lejkówka jadowita',
+    latin: 'Collybia rivulosa',
+    shortName: 'lejkówka',
+    rarity: 'pospolity',
+    edibility: 'trujacy',
+    habitat: 'Łąki i trawniki',
+    habitats: ['laka', 'park'],
+    typical: { capCm: 3, heightCm: 3, weightG: 5 },
+    seasonWeights: [0, 0, 0, 0, 0, 0, 0.1, 0.6, 1, 0.8, 0.3, 0],
+    description:
+      'Mały, białawy lub cielisty kapelusz z oszronionym nalotem i plamami; gęste blaszki zbiegają na trzon. Rośnie w trawie, często w kręgach – jak twardzioszek. Zawiera muskarynę: poty, łzawienie, ślinotok, wymioty już po kilkunastu minutach.',
+    lookalikes: [
+      {
+        name: 'twardzioszek przydrożny',
+        edibility: 'jadalny',
+        tip: 'Twardzioszek ma rzadkie, wolne blaszki i elastyczny trzon, który da się skręcić bez złamania.',
+      },
+    ],
+  },
+  {
+    id: 'twardzioszek-przydrozny',
+    name: 'Twardzioszek przydrożny',
+    latin: 'Marasmius oreades',
+    shortName: 'twardzioszek',
+    rarity: 'pospolity',
+    edibility: 'jadalny',
+    habitat: 'Łąki i pastwiska',
+    habitats: ['laka', 'park'],
+    clustered: true,
+    typical: { capCm: 3, heightCm: 6, weightG: 4 },
+    seasonWeights: [0, 0, 0, 0.05, 0.4, 0.7, 0.8, 0.9, 1, 0.7, 0.2, 0],
+    description:
+      'Mały, płowy do ochrowego kapelusz z tępym garbkiem, rzadkie blaszki i cienki, bardzo elastyczny trzon (można go skręcić). Rośnie w trawie w kręgach; zbiera się same kapelusze. Uwaga: w tych samych miejscach rośnie trująca lejkówka jadowita.',
+    lookalikes: [
+      {
+        name: 'lejkówka jadowita',
+        edibility: 'trujacy',
+        tip: 'Lejkówka jest biaława, oszroniona, ma gęste, zbiegające blaszki i kruchy trzon.',
+      },
+    ],
+  },
+  {
+    id: 'boczniak-ostrygowaty',
+    name: 'Boczniak ostrygowaty',
+    latin: 'Pleurotus ostreatus',
+    shortName: 'boczniak',
+    rarity: 'pospolity',
+    edibility: 'jadalny',
+    habitat: 'Pnie liściastych',
+    habitats: ['drewno', 'lisciasty', 'park'],
+    clustered: true,
+    typical: { capCm: 9, heightCm: 3, weightG: 40 },
+    seasonWeights: [0.4, 0.3, 0.4, 0.1, 0, 0, 0, 0, 0.1, 0.6, 1, 0.8],
+    description:
+      'Muszlowate, szare do brązowoszarych kapelusze wyrastają dachówkowato na pniach drzew liściastych; białe blaszki zbiegają na krótki, boczny trzon. Pojawia się po przymrozkach, zimą i wczesną wiosną. Ten sam gatunek uprawia się masowo.',
+    lookalikes: [
+      {
+        name: 'boczniak łyżkowaty',
+        edibility: 'jadalny',
+        tip: 'Łyżkowaty jest jaśniejszy, kremowy i owocnikuje latem, a nie zimą.',
+      },
+    ],
+  },
+  {
+    id: 'luszczak-zmienny',
+    name: 'Łuszczak zmienny',
+    latin: 'Kuehneromyces mutabilis',
+    shortName: 'łuszczak',
+    rarity: 'pospolity',
+    edibility: 'jadalny',
+    habitat: 'Pnie liściastych',
+    habitats: ['drewno', 'lisciasty', 'mieszany'],
+    clustered: true,
+    typical: { capCm: 4, heightCm: 6, weightG: 12 },
+    seasonWeights: [0, 0, 0, 0.3, 0.6, 0.7, 0.6, 0.7, 1, 0.9, 0.4, 0.1],
+    description:
+      'Kępy na pniakach liściastych. Kapelusz po wysychaniu dwubarwny: jasnoochrowy środek, ciemny brzeg; trzon pod pierścieniem pokryty odstającymi łuskami. Jada się ugotowane kapelusze. Zbieraj tylko, jeśli pewnie odróżniasz go od hełmówki jadowitej.',
+    lookalikes: [
+      {
+        name: 'hełmówka jadowita',
+        edibility: 'smiertelny',
+        tip: 'Hełmówka ma pod pierścieniem srebrzyste, gładkie włókienka zamiast łusek i rośnie częściej na drewnie iglastym.',
+      },
+      {
+        name: 'maślanka wiązkowa',
+        edibility: 'trujacy',
+        tip: 'Maślanka ma siarkowożółty kapelusz, zielonkawe blaszki, gładki trzon i bardzo gorzki smak.',
+      },
+    ],
+  },
+  {
+    id: 'maslanka-wiazkowa',
+    name: 'Maślanka wiązkowa',
+    latin: 'Hypholoma fasciculare',
+    shortName: 'maślanka',
+    rarity: 'pospolity',
+    edibility: 'trujacy',
+    habitat: 'Pnie i pniaki',
+    habitats: ['drewno', 'lisciasty', 'iglasty'],
+    clustered: true,
+    typical: { capCm: 4, heightCm: 7, weightG: 10 },
+    seasonWeights: [0.05, 0, 0.1, 0.3, 0.4, 0.4, 0.5, 0.7, 1, 1, 0.7, 0.3],
+    description:
+      'Gęste kępy na pniakach liściastych i iglastych. Kapelusz siarkowożółty z rdzawym środkiem; blaszki najpierw siarkowe, potem zielonkawe do fioletowoczarnych; miąższ bardzo gorzki. Trująca – wywołuje silne zatrucia żołądkowo-jelitowe.',
+    lookalikes: [
+      {
+        name: 'opieńka miodowa',
+        edibility: 'jadalny',
+        tip: 'Opieńka ma miodowy kapelusz z łuseczkami, białawe (nie zielone) blaszki, biały pierścień i łagodny smak.',
+      },
+      {
+        name: 'łuszczak zmienny',
+        edibility: 'jadalny',
+        tip: 'Łuszczak ma brązowy, dwubarwny kapelusz, rdzawe blaszki i łuskowaty trzon pod pierścieniem.',
+      },
+    ],
+  },
+  {
+    id: 'czubajka-czerwieniejaca',
+    name: 'Czubajka czerwieniejąca',
+    latin: 'Chlorophyllum rhacodes',
+    shortName: 'czubajka',
+    rarity: 'pospolity',
+    edibility: 'jadalny',
+    habitat: 'Skraje lasów, parki',
+    habitats: ['mieszany', 'park', 'iglasty'],
+    typical: { capCm: 12, heightCm: 14, weightG: 110 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.1, 0.4, 0.8, 1, 0.7, 0.2, 0],
+    description:
+      'Kapelusz z grubymi, brązowymi, odstającymi łuskami na białawym tle; trzon gładki, bez wężykowatego wzoru, z bulwą i ruchomym pierścieniem. Miąższ po przekrojeniu szybko czerwienieje. U wrażliwych osób wywołuje dolegliwości żołądkowe.',
+    lookalikes: [
+      {
+        name: 'muchomor zielonawy',
+        edibility: 'smiertelny',
+        tip: 'Muchomor ma gładki kapelusz bez łusek, nieruchomy pierścień i bulwę w błoniastej pochwie.',
+      },
+      {
+        name: 'muchomor plamisty',
+        edibility: 'trujacy',
+        tip: 'Plamisty ma białe kosmki na brązowym kapeluszu, prążkowany brzeg i nieczerwieniejący miąższ.',
+      },
+      {
+        name: 'czubajka kania',
+        edibility: 'jadalny',
+        tip: 'Kania jest większa, ma wężykowaty wzór na trzonie i miąższ, który nie czerwienieje.',
+      },
+    ],
+  },
+  {
+    id: 'czubajeczka-cuchnaca',
+    name: 'Czubajeczka cuchnąca',
+    latin: 'Lepiota cristata',
+    shortName: 'czubajeczka',
+    rarity: 'pospolity',
+    edibility: 'trujacy',
+    habitat: 'Drogi leśne, ogrody',
+    habitats: ['mieszany', 'park', 'lisciasty'],
+    typical: { capCm: 3, heightCm: 5, weightG: 5 },
+    seasonWeights: [0, 0, 0, 0, 0.2, 0.4, 0.6, 0.9, 1, 0.7, 0.2, 0],
+    description:
+      'Mały, biały kapelusz z rudobrązowym środkiem i koncentrycznymi, rdzawymi łuseczkami; cienki trzon z nietrwałym pierścieniem. Silny, nieprzyjemny, gumowy zapach. Trująca – nigdy nie zbieraj małych czubajeczek, część z nich jest śmiertelna.',
+    lookalikes: [
+      {
+        name: 'czubajeczka brązowoczerwona',
+        edibility: 'smiertelny',
+        tip: 'Brązowoczerwona ma łuseczki prawie do brzegu kapelusza i nie cuchnie gumą – obie omijaj.',
+      },
+      {
+        name: 'czubajka kania',
+        edibility: 'jadalny',
+        tip: 'Kania jest wielokrotnie większa, ma wężykowaty wzór na trzonie i gruby, ruchomy pierścień.',
+      },
+    ],
+  },
+  {
+    id: 'pieczarka-polna',
+    name: 'Pieczarka polna',
+    latin: 'Agaricus campestris',
+    shortName: 'pieczarka',
+    rarity: 'pospolity',
+    edibility: 'jadalny',
+    habitat: 'Łąki i pastwiska',
+    habitats: ['laka', 'park'],
+    typical: { capCm: 7, heightCm: 6, weightG: 50 },
+    seasonWeights: [0, 0, 0, 0, 0.2, 0.4, 0.6, 0.9, 1, 0.6, 0.1, 0],
+    description:
+      'Biały do szarawego, jedwabisty kapelusz; wolne blaszki u młodych różowe, potem czekoladowobrązowe; trzon z delikatnym pierścieniem, bez pochwy. Miąższ nie żółknie, pachnie grzybowo. Nigdy nie zbieraj okazów z białymi blaszkami.',
+    lookalikes: [
+      {
+        name: 'muchomor zielonawy',
+        edibility: 'smiertelny',
+        tip: 'Muchomor ma zawsze białe blaszki i bulwę w pochwie; pieczarka ma blaszki różowe do brązowych.',
+      },
+      {
+        name: 'muchomor jadowity',
+        edibility: 'smiertelny',
+        tip: 'Jadowity jest czysto biały, z białymi blaszkami i pochwą u podstawy; rośnie w lesie, nie na łące.',
+      },
+      {
+        name: 'pieczarka karbolowa',
+        edibility: 'trujacy',
+        tip: 'Karbolowa intensywnie żółknie u podstawy trzonu po zadrapaniu i pachnie atramentem lub fenolem.',
+      },
+    ],
+  },
+  {
+    id: 'pieczarka-karbolowa',
+    name: 'Pieczarka karbolowa',
+    latin: 'Agaricus xanthodermus',
+    shortName: 'pieczarka',
+    rarity: 'pospolity',
+    edibility: 'trujacy',
+    habitat: 'Parki i ogrody',
+    habitats: ['park', 'lisciasty', 'laka'],
+    typical: { capCm: 8, heightCm: 9, weightG: 70 },
+    seasonWeights: [0, 0, 0, 0, 0.1, 0.4, 0.6, 0.9, 1, 0.6, 0.1, 0],
+    description:
+      'Biały kapelusz i trzon; po zadrapaniu, zwłaszcza u podstawy trzonu, intensywnie chromowożółknie. Pachnie fenolem, atramentem lub szpitalem – zapach nasila się przy gotowaniu. Trująca, wywołuje wymioty i biegunkę.',
+    lookalikes: [
+      {
+        name: 'pieczarka polna',
+        edibility: 'jadalny',
+        tip: 'Polna nie żółknie u podstawy trzonu i pachnie przyjemnie grzybowo.',
+      },
+    ],
+  },
+  {
+    id: 'czernidlak-pospolity',
+    name: 'Czernidłak pospolity',
+    latin: 'Coprinopsis atramentaria',
+    shortName: 'czernidłak',
+    rarity: 'pospolity',
+    edibility: 'trujacy',
+    habitat: 'Pniaki, ogrody, łąki',
+    habitats: ['park', 'laka', 'drewno'],
+    clustered: true,
+    typical: { capCm: 5, heightCm: 10, weightG: 20 },
+    seasonWeights: [0, 0, 0.05, 0.3, 0.6, 0.4, 0.3, 0.5, 0.9, 1, 0.5, 0.1],
+    description:
+      'Szary, dzwonkowaty kapelusz z promienistymi bruzdami; rośnie kępami przy pniakach i w ogrodach, blaszki z wiekiem rozpływają się w czarny „atrament”. Zawiera koprynę – z alkoholem, nawet wypitym kilka dni później, wywołuje silne zatrucie.',
+    lookalikes: [
+      {
+        name: 'czernidłak kołpakowaty',
+        edibility: 'jadalny',
+        tip: 'Kołpakowaty jest biały, wydłużony, pokryty odstającymi łuskami i rośnie pojedynczo na trawnikach.',
+      },
+    ],
+  },
+  {
+    id: 'lisowka-pomaranczowa',
+    name: 'Lisówka pomarańczowa',
+    latin: 'Hygrophoropsis aurantiaca',
+    shortName: 'lisówka',
+    rarity: 'pospolity',
+    edibility: 'niejadalny',
+    habitat: 'Bory iglaste',
+    habitats: ['iglasty', 'mieszany', 'drewno'],
+    typical: { capCm: 4, heightCm: 5, weightG: 12 },
+    seasonWeights: [0, 0, 0, 0, 0, 0, 0.1, 0.4, 0.9, 1, 0.5, 0],
+    description:
+      'Pomarańczowy, lejkowaty kapelusz z cienkim, miękkim miąższem; pod spodem gęste, cienkie, wielokrotnie rozwidlone blaszki. Rośnie na igliwiu i butwiejącym drewnie. Niejadalna, w większej ilości może wywołać dolegliwości żołądkowe.',
+    lookalikes: [
+      {
+        name: 'pieprznik jadalny',
+        edibility: 'jadalny',
+        tip: 'Kurka ma grube, tępe listewki zamiast cienkich blaszek, jędrny miąższ i owocowy zapach.',
+      },
+    ],
+  },
+  {
+    id: 'mleczaj-welnianka',
+    name: 'Mleczaj wełnianka',
+    latin: 'Lactarius torminosus',
+    shortName: 'wełnianka',
+    rarity: 'pospolity',
+    edibility: 'trujacy',
+    habitat: 'Pod brzozami',
+    habitats: ['mieszany', 'lisciasty'],
+    typical: { capCm: 8, heightCm: 6, weightG: 60 },
+    seasonWeights: [0, 0, 0, 0, 0, 0, 0.3, 0.7, 1, 0.8, 0.3, 0],
+    description:
+      'Różowawy kapelusz z ciemniejszymi strefami i silnie kosmatym, wełnistym, podwiniętym brzegiem; rośnie pod brzozami. Białe mleczko nie zmienia barwy i jest bardzo piekące. Wywołuje nudności, wymioty i biegunkę.',
+    lookalikes: [
+      {
+        name: 'mleczaj rydz',
+        edibility: 'jadalny',
+        tip: 'Rydz ma pomarańczowe mleczko, gładki brzeg kapelusza i rośnie pod sosnami.',
+      },
+    ],
+  },
+  {
+    id: 'mleczaj-swierkowy',
+    name: 'Mleczaj świerkowy',
+    latin: 'Lactarius deterrimus',
+    shortName: 'rydz',
+    rarity: 'pospolity',
+    edibility: 'jadalny',
+    habitat: 'Pod świerkami',
+    habitats: ['iglasty', 'mieszany'],
+    typical: { capCm: 7, heightCm: 6, weightG: 60 },
+    seasonWeights: [0, 0, 0, 0, 0, 0, 0.2, 0.7, 1, 0.8, 0.2, 0],
+    description:
+      'Pomarańczowy kapelusz z ciemniejszymi pręgami, z wiekiem i po przymrozku plami się na zielono; rośnie tylko pod świerkami. Pomarańczowe mleczko po kilkunastu minutach ciemnieje do winnoczerwonego. Jadalny, mniej smaczny od rydza.',
+    lookalikes: [
+      {
+        name: 'mleczaj wełnianka',
+        edibility: 'trujacy',
+        tip: 'Wełnianka ma różowawy kapelusz z kosmatym brzegiem i białe, piekące mleczko.',
+      },
+      {
+        name: 'mleczaj rydz',
+        edibility: 'jadalny',
+        tip: 'Rydz rośnie pod sosnami, a jego pomarańczowe mleczko nie czerwienieje.',
+      },
+    ],
+  },
+  {
+    id: 'mleczaj-paskudnik',
+    name: 'Mleczaj paskudnik',
+    latin: 'Lactarius necator',
+    shortName: 'mleczaj',
+    rarity: 'pospolity',
+    edibility: 'trujacy',
+    habitat: 'Pod brzozami',
+    habitats: ['mieszany', 'lisciasty', 'iglasty'],
+    typical: { capCm: 10, heightCm: 6, weightG: 100 },
+    seasonWeights: [0, 0, 0, 0, 0, 0, 0.2, 0.6, 1, 0.9, 0.3, 0],
+    description:
+      'Duży, oliwkowobrązowy do niemal czarnego, lepki kapelusz; kremowe blaszki plamią się oliwkowo. Białe mleczko nie zmienia barwy i jest bardzo piekące. Zawiera mutagenną nekatorynę, której gotowanie nie usuwa – nie zbieraj.',
+  },
+  {
+    id: 'golabek-wymiotny',
+    name: 'Gołąbek wymiotny',
+    latin: 'Russula emetica',
+    shortName: 'gołąbek',
+    rarity: 'pospolity',
+    edibility: 'trujacy',
+    habitat: 'Wilgotne bory, mchy',
+    habitats: ['iglasty', 'torfowisko', 'mieszany'],
+    typical: { capCm: 6, heightCm: 6, weightG: 35 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.2, 0.5, 0.8, 1, 0.8, 0.2, 0],
+    description:
+      'Jaskrawoczerwony, błyszczący kapelusz z łatwo zdzieralną skórką; blaszki i trzon czysto białe, miąższ kruchy. Smak bardzo ostry, palący. Trujący – już mała ilość wywołuje bóle brzucha, nudności i wymioty.',
+    lookalikes: [
+      {
+        name: 'muchomor czerwony',
+        edibility: 'trujacy',
+        tip: 'Muchomor ma pierścień, bulwę z resztkami osłony u podstawy i zwykle białe kropki na kapeluszu.',
+      },
+    ],
+  },
+  {
+    id: 'golabek-modrozielony',
+    name: 'Gołąbek modrozielony',
+    latin: 'Russula cyanoxantha',
+    shortName: 'gołąbek',
+    rarity: 'pospolity',
+    edibility: 'jadalny',
+    habitat: 'Lasy liściaste',
+    habitats: ['lisciasty', 'mieszany'],
+    typical: { capCm: 9, heightCm: 8, weightG: 90 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.3, 0.7, 1, 0.9, 0.5, 0.1, 0],
+    description:
+      'Kapelusz bardzo zmienny: fioletowy, niebieskawy, oliwkowy lub zielonkawy, często mieszany. Białe blaszki są elastyczne i tłustawe – nie łamią się jak u innych gołąbków; trzon biały, bez pierścienia i pochwy. Smaczny, łagodny.',
+    lookalikes: [
+      {
+        name: 'muchomor zielonawy',
+        edibility: 'smiertelny',
+        tip: 'Muchomor ma pierścień i bulwę w pochwie u podstawy – zawsze wyjmuj gołąbka z całym trzonem.',
+      },
+      {
+        name: 'gołąbek zielonawy',
+        edibility: 'jadalny',
+        tip: 'Zielonawy ma zielony kapelusz popękany w drobne poletka i kruche blaszki.',
+      },
+    ],
+  },
+  {
+    id: 'golabek-jadalny',
+    name: 'Gołąbek jadalny',
+    latin: 'Russula vesca',
+    shortName: 'gołąbek',
+    rarity: 'pospolity',
+    edibility: 'jadalny',
+    habitat: 'Lasy mieszane',
+    habitats: ['mieszany', 'lisciasty', 'iglasty'],
+    typical: { capCm: 7, heightCm: 6, weightG: 60 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.4, 0.8, 1, 0.8, 0.4, 0.05, 0],
+    description:
+      'Kapelusz cielistoróżowy do brązowoczerwonego; skórka nie dochodzi 1–2 mm do brzegu, odsłaniając końce blaszek. Blaszki i trzon białe, miąższ jędrny, o łagodnym, orzechowym smaku. Zawsze sprawdź podstawę trzonu – nie może mieć pochwy.',
+    lookalikes: [
+      {
+        name: 'muchomor zielonawy',
+        edibility: 'smiertelny',
+        tip: 'Muchomor ma pierścień i bulwę w pochwie; gołąbek ma kruchy, prosty trzon bez pierścienia i pochwy.',
+      },
+      {
+        name: 'gołąbek wymiotny',
+        edibility: 'trujacy',
+        tip: 'Wymiotny ma jaskrawoczerwony, błyszczący kapelusz i bardzo piekący smak.',
+      },
+    ],
+  },
+  {
+    id: 'muchomor-czerwonawy',
+    name: 'Muchomor czerwonawy',
+    latin: 'Amanita rubescens',
+    shortName: 'muchomor',
+    rarity: 'pospolity',
+    edibility: 'jadalny',
+    habitat: 'Lasy mieszane',
+    habitats: ['mieszany', 'iglasty', 'lisciasty'],
+    typical: { capCm: 10, heightCm: 12, weightG: 90 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.5, 0.8, 1, 0.9, 0.5, 0.1, 0],
+    description:
+      'Kapelusz cielistobrązowy z łatkami osłony; miąższ po uszkodzeniu, zwłaszcza w podstawie trzonu, różowieje. Pierścień prążkowany od góry. Jadalny tylko po dokładnym ugotowaniu, nie jeść na surowo – zbiór wyłącznie dla doświadczonych.',
+    lookalikes: [
+      {
+        name: 'muchomor plamisty',
+        edibility: 'trujacy',
+        tip: 'Plamisty nie różowieje, ma gładki pierścień, prążkowany brzeg kapelusza i bulwę z wyraźnym kołnierzykiem.',
+      },
+    ],
+  },
+  {
+    id: 'muchomor-cytrynowy',
+    name: 'Muchomor cytrynowy',
+    latin: 'Amanita citrina',
+    shortName: 'muchomor',
+    rarity: 'pospolity',
+    edibility: 'niejadalny',
+    habitat: 'Bory i lasy mieszane',
+    habitats: ['iglasty', 'mieszany', 'lisciasty'],
+    typical: { capCm: 7, heightCm: 9, weightG: 50 },
+    seasonWeights: [0, 0, 0, 0, 0, 0, 0.3, 0.7, 1, 0.8, 0.2, 0],
+    description:
+      'Bladocytrynowy lub białawy kapelusz z płatami osłony, białe blaszki, pierścień i kulista bulwa z wyraźnym obrzeżeniem u podstawy. Pachnie surowymi ziemniakami. Niejadalny – nie zbieraj, łatwo pomylić go z muchomorem zielonawym.',
+    lookalikes: [
+      {
+        name: 'muchomor zielonawy',
+        edibility: 'smiertelny',
+        tip: 'Zielonawy ma oliwkowozielony kapelusz, workowatą pochwę u podstawy i nie pachnie ziemniakami.',
+      },
+      {
+        name: 'muchomor jadowity',
+        edibility: 'smiertelny',
+        tip: 'Jadowity jest czysto biały i ma luźną, workowatą pochwę zamiast bulwy z obrzeżeniem.',
+      },
+    ],
+  },
+  {
+    id: 'strzepiak-ziemistoblaszkowy',
+    name: 'Strzępiak ziemistoblaszkowy',
+    latin: 'Inocybe geophylla',
+    shortName: 'strzępiak',
+    rarity: 'pospolity',
+    edibility: 'trujacy',
+    habitat: 'Lasy, skraje dróg',
+    habitats: ['mieszany', 'lisciasty', 'iglasty'],
+    typical: { capCm: 3, heightCm: 4, weightG: 5 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.1, 0.3, 0.7, 1, 0.8, 0.3, 0],
+    description:
+      'Mały, jedwabiście biały, stożkowaty kapelusz z wyraźnym garbkiem; blaszki szarawe, z wiekiem ziemistobrązowe. Pachnie ziemią lub spermą. Zawiera muskarynę – poty, łzawienie, zaburzenia widzenia i wymioty już po kilkunastu minutach.',
+    lookalikes: [
+      {
+        name: 'lakówka ametystowa',
+        edibility: 'jadalny',
+        tip: 'Fioletowa odmiana strzępiaka ma brązowiejące blaszki; lakówka jest cała fioletowa, łącznie z blaszkami.',
+      },
+    ],
+  },
+  {
+    id: 'piestrzyca-kedzierzawa',
+    name: 'Piestrzyca kędzierzawa',
+    latin: 'Helvella crispa',
+    shortName: 'piestrzyca',
+    rarity: 'pospolity',
+    edibility: 'trujacy',
+    habitat: 'Lasy liściaste, parki',
+    habitats: ['lisciasty', 'park', 'mieszany'],
+    typical: { capCm: 4, heightCm: 8, weightG: 20 },
+    seasonWeights: [0, 0, 0, 0, 0, 0, 0.1, 0.4, 0.9, 1, 0.4, 0],
+    description:
+      'Białawy do kremowego, siodłowato powyginany, pofałdowany kapelusz na pustym trzonie z głębokimi podłużnymi bruzdami. Rośnie od końca lata do jesieni w wilgotnych lasach liściastych. Zawiera związki z grupy gyromitryny – nie jedz.',
+    lookalikes: [
+      {
+        name: 'piestrzenica kasztanowata',
+        edibility: 'smiertelny',
+        tip: 'Piestrzenica jest kasztanowobrązowa, mózgowato pofałdowana i rośnie wiosną w borach.',
+      },
+    ],
+  },
+  {
+    id: 'uszak-bzowy',
+    name: 'Uszak bzowy',
+    latin: 'Auricularia auricula-judae',
+    shortName: 'uszak',
+    rarity: 'pospolity',
+    edibility: 'jadalny',
+    habitat: 'Pnie i gałęzie bzu',
+    habitats: ['drewno', 'lisciasty', 'park'],
+    clustered: true,
+    typical: { capCm: 5, heightCm: 4, weightG: 6 },
+    seasonWeights: [0.6, 0.6, 0.7, 0.6, 0.4, 0.2, 0.2, 0.3, 0.5, 0.8, 1, 0.8],
+    description:
+      'Galaretowate, brązowe owocniki w kształcie małżowiny usznej, od spodu gładkie i lśniące, od góry matowo aksamitne. Rośnie przez cały rok, głównie na czarnym bzie, także zimą w odwilż. Po wyschnięciu twardnieje, po deszczu odżywa. Jadalny.',
+    lookalikes: [
+      {
+        name: 'uszak skórnikowaty',
+        edibility: 'niejadalny',
+        tip: 'Skórnikowaty ma owłosioną, strefowaną górną powierzchnię i rośnie dachówkowato.',
+      },
+    ],
+  },
+  {
+    id: 'hubiak-pospolity',
+    name: 'Hubiak pospolity',
+    latin: 'Fomes fomentarius',
+    shortName: 'hubiak',
+    rarity: 'pospolity',
+    edibility: 'niejadalny',
+    habitat: 'Buki i brzozy',
+    habitats: ['drewno', 'lisciasty'],
+    typical: { capCm: 20, heightCm: 12, weightG: 700 },
+    seasonWeights: [0.8, 0.8, 0.8, 0.9, 1, 1, 1, 1, 1, 1, 0.9, 0.8],
+    description:
+      'Twarda, kopytowata huba z szarym, strefowanym wierzchem i brązowymi porami od spodu; latami rośnie na bukach i brzozach. Wieloletnia – widoczna przez cały rok. Niejadalna, zdrewniała; dawniej służyła do rozniecania ognia.',
+    lookalikes: [
+      {
+        name: 'pniarek obrzeżony',
+        edibility: 'niejadalny',
+        tip: 'Pniarek ma czerwonawy lub pomarańczowy pas przy brzegu i kremowe pory; rośnie głównie na iglastych.',
+      },
+    ],
+  },
+  {
+    id: 'pniarek-obrzezony',
+    name: 'Pniarek obrzeżony',
+    latin: 'Fomitopsis pinicola',
+    shortName: 'pniarek',
+    rarity: 'pospolity',
+    edibility: 'niejadalny',
+    habitat: 'Pnie świerków i sosen',
+    habitats: ['drewno', 'iglasty'],
+    typical: { capCm: 18, heightCm: 10, weightG: 500 },
+    seasonWeights: [0.8, 0.8, 0.8, 0.9, 1, 1, 1, 1, 1, 1, 0.9, 0.8],
+    description:
+      'Wieloletnia, twarda huba z szarobrązowym wierzchem i charakterystycznym czerwonawym lub pomarańczowym pasem przy jasnym brzegu. Pory kremowe do żółtawych, przy wzroście często z kropelkami wody. Rośnie głównie na świerkach i sosnach; niejadalna.',
+    lookalikes: [
+      {
+        name: 'hubiak pospolity',
+        edibility: 'niejadalny',
+        tip: 'Hubiak ma szary wierzch bez czerwonego pasa i brązowe pory; rośnie na bukach i brzozach.',
+      },
+    ],
+  },
+  {
+    id: 'zagiew-luskowata',
+    name: 'Żagiew łuskowata',
+    latin: 'Cerioporus squamosus',
+    shortName: 'żagiew',
+    rarity: 'pospolity',
+    edibility: 'jadalny',
+    habitat: 'Pnie liściastych',
+    habitats: ['drewno', 'lisciasty', 'park'],
+    typical: { capCm: 25, heightCm: 8, weightG: 400 },
+    seasonWeights: [0, 0, 0.05, 0.4, 1, 0.8, 0.4, 0.3, 0.2, 0.1, 0.05, 0],
+    description:
+      'Duży, wachlarzowaty kapelusz na krótkim, bocznym trzonie, kremowy z koncentrycznymi, ciemnobrązowymi łuskami; od spodu białe, kanciaste pory. Miąższ pachnie świeżym ogórkiem. Jadalne tylko młode, miękkie owocniki i wyłącznie po ugotowaniu.',
+  },
+  {
+    id: 'tegoskor-pospolity',
+    name: 'Tęgoskór pospolity',
+    latin: 'Scleroderma citrinum',
+    shortName: 'tęgoskór',
+    rarity: 'pospolity',
+    edibility: 'trujacy',
+    habitat: 'Piaszczyste lasy',
+    habitats: ['iglasty', 'mieszany', 'torfowisko'],
+    typical: { capCm: 5, heightCm: 4, weightG: 50 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.2, 0.5, 0.9, 1, 0.7, 0.2, 0],
+    description:
+      'Bulwiasty owocnik bez trzonu, z grubą, twardą, żółtawoochrową skórą pokrytą płaskimi brodawkami. Wnętrze szybko ciemnieje do czarnofioletowego, marmurkowatego; zapach silny. Trujący – nie myl z purchawkami, które w środku są białe i jednolite.',
+    lookalikes: [
+      {
+        name: 'purchawka chropowata',
+        edibility: 'jadalny',
+        tip: 'Purchawka ma cienką, kolczastą skórkę, trzonkowatą podstawę i jednolicie biały środek u młodych.',
+      },
+      {
+        name: 'purchawka gruszkowata',
+        edibility: 'jadalny',
+        tip: 'Gruszkowata rośnie kępami na drewnie, ma cienką skórkę i biały środek.',
+      },
+    ],
+  },
+  {
+    id: 'purchawka-gruszkowata',
+    name: 'Purchawka gruszkowata',
+    latin: 'Apioperdon pyriforme',
+    shortName: 'purchawka',
+    rarity: 'pospolity',
+    edibility: 'jadalny',
+    habitat: 'Butwiejące drewno',
+    habitats: ['drewno', 'mieszany', 'lisciasty'],
+    clustered: true,
+    typical: { capCm: 3, heightCm: 4, weightG: 8 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.2, 0.5, 0.8, 1, 0.8, 0.3, 0],
+    description:
+      'Gruszkowate, białawe do brązowawych owocniki wyrastają gęstymi kępami na butwiejącym drewnie, u podstawy z białymi sznurami grzybni. Jadalna tylko młoda, gdy wnętrze jest jednolicie białe i jędrne – przekrój każdą sztukę.',
+    lookalikes: [
+      {
+        name: 'muchomor zielonawy',
+        edibility: 'smiertelny',
+        tip: 'Na przekroju młodego muchomora widać zarys kapelusza i blaszek; purchawka jest w środku jednolita.',
+      },
+      {
+        name: 'tęgoskór pospolity',
+        edibility: 'trujacy',
+        tip: 'Tęgoskór ma grubą, twardą, brodawkowatą skórę i ciemne, marmurkowate wnętrze; rośnie na ziemi.',
+      },
+    ],
+  },
+  {
+    id: 'madziak-psi',
+    name: 'Mądziak psi',
+    latin: 'Mutinus caninus',
+    shortName: 'mądziak',
+    rarity: 'pospolity',
+    edibility: 'niejadalny',
+    habitat: 'Lasy liściaste',
+    habitats: ['lisciasty', 'mieszany'],
+    typical: { capCm: 1, heightCm: 12, weightG: 10 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.1, 0.4, 0.8, 1, 0.6, 0.1, 0],
+    description:
+      'Wyrasta z białego „jaja” jako cienki, gąbczasty trzon z pomarańczowoczerwonym szczytem pokrytym oliwkową, śluzowatą masą zarodników. Rośnie gromadnie w wilgotnych, cienistych lasach liściastych. Niejadalny.',
+    lookalikes: [
+      {
+        name: 'sromotnik bezwstydny',
+        edibility: 'niejadalny',
+        tip: 'Sromotnik jest znacznie większy, ma biały trzon z osobnym, komorowatym kapeluszem i silnie cuchnie.',
+      },
+    ],
+  },
+  {
+    id: 'wodnicha-pozna',
+    name: 'Wodnicha późna',
+    latin: 'Hygrophorus hypothejus',
+    shortName: 'wodnicha',
+    rarity: 'rzadki',
+    edibility: 'jadalny',
+    habitat: 'Bory sosnowe',
+    habitats: ['iglasty'],
+    typical: { capCm: 4, heightCm: 6, weightG: 20 },
+    seasonWeights: [0.1, 0, 0, 0, 0, 0, 0, 0, 0.05, 0.6, 1, 0.6],
+    description:
+      'Oliwkowobrązowy, śluzowaty kapelusz z ciemniejszym środkiem; rzadkie, zbiegające blaszki od kremowych do żółtopomarańczowych; trzon żółtawy, oślizgły. Pojawia się w borach sosnowych po pierwszych przymrozkach, nawet spod śniegu. Jadalna.',
+  },
+  {
+    id: 'borowik-usiatkowany',
+    name: 'Borowik usiatkowany',
+    latin: 'Boletus reticulatus',
+    shortName: 'borowik',
+    rarity: 'rzadki',
+    edibility: 'jadalny',
+    habitat: 'Dąbrowy i buczyny',
+    habitats: ['lisciasty', 'mieszany', 'park'],
+    typical: { capCm: 13, heightCm: 13, weightG: 300 },
+    seasonWeights: [0, 0, 0, 0, 0.3, 0.8, 1, 0.9, 0.6, 0.25, 0.05, 0],
+    description:
+      'Kapelusz jasnobrązowy, matowy i zamszowy, w suchą pogodę spękany. Rurki białe, potem żółtooliwkowe, nie sinieją; trzon pokryty białą siateczką aż do podstawy. Najwcześniejszy z borowików – pojawia się już w maju pod dębami i bukami.',
+    lookalikes: [
+      {
+        name: 'borowik szatański',
+        edibility: 'trujacy',
+        tip: 'Szatan ma białoszary kapelusz, czerwone pory i czerwoną siateczkę, a miąższ sinieje. Usiatkowany ma jasne pory i nie sinieje.',
+      },
+      {
+        name: 'goryczak żółciowy',
+        edibility: 'niejadalny',
+        tip: 'Goryczak ma różowawe rurki, ciemnobrązową siateczkę na trzonie i bardzo gorzki miąższ.',
+      },
+    ],
+  },
+  {
+    id: 'borowik-sosnowy',
+    name: 'Borowik sosnowy',
+    latin: 'Boletus pinophilus',
+    shortName: 'borowik',
+    rarity: 'rzadki',
+    edibility: 'jadalny',
+    habitat: 'Bory sosnowe',
+    habitats: ['iglasty', 'mieszany'],
+    typical: { capCm: 14, heightCm: 13, weightG: 350 },
+    seasonWeights: [0, 0, 0, 0, 0.2, 0.7, 0.9, 1, 0.9, 0.5, 0.1, 0],
+    description:
+      'Kapelusz ciemny, czerwonobrązowy z winnym odcieniem, matowy, w wilgoci lekko lepki. Rurki białe, potem oliwkowożółte, nie sinieją; trzon gruby, beczułkowaty, z jasną siateczką. Miąższ biały, o łagodnym smaku.',
+    lookalikes: [
+      {
+        name: 'goryczak żółciowy',
+        edibility: 'niejadalny',
+        tip: 'Goryczak ma różowawe rurki, ciemną, grubą siateczkę na trzonie i bardzo gorzki miąższ.',
+      },
+      {
+        name: 'borowik szlachetny',
+        edibility: 'jadalny',
+        tip: 'Szlachetny ma jaśniejszy, brązowy kapelusz bez czerwonego odcienia i rośnie częściej pod świerkami.',
+      },
+    ],
+  },
+  {
+    id: 'borowik-ponury',
+    name: 'Borowik ponury',
+    latin: 'Suillellus luridus',
+    shortName: 'ponury',
+    rarity: 'rzadki',
+    edibility: 'jadalny',
+    habitat: 'Wapienne lasy, parki',
+    habitats: ['lisciasty', 'park', 'mieszany'],
+    typical: { capCm: 12, heightCm: 11, weightG: 220 },
+    seasonWeights: [0, 0, 0, 0, 0.1, 0.6, 0.9, 1, 0.8, 0.4, 0.05, 0],
+    description:
+      'Kapelusz oliwkowobrązowy, pory żółte, potem pomarańczowoczerwone; trzon z wyraźną czerwonobrązową siateczką. Miąższ silnie sinieje, nad rurkami ma czerwoną linię. Trujący na surowo – jeść tylko po dokładnym gotowaniu (ok. 25 min) i nie łączyć z alkoholem.',
+    lookalikes: [
+      {
+        name: 'borowik szatański',
+        edibility: 'trujacy',
+        tip: 'Szatan ma białoszary kapelusz, bulwiasty trzon i słabiej sinieje; stare okazy cuchną padliną. W razie wątpliwości nie zbieraj.',
+      },
+      {
+        name: 'borowik ceglastopory',
+        edibility: 'jadalny',
+        tip: 'Ceglastopory ma ciemnobrązowy kapelusz, a trzon pokryty czerwonymi kropkami zamiast siateczki.',
+      },
+    ],
+  },
+  {
+    id: 'piaskowiec-modrzak',
+    name: 'Piaskowiec modrzak',
+    latin: 'Gyroporus cyanescens',
+    shortName: 'piaskowiec',
+    rarity: 'rzadki',
+    edibility: 'jadalny',
+    habitat: 'Piaszczyste lasy',
+    habitats: ['mieszany', 'lisciasty', 'iglasty'],
+    typical: { capCm: 8, heightCm: 8, weightG: 90 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.1, 0.5, 0.9, 1, 0.6, 0.15, 0],
+    description:
+      'Kapelusz słomkowokremowy, filcowaty; rurki białe, potem żółtawe. Trzon kruchy, z wiekiem komorowato pusty. Miąższ po przekrojeniu natychmiast barwi się na intensywnie chabrowo – to cecha rozpoznawcza, a nie oznaka trucizny.',
+    lookalikes: [
+      {
+        name: 'piaskowiec kasztanowaty',
+        edibility: 'jadalny',
+        tip: 'Kasztanowaty ma rdzawobrązowy kapelusz i trzon, a jego miąższ po przekrojeniu nie sinieje.',
+      },
+    ],
+  },
+  {
+    id: 'piaskowiec-kasztanowaty',
+    name: 'Piaskowiec kasztanowaty',
+    latin: 'Gyroporus castaneus',
+    shortName: 'piaskowiec',
+    rarity: 'rzadki',
+    edibility: 'jadalny',
+    habitat: 'Dąbrowy na piaskach',
+    habitats: ['lisciasty', 'mieszany'],
+    typical: { capCm: 6, heightCm: 6, weightG: 45 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.15, 0.6, 1, 0.8, 0.3, 0, 0],
+    description:
+      'Kapelusz i trzon rdzawo- lub kasztanowobrązowe, zamszowe, w suszy spękane. Rurki i miąższ białe, nie sinieją; trzon kruchy, z wiekiem pusty w środku. Rośnie na kwaśnych, piaszczystych glebach, najczęściej pod dębami.',
+    lookalikes: [
+      {
+        name: 'piaskowiec modrzak',
+        edibility: 'jadalny',
+        tip: 'Modrzak ma jaśniejszy, słomkowy kapelusz, a jego miąższ po przekrojeniu intensywnie sinieje.',
+      },
+    ],
+  },
+  {
+    id: 'kozlarz-bialawy',
+    name: 'Koźlarz białawy',
+    latin: 'Leccinum holopus',
+    shortName: 'koźlarz',
+    rarity: 'rzadki',
+    edibility: 'jadalny',
+    habitat: 'Torfowiska z brzozą',
+    habitats: ['torfowisko', 'lisciasty'],
+    typical: { capCm: 8, heightCm: 12, weightG: 80 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.2, 0.6, 0.9, 1, 0.5, 0.05, 0],
+    description:
+      'Kapelusz białawy do kremowego, z wiekiem beżowy lub zielonkawy. Trzon wysmukły, biały z białymi, potem szarawymi łuseczkami; miąższ biały, u podstawy trzonu często zielonkawy lub niebieskawy. Rośnie wśród torfowców pod brzozami.',
+    lookalikes: [
+      {
+        name: 'koźlarz babka',
+        edibility: 'jadalny',
+        tip: 'Babka ma brązowy kapelusz i ciemne łuski na trzonie; rośnie w suchszych miejscach pod brzozami.',
+      },
+    ],
+  },
+  {
+    id: 'podgrzybek-pasozytniczy',
+    name: 'Podgrzybek pasożytniczy',
+    latin: 'Pseudoboletus parasiticus',
+    shortName: 'podgrzybek',
+    rarity: 'rzadki',
+    edibility: 'niejadalny',
+    habitat: 'Na tęgoskórach',
+    habitats: ['mieszany', 'lisciasty', 'iglasty'],
+    typical: { capCm: 4, heightCm: 5, weightG: 20 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.1, 0.5, 1, 0.9, 0.4, 0.05, 0],
+    protection: 'czesciowa',
+    description:
+      'Mały, oliwkowobrązowy, zamszowy grzyb rosnący wyłącznie na owocnikach tęgoskóra pospolitego. Rurki żółte, potem rdzawooliwkowe; trzon cienki, często wygięty. Gatunek pod ochroną częściową – nie zbieraj.',
+    lookalikes: [
+      {
+        name: 'podgrzybek zajączek',
+        edibility: 'jadalny',
+        tip: 'Zajączek rośnie na ziemi, a nie na tęgoskórze; jest większy i ma żywo żółte rurki.',
+      },
+    ],
+  },
+  {
+    id: 'kolczak-oblaczasty',
+    name: 'Kolczak obłączasty',
+    latin: 'Hydnum repandum',
+    shortName: 'kolczak',
+    rarity: 'rzadki',
+    edibility: 'jadalny',
+    habitat: 'Lasy mieszane',
+    habitats: ['mieszany', 'lisciasty', 'iglasty'],
+    typical: { capCm: 8, heightCm: 6, weightG: 80 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.1, 0.4, 0.8, 1, 0.8, 0.3, 0],
+    description:
+      'Kapelusz kremowy do bladopomarańczowego, nieregularny i kruchy. Pod spodem zamiast rurek i blaszek gęste, łamliwe kolce; trzon krótki, jasny, często mimośrodowy. Jadalne są młode okazy – starsze stają się gorzkawe.',
+    lookalikes: [
+      {
+        name: 'pieprznik jadalny',
+        edibility: 'jadalny',
+        tip: 'Kurka ma pod kapeluszem listewki, a kolczak – drobne, łatwo odpadające kolce.',
+      },
+      {
+        name: 'kolczak rudawy',
+        edibility: 'jadalny',
+        tip: 'Kolczak rudawy jest mniejszy, bardziej pomarańczowy, a jego kolce nie zbiegają na trzon.',
+      },
+    ],
+  },
+  {
+    id: 'pieprznik-trabkowy',
+    name: 'Pieprznik trąbkowy',
+    latin: 'Craterellus tubaeformis',
+    shortName: 'pieprznik',
+    rarity: 'rzadki',
+    edibility: 'jadalny',
+    habitat: 'Mszyste bory świerkowe',
+    habitats: ['iglasty', 'mieszany'],
+    clustered: true,
+    typical: { capCm: 4, heightCm: 6, weightG: 6 },
+    seasonWeights: [0, 0, 0, 0, 0, 0, 0.05, 0.3, 0.8, 1, 0.6, 0.1],
+    description:
+      'Kapelusz szarobrązowy, lejkowaty, w środku przedziurawiony. Pod spodem żółtawoszare, rozwidlone listewki zamiast blaszek; trzon pusty, żółty. Rośnie gromadnie w wilgotnych mchach aż do pierwszych mrozów.',
+    lookalikes: [
+      {
+        name: 'lejkowiec dęty',
+        edibility: 'jadalny',
+        tip: 'Lejkowiec dęty jest czarnoszary i ma spód niemal gładki, bez wyraźnych listewek.',
+      },
+      {
+        name: 'pieprznik jadalny',
+        edibility: 'jadalny',
+        tip: 'Kurka jest cała żółta, mięsista i ma pełny, nie pusty trzon.',
+      },
+    ],
+  },
+  {
+    id: 'plomiennica-zimowa',
+    name: 'Płomiennica zimowa',
+    latin: 'Flammulina velutipes',
+    shortName: 'płomiennica',
+    rarity: 'rzadki',
+    edibility: 'jadalny',
+    habitat: 'Pnie wierzb i topól',
+    habitats: ['drewno', 'lisciasty', 'park'],
+    clustered: true,
+    typical: { capCm: 4, heightCm: 6, weightG: 8 },
+    seasonWeights: [1, 0.8, 0.5, 0.15, 0, 0, 0, 0, 0.05, 0.5, 0.9, 1],
+    description:
+      'Kapelusz miodowopomarańczowy, śliski i błyszczący; blaszki kremowe. Trzon w górze żółty, ku dołowi ciemnobrązowy i aksamitny, bez pierścienia. Rośnie kępami na drewnie zimą; jeść tylko kapelusze, po ugotowaniu – nie na surowo.',
+    lookalikes: [
+      {
+        name: 'hełmówka jadowita',
+        edibility: 'smiertelny',
+        tip: 'Hełmówka ma rdzawobrązowe blaszki, pierścień i srebrzyste włókienka na trzonie; płomiennica – białe zarodniki i aksamitny trzon.',
+      },
+      {
+        name: 'maślanka wiązkowa',
+        edibility: 'trujacy',
+        tip: 'Maślanka ma siarkowożółte, potem oliwkowe blaszki, gorzki smak i gładki, żółty trzon.',
+      },
+    ],
+  },
+  {
+    id: 'zolciak-siarkowy',
+    name: 'Żółciak siarkowy',
+    latin: 'Laetiporus sulphureus',
+    shortName: 'żółciak',
+    rarity: 'rzadki',
+    edibility: 'jadalny',
+    habitat: 'Pnie dębów i wierzb',
+    habitats: ['drewno', 'lisciasty', 'park'],
+    typical: { capCm: 25, heightCm: 15, weightG: 1200 },
+    seasonWeights: [0, 0, 0, 0.1, 0.7, 1, 0.9, 0.7, 0.5, 0.25, 0.05, 0],
+    description:
+      'Wachlarzowate, dachówkowato nakładające się owocniki, pomarańczowe z wierzchu i siarkowożółte od spodu, na pniach drzew liściastych. Jadalne tylko młode, miękkie brzegi – zawsze dokładnie ugotowane, nigdy na surowo; unikaj okazów z cisów i drzew iglastych.',
+    lookalikes: [
+      {
+        name: 'murszak rdzawy',
+        edibility: 'niejadalny',
+        tip: 'Murszak rośnie u podstawy sosen, ma filcowatą, rdzawobrązową powierzchnię i ciemnieje po dotyku.',
+      },
+    ],
+  },
+  {
+    id: 'flagowiec-olbrzymi',
+    name: 'Flagowiec olbrzymi',
+    latin: 'Meripilus giganteus',
+    shortName: 'flagowiec',
+    rarity: 'rzadki',
+    edibility: 'jadalny',
+    habitat: 'U podstawy buków',
+    habitats: ['drewno', 'lisciasty', 'park'],
+    typical: { capCm: 50, heightCm: 20, weightG: 6000 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.2, 0.6, 1, 0.9, 0.5, 0.1, 0],
+    description:
+      'Ogromna rozeta wachlarzowatych, brązowych kapeluszy u podstawy buków i dębów. Spód z drobnymi, białymi porami, które po uciśnięciu – podobnie jak miąższ – czernieją. Jadalne tylko bardzo młode brzegi, po ugotowaniu; starsze są łykowate i kwaśne.',
+    lookalikes: [
+      {
+        name: 'żagwica listkowata',
+        edibility: 'jadalny',
+        tip: 'Żagwica ma liczne drobne, szarobrązowe kapelusiki, nie czernieje po uciśnięciu i rośnie głównie pod dębami.',
+      },
+    ],
+  },
+  {
+    id: 'pieczarka-lesna',
+    name: 'Pieczarka leśna',
+    latin: 'Agaricus sylvaticus',
+    shortName: 'pieczarka',
+    rarity: 'rzadki',
+    edibility: 'jadalny',
+    habitat: 'Bory świerkowe',
+    habitats: ['iglasty', 'mieszany'],
+    typical: { capCm: 7, heightCm: 8, weightG: 50 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.1, 0.4, 0.8, 1, 0.7, 0.2, 0],
+    description:
+      'Kapelusz pokryty brązowymi, włókienkowatymi łuskami. Blaszki wolne, szaroróżowe, potem ciemnobrązowe – nigdy białe; trzon z pierścieniem, bez pochwy. Miąższ po przekrojeniu szybko czerwienieje.',
+    lookalikes: [
+      {
+        name: 'muchomor zielonawy',
+        edibility: 'smiertelny',
+        tip: 'Muchomor ma stale białe blaszki i pochwę u podstawy trzonu; pieczarka ma blaszki różowe do brązowych.',
+      },
+      {
+        name: 'pieczarka karbolowa',
+        edibility: 'trujacy',
+        tip: 'Karbolowa żółknie w podstawie trzonu po przecięciu i pachnie atramentem lub karbolem.',
+      },
+    ],
+  },
+  {
+    id: 'helmowka-jadowita',
+    name: 'Hełmówka jadowita',
+    latin: 'Galerina marginata',
+    shortName: 'hełmówka',
+    rarity: 'rzadki',
+    edibility: 'smiertelny',
+    habitat: 'Butwiejące pnie',
+    habitats: ['drewno', 'iglasty', 'mieszany'],
+    clustered: true,
+    typical: { capCm: 3, heightCm: 5, weightG: 5 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.1, 0.3, 0.7, 1, 0.9, 0.5, 0.1],
+    description:
+      'Mały, miodowobrązowy grzyb rosnący kępkami na murszejącym drewnie. Blaszki rdzawobrązowe, trzon z nietrwałym pierścieniem, poniżej pokryty srebrzystymi włókienkami. Zawiera amanityny jak muchomor zielonawy – łatwo pomylić z opieńką lub łuszczakiem.',
+    lookalikes: [
+      {
+        name: 'łuszczak zmienny',
+        edibility: 'jadalny',
+        tip: 'Łuszczak ma pod pierścieniem odstające, ciemne łuseczki na trzonie; hełmówka – gładkie, srebrzyste włókienka.',
+      },
+      {
+        name: 'opieńka miodowa',
+        edibility: 'jadalny',
+        tip: 'Opieńka ma białe blaszki i zarodniki, grubszy trzon i wyraźny, białawy pierścień.',
+      },
+      {
+        name: 'płomiennica zimowa',
+        edibility: 'jadalny',
+        tip: 'Płomiennica nie ma pierścienia, jej trzon jest ciemny i aksamitny, a zarodniki białe.',
+      },
+    ],
+  },
+  {
+    id: 'muchomor-jadowity',
+    name: 'Muchomor jadowity',
+    latin: 'Amanita virosa',
+    shortName: 'muchomor',
+    rarity: 'rzadki',
+    edibility: 'smiertelny',
+    habitat: 'Wilgotne kwaśne bory',
+    habitats: ['iglasty', 'mieszany', 'lisciasty'],
+    typical: { capCm: 7, heightCm: 11, weightG: 70 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.1, 0.4, 0.9, 1, 0.5, 0.05, 0],
+    description:
+      'Cały śnieżnobiały: kapelusz jedwabisty, często stożkowaty i niesymetryczny, blaszki stale białe. Trzon kosmato-łuseczkowaty, z postrzępionym pierścieniem i workowatą pochwą u bulwiastej podstawy. Śmiertelnie trujący – zawiera amanityny.',
+    lookalikes: [
+      {
+        name: 'muchomor zielonawy',
+        edibility: 'smiertelny',
+        tip: 'Biała forma zielonawego jest równie śmiertelna; oba mają białe blaszki, pierścień i pochwę – nie zbieraj białych grzybów z pochwą.',
+      },
+      {
+        name: 'pieczarka polna',
+        edibility: 'jadalny',
+        tip: 'Pieczarka ma różowe, potem brązowe blaszki i nie ma pochwy; zawsze wykop cały trzon i sprawdź podstawę.',
+      },
+      {
+        name: 'purchawka chropowata',
+        edibility: 'jadalny',
+        tip: 'Przetnij młodą purchawkę – w środku jest jednolicie biała; młody muchomor w osłonie pokazuje zarys kapelusza i blaszek.',
+      },
+    ],
+  },
+  {
+    id: 'gaska-tygrysia',
+    name: 'Gąska tygrysia',
+    latin: 'Tricholoma pardinum',
+    shortName: 'gąska',
+    rarity: 'rzadki',
+    edibility: 'trujacy',
+    habitat: 'Wapienne buczyny',
+    habitats: ['lisciasty', 'iglasty', 'mieszany'],
+    typical: { capCm: 9, heightCm: 9, weightG: 120 },
+    seasonWeights: [0, 0, 0, 0, 0, 0, 0.1, 0.6, 1, 0.6, 0.1, 0],
+    description:
+      'Kapelusz mięsisty, białawoszary, pokryty koncentrycznie ułożonymi, szarobrązowymi łuseczkami. Blaszki białawe z zielonkawożółtym odcieniem, trzon biały, u dołu ochrowy; zapach mączny. Powoduje ostre zatrucie żołądkowo-jelitowe.',
+    lookalikes: [
+      {
+        name: 'gąska ziemistoblaszkowa',
+        edibility: 'jadalny',
+        tip: 'Ziemistoblaszkowa jest mniejsza, ma cienki miąższ, filcowaty kapelusz bez wyraźnych łusek i nie pachnie mąką.',
+      },
+      {
+        name: 'gąska niekształtna',
+        edibility: 'jadalny',
+        tip: 'Niekształtna ma gładki, ciemnoszary, promieniście włókienkowaty kapelusz bez łusek i rośnie w borach sosnowych.',
+      },
+    ],
+  },
+  {
+    id: 'piestrzenica-olbrzymia',
+    name: 'Piestrzenica olbrzymia',
+    latin: 'Discina gigas',
+    shortName: 'piestrzenica',
+    rarity: 'rzadki',
+    edibility: 'trujacy',
+    habitat: 'Wiosną, przy pniakach',
+    habitats: ['lisciasty', 'mieszany', 'drewno'],
+    typical: { capCm: 10, heightCm: 10, weightG: 150 },
+    seasonWeights: [0, 0, 0.4, 1, 0.6, 0.05, 0, 0, 0, 0, 0, 0],
+    description:
+      'Duży, jasnoochrowy do brązowawego, mózgowato pofałdowany kapelusz na grubym, krótkim, białym trzonie; wnętrze z komorami. Zawiera giromitrynę (mniej niż piestrzenica kasztanowata), a obie łatwo pomylić – nie zbieraj.',
+    lookalikes: [
+      {
+        name: 'piestrzenica kasztanowata',
+        edibility: 'smiertelny',
+        tip: 'Kasztanowata jest mniejsza i ciemniejsza; pewne odróżnienie wymaga mikroskopu – nie zbieraj żadnej z nich.',
+      },
+      {
+        name: 'smardz jadalny',
+        edibility: 'jadalny',
+        tip: 'Smardz ma regularne, gąbczaste komory na kapeluszu i jest w całości pusty w środku.',
+      },
+    ],
+  },
+  {
+    id: 'naparstniczka-czeska',
+    name: 'Naparstniczka czeska',
+    latin: 'Verpa bohemica',
+    shortName: 'naparstniczka',
+    rarity: 'rzadki',
+    edibility: 'trujacy',
+    habitat: 'Łęgi pod osikami',
+    habitats: ['lisciasty', 'park'],
+    typical: { capCm: 3, heightCm: 10, weightG: 25 },
+    seasonWeights: [0, 0, 0.3, 1, 0.5, 0, 0, 0, 0, 0, 0, 0],
+    protection: 'czesciowa',
+    description:
+      'Dzwonkowaty, podłużnie pofałdowany, brązowy kapelusz przyrośnięty do trzonu tylko na szczycie – boki wiszą swobodnie jak naparstek. Trzon wypełniony watowatym miąższem. Bywa uznawana za jadalną, ale znane są zatrucia. Gatunek pod ochroną częściową – nie zbieraj.',
+    lookalikes: [
+      {
+        name: 'piestrzenica kasztanowata',
+        edibility: 'smiertelny',
+        tip: 'Piestrzenica ma mózgowato pofałdowany, kasztanowy kapelusz zrośnięty z trzonem w wielu miejscach.',
+      },
+      {
+        name: 'smardz półwolny',
+        edibility: 'jadalny',
+        tip: 'Smardz półwolny ma kapelusz z komorami, przyrośnięty do trzonu do połowy wysokości, a trzon pusty.',
+      },
+    ],
+  },
+  {
+    id: 'czarka-austriacka',
+    name: 'Czarka austriacka',
+    latin: 'Sarcoscypha austriaca',
+    shortName: 'czarka',
+    rarity: 'rzadki',
+    edibility: 'niejadalny',
+    habitat: 'Opadłe gałązki',
+    habitats: ['drewno', 'lisciasty'],
+    typical: { capCm: 3, heightCm: 2, weightG: 3 },
+    seasonWeights: [0.1, 0.4, 1, 0.9, 0.3, 0, 0, 0, 0, 0, 0.05, 0.1],
+    description:
+      'Miseczka o jaskrawoszkarłatnym wnętrzu i bladej, owłosionej stronie zewnętrznej, na krótkim trzonku. Rośnie przedwiośniem na opadłych, butwiejących gałązkach wierzb, olch i klonów, często wśród mchów w wilgotnych lasach.',
+    lookalikes: [
+      {
+        name: 'czarka jurajska',
+        edibility: 'niejadalny',
+        tip: 'Czarka jurajska rośnie głównie na gałęziach lip i jest pod ochroną ścisłą; pewne odróżnienie wymaga mikroskopu.',
+      },
+      {
+        name: 'czarka szkarłatna',
+        edibility: 'niejadalny',
+        tip: 'Czarka szkarłatna różni się tylko mikroskopowo – ma proste włoski i zaokrąglone zarodniki.',
+      },
+    ],
+  },
+  {
+    id: 'sromotnik-bezwstydny',
+    name: 'Sromotnik bezwstydny',
+    latin: 'Phallus impudicus',
+    shortName: 'sromotnik',
+    rarity: 'pospolity',
+    edibility: 'niejadalny',
+    habitat: 'Żyzne lasy i parki',
+    habitats: ['lisciasty', 'mieszany', 'park'],
+    typical: { capCm: 3, heightCm: 18, weightG: 60 },
+    seasonWeights: [0, 0, 0, 0, 0.2, 0.6, 1, 1, 0.8, 0.4, 0.05, 0],
+    description:
+      'Z białego, galaretowatego „jaja” wyrasta biały, gąbczasty trzon z główką pokrytą oliwkowozielonym, cuchnącym śluzem z zarodnikami. Odór padliny, wyczuwalny z daleka, zwabia muchy roznoszące zarodniki.',
+    lookalikes: [
+      {
+        name: 'muchomor zielonawy',
+        edibility: 'smiertelny',
+        tip: 'Młody muchomor w osłonie przypomina „jajo” sromotnika – po przecięciu widać zarys kapelusza i blaszek, a nie galaretę.',
+      },
+      {
+        name: 'mądziak psi',
+        edibility: 'niejadalny',
+        tip: 'Mądziak jest mniejszy i smuklejszy, ma pomarańczowoczerwony szczyt i słabszy zapach.',
+      },
+    ],
+  },
+  {
+    id: 'gwiazdosz-fredzelkowany',
+    name: 'Gwiazdosz frędzelkowany',
+    latin: 'Geastrum fimbriatum',
+    shortName: 'gwiazdosz',
+    rarity: 'rzadki',
+    edibility: 'niejadalny',
+    habitat: 'Ściółka iglasta',
+    habitats: ['iglasty', 'mieszany', 'lisciasty'],
+    typical: { capCm: 4, heightCm: 2, weightG: 5 },
+    seasonWeights: [0, 0, 0, 0, 0.1, 0.2, 0.4, 0.7, 1, 0.9, 0.4, 0],
+    description:
+      'Kulista, szarobrązowa główka z otworem otoczonym drobno postrzępionym, niewyodrębnionym brzegiem, siedząca na 7–10 jasnoochrowych, odgiętych w dół ramionach. Po naciśnięciu główki wydobywa się chmurka brązowych zarodników.',
+    lookalikes: [
+      {
+        name: 'gwiazdosz czteropromienny',
+        edibility: 'niejadalny',
+        tip: 'Czteropromienny stoi na 4 łukowato wygiętych ramionach jak na nóżkach, a jego otwór jest wyraźnie odgraniczony.',
+      },
+      {
+        name: 'gwiazdosz potrójny',
+        edibility: 'niejadalny',
+        tip: 'Potrójny jest większy, ma pod główką kołnierz w kształcie miseczki i wyraźnie odgraniczony otwór.',
+      },
+    ],
+  },
+  {
+    id: 'zaslonak-fioletowy',
+    name: 'Zasłonak fioletowy',
+    latin: 'Cortinarius violaceus',
+    shortName: 'zasłonak',
+    rarity: 'rzadki',
+    edibility: 'niejadalny',
+    habitat: 'Buczyny i brzeziny',
+    habitats: ['lisciasty', 'mieszany', 'iglasty'],
+    typical: { capCm: 8, heightCm: 10, weightG: 90 },
+    seasonWeights: [0, 0, 0, 0, 0, 0, 0.2, 0.7, 1, 0.7, 0.1, 0],
+    description:
+      'Cały ciemnofioletowy: łuseczkowato-filcowaty kapelusz, fioletowe blaszki (z wiekiem rdzawe od zarodników), trzon z bulwką i pajęczynowatą zasnówką. Miąższ fioletowy, pachnie cedrem. Niesmaczny, a zasłonaki łatwo pomylić z gatunkami śmiertelnie trującymi.',
+    lookalikes: [
+      {
+        name: 'zasłonak kozi',
+        edibility: 'niejadalny',
+        tip: 'Zasłonak kozi ma jaśniejszy, liliowy kapelusz, ochrowe blaszki i nieprzyjemny, kozi zapach.',
+      },
+      {
+        name: 'gąsówka fioletowawa',
+        edibility: 'jadalny',
+        tip: 'Gąsówka ma gładki kapelusz bez łusek, blaszki różowawe, nie rdzawe, i nie ma zasnówki.',
+      },
+      {
+        name: 'lakówka ametystowa',
+        edibility: 'jadalny',
+        tip: 'Lakówka jest znacznie mniejsza, ma rzadkie, grube blaszki i cienki, włóknisty trzon.',
+      },
+    ],
+  },
+  {
+    id: 'blyskoporek-podkorowy',
+    name: 'Błyskoporek podkorowy',
+    latin: 'Inonotus obliquus',
+    shortName: 'czaga',
+    rarity: 'rzadki',
+    edibility: 'niejadalny',
+    habitat: 'Pnie żywych brzóz',
+    habitats: ['drewno', 'lisciasty', 'mieszany'],
+    typical: { capCm: 20, heightCm: 25, weightG: 900 },
+    seasonWeights: [1, 1, 0.9, 0.8, 0.7, 0.7, 0.7, 0.7, 0.8, 0.9, 1, 1],
+    protection: 'czesciowa',
+    description:
+      'Bezpłodna, czarna, głęboko spękana narośl przypominająca zwęglone drewno, wewnątrz rdzawożółta; rośnie latami na pniach żywych brzóz. Używana do naparów (czaga), ale zawiera dużo szczawianów szkodliwych dla nerek. Gatunek pod ochroną częściową – nie zbieraj.',
+    lookalikes: [
+      {
+        name: 'hubiak pospolity',
+        edibility: 'niejadalny',
+        tip: 'Hubiak ma kształt kopyta z szarą skorupą i porami od spodu; czaga to bezkształtna, czarna, spękana narośl.',
+      },
+    ],
+  },
+  {
+    id: 'borowik-zoltobrazowy',
+    name: 'Borowik żółtobrązowy',
+    latin: 'Butyriboletus appendiculatus',
+    shortName: 'borowik',
+    rarity: 'epicki',
+    edibility: 'jadalny',
+    habitat: 'Dąbrowy i buczyny',
+    habitats: ['lisciasty', 'mieszany'],
+    typical: { capCm: 12, heightCm: 12, weightG: 250 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.3, 0.7, 1, 0.8, 0.3, 0, 0],
+    description:
+      'Kapelusz żółtobrązowy do rdzawobrązowego, pory jaskrawożółte, trzon złotożółty z delikatną żółtą siateczką, u dołu zwężony i z rdzawymi plamami. Żółtawy miąższ na przekroju lekko sinieje. Rośnie pod dębami i bukami na glebach wapiennych.',
+    lookalikes: [
+      {
+        name: 'borowik korzeniasty',
+        edibility: 'trujacy',
+        tip: 'Korzeniasty ma białawoszary kapelusz, gorzki, silnie siniejący miąższ i korzeniasto zwężoną podstawę trzonu.',
+      },
+      {
+        name: 'borowik królewski',
+        edibility: 'jadalny',
+        tip: 'Królewski ma kapelusz różowy do purpurowoczerwonego; żółtobrązowy jest brązowy, bez różowych tonów.',
+      },
+      {
+        name: 'borowik szlachetny',
+        edibility: 'jadalny',
+        tip: 'Szlachetny ma białawą siateczkę na trzonie, białe lub oliwkowe pory i miąższ, który nie sinieje.',
+      },
+    ],
+  },
+  {
+    id: 'borowik-korzeniasty',
+    name: 'Borowik korzeniasty',
+    latin: 'Caloboletus radicans',
+    shortName: 'borowik',
+    rarity: 'epicki',
+    edibility: 'trujacy',
+    habitat: 'Ciepłe buczyny',
+    habitats: ['lisciasty'],
+    typical: { capCm: 15, heightCm: 12, weightG: 350 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.1, 0.6, 1, 0.7, 0.3, 0, 0],
+    protection: 'scisla',
+    description:
+      'Duży, białawoszary lub beżowy kapelusz, cytrynowożółte pory i żółty trzon bez czerwieni, zwężony u dołu w korzeniasty wyrostek. Miąższ natychmiast mocno sinieje i jest gorzki; po zjedzeniu może wywołać wymioty i biegunkę. Gatunek pod ochroną ścisłą – nie zrywaj.',
+    lookalikes: [
+      {
+        name: 'borowik szatański',
+        edibility: 'trujacy',
+        tip: 'Szatański ma czerwone pory i czerwono nabiegły trzon; korzeniasty ma pory cytrynowożółte i trzon bez czerwieni.',
+      },
+      {
+        name: 'borowik żółtobrązowy',
+        edibility: 'jadalny',
+        tip: 'Żółtobrązowy ma brązowy kapelusz i łagodny smak; korzeniasty jest białawoszary, mocno sinieje i jest gorzki.',
+      },
+      {
+        name: 'borowik szlachetny',
+        edibility: 'jadalny',
+        tip: 'Szlachetny ma białe lub oliwkowe pory i miąższ, który nie sinieje po przekrojeniu.',
+      },
+    ],
+  },
+  {
+    id: 'szyszkowiec-luskowaty',
+    name: 'Szyszkowiec łuskowaty',
+    latin: 'Strobilomyces strobilaceus',
+    shortName: 'szyszkowiec',
+    rarity: 'epicki',
+    edibility: 'jadalny',
+    habitat: 'Buczyny i świerczyny',
+    habitats: ['mieszany', 'lisciasty', 'iglasty'],
+    typical: { capCm: 9, heightCm: 11, weightG: 90 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.1, 0.6, 1, 0.9, 0.5, 0.1, 0],
+    protection: 'czesciowa',
+    description:
+      'Szarobrązowy do czarnego kapelusz pokryty grubymi, odstającymi, wełnistymi łuskami jak szyszka; pory białoszare, potem ciemne, trzon kosmaty. Miąższ po przekrojeniu czerwienieje, a potem czernieje. Gatunek pod ochroną częściową – nie zbieraj.',
+  },
+  {
+    id: 'ozorek-debowy',
+    name: 'Ozorek dębowy',
+    latin: 'Fistulina hepatica',
+    shortName: 'ozorek',
+    rarity: 'epicki',
+    edibility: 'jadalny',
+    habitat: 'Pnie starych dębów',
+    habitats: ['drewno', 'lisciasty', 'park'],
+    typical: { capCm: 15, heightCm: 10, weightG: 350 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.1, 0.5, 1, 1, 0.5, 0.1, 0],
+    protection: 'czesciowa',
+    description:
+      'Mięsisty, czerwony owocnik w kształcie języka lub wątroby, wyrastający nisko na pniu dębu; od spodu kremowe, drobne rurki. Miąższ przypomina surowe mięso i wydziela czerwony sok, smak kwaskowaty. Gatunek pod ochroną częściową – nie zbieraj.',
+  },
+  {
+    id: 'lakownica-zoltawa',
+    name: 'Lakownica żółtawa',
+    latin: 'Ganoderma lucidum',
+    shortName: 'lakownica',
+    rarity: 'epicki',
+    edibility: 'niejadalny',
+    habitat: 'Pniaki liściastych',
+    habitats: ['drewno', 'lisciasty', 'park'],
+    typical: { capCm: 12, heightCm: 14, weightG: 90 },
+    seasonWeights: [0.1, 0.1, 0.1, 0.1, 0.2, 0.5, 0.9, 1, 0.9, 0.6, 0.3, 0.15],
+    protection: 'czesciowa',
+    description:
+      'Nerkowaty kapelusz jakby polakierowany – od żółtego brzegu po czerwonobrązowy do niemal czarnego środek, na bocznym, równie błyszczącym trzonie. Pory białawe, potem brązowe; miąższ korkowaty. Rośnie u podstawy pni i na korzeniach drzew liściastych. Gatunek pod ochroną częściową – nie zbieraj.',
+    lookalikes: [
+      {
+        name: 'lakownica spłaszczona',
+        edibility: 'niejadalny',
+        tip: 'Lakownica spłaszczona jest matowa, szarobrązowa, wieloletnia i przyrasta bokiem do pnia, bez trzonu.',
+      },
+    ],
+  },
+  {
+    id: 'smardz-stozkowaty',
+    name: 'Smardz stożkowaty',
+    latin: 'Morchella conica',
+    shortName: 'smardz',
+    rarity: 'epicki',
+    edibility: 'jadalny',
+    habitat: 'Wiosną, doliny potoków',
+    habitats: ['mieszany', 'park', 'lisciasty'],
+    typical: { capCm: 4, heightCm: 9, weightG: 30 },
+    seasonWeights: [0, 0, 0.3, 1, 0.8, 0.1, 0, 0, 0, 0, 0, 0],
+    protection: 'czesciowa',
+    description:
+      'Wydłużony, stożkowaty kapelusz szarobrązowy do czarniawego, z komorami w pionowych rzędach między ciemnymi żeberkami; cały owocnik pusty w środku. Jadalny wyłącznie po dokładnym ugotowaniu – nie jeść na surowo. Gatunek pod ochroną częściową – nie zbieraj.',
+    lookalikes: [
+      {
+        name: 'piestrzenica kasztanowata',
+        edibility: 'smiertelny',
+        tip: 'Piestrzenica ma mózgowato pofałdowany kapelusz bez komór i komorowate wnętrze; smardz jest w środku jednolicie pusty.',
+      },
+      {
+        name: 'naparstniczka czeska',
+        edibility: 'trujacy',
+        tip: 'Naparstniczka ma kapelusz przyrośnięty tylko na samym szczycie, a trzon wypełniony watowatym rdzeniem.',
+      },
+      {
+        name: 'smardz jadalny',
+        edibility: 'jadalny',
+        tip: 'Smardz jadalny ma jaśniejszy, jajowaty kapelusz z nieregularnymi komorami, bez ciemnych pionowych żeberek.',
+      },
+    ],
+  },
+  {
+    id: 'smardz-polwolny',
+    name: 'Smardz półwolny',
+    latin: 'Morchella semilibera',
+    shortName: 'smardz',
+    rarity: 'epicki',
+    edibility: 'jadalny',
+    habitat: 'Wiosną, łęgi i parki',
+    habitats: ['lisciasty', 'park'],
+    typical: { capCm: 3, heightCm: 10, weightG: 25 },
+    seasonWeights: [0, 0, 0.2, 1, 0.7, 0.1, 0, 0, 0, 0, 0, 0],
+    protection: 'czesciowa',
+    description:
+      'Mały, stożkowaty kapelusz z pionowymi żeberkami, przyrośnięty do trzonu tylko górną połową – dolny brzeg odstaje jak spódniczka. Trzon długi, kruchy, pusty w środku. Jadalny tylko po ugotowaniu – nie jeść na surowo. Gatunek pod ochroną częściową – nie zbieraj.',
+    lookalikes: [
+      {
+        name: 'naparstniczka czeska',
+        edibility: 'trujacy',
+        tip: 'Naparstniczka ma kapelusz przyrośnięty tylko na samym szczycie i trzon wypełniony watą; u smardza przyrasta połowa kapelusza.',
+      },
+      {
+        name: 'piestrzenica kasztanowata',
+        edibility: 'smiertelny',
+        tip: 'Piestrzenica ma brązowy, mózgowato pofałdowany kapelusz bez komór i żeberek oraz komorowate wnętrze.',
+      },
+      {
+        name: 'smardz stożkowaty',
+        edibility: 'jadalny',
+        tip: 'Smardz stożkowaty ma kapelusz zrośnięty z trzonem na całej długości, bez wolnego dolnego brzegu.',
+      },
+    ],
+  },
+  {
+    id: 'siatkoblaszek-maczugowaty',
+    name: 'Siatkoblaszek maczugowaty',
+    latin: 'Gomphus clavatus',
+    shortName: 'siatkoblaszek',
+    rarity: 'epicki',
+    edibility: 'jadalny',
+    habitat: 'Górskie świerczyny',
+    habitats: ['iglasty', 'mieszany'],
+    typical: { capCm: 6, heightCm: 9, weightG: 70 },
+    seasonWeights: [0, 0, 0, 0, 0, 0, 0.5, 1, 0.9, 0.4, 0, 0],
+    protection: 'czesciowa',
+    description:
+      'Maczugowaty lub lejkowaty owocnik ze ściętym, wklęsłym szczytem, młody fioletowy, później ochrowobrązowy. Spód pokrywają grube, rozwidlone, siateczkowato połączone fałdy zamiast blaszek, zbiegające na trzon. Gatunek pod ochroną częściową – nie zbieraj.',
+    lookalikes: [
+      {
+        name: 'buławka obcięta',
+        edibility: 'niejadalny',
+        tip: 'Buławka ma gładką lub lekko pomarszczoną powierzchnię bez siateczki fałd i jest żółtoochrowa, nie fioletowa.',
+      },
+      {
+        name: 'pieprznik jadalny',
+        edibility: 'jadalny',
+        tip: 'Kurka jest żółta i rośnie w kępkach; młody siatkoblaszek jest fioletowy, z gęstą siateczką fałd pod spodem.',
+      },
+    ],
+  },
+  {
+    id: 'okratek-australijski',
+    name: 'Okratek australijski',
+    latin: 'Clathrus archeri',
+    shortName: 'okratek',
+    rarity: 'epicki',
+    edibility: 'niejadalny',
+    habitat: 'Zarośla i polany',
+    habitats: ['mieszany', 'lisciasty', 'laka'],
+    typical: { capCm: 12, heightCm: 5, weightG: 45 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.1, 0.6, 1, 0.9, 0.5, 0.1, 0],
+    description:
+      'Z białawego, galaretowatego „jaja” wyrastają 4–7 czerwone ramiona, rozkładające się jak macki ośmiornicy, od wewnątrz pokryte ciemnym śluzem cuchnącym padliną. Obcy gatunek z Australii, w Polsce od 1975 r., coraz częstszy zwłaszcza na południu.',
+    lookalikes: [
+      {
+        name: 'okratek czerwony',
+        edibility: 'niejadalny',
+        tip: 'Okratek czerwony tworzy zamkniętą, kulistą czerwoną kratownicę zamiast rozpostartych ramion.',
+      },
+    ],
+  },
+  {
+    id: 'zaslonak-rudawy',
+    name: 'Zasłonak rudawy',
+    latin: 'Cortinarius rubellus',
+    shortName: 'zasłonak',
+    rarity: 'epicki',
+    edibility: 'smiertelny',
+    habitat: 'Wilgotne świerczyny',
+    habitats: ['iglasty', 'torfowisko'],
+    typical: { capCm: 6, heightCm: 9, weightG: 35 },
+    seasonWeights: [0, 0, 0, 0, 0, 0, 0.2, 0.7, 1, 0.6, 0.1, 0],
+    description:
+      'Rdzawopomarańczowy kapelusz ze spiczastym garbkiem, grube rdzawe blaszki i trzon z żółtymi, zygzakowatymi przepaskami zasnówki; słaby zapach rzodkwi. Śmiertelnie trujący – orelanina niszczy nerki, a objawy pojawiają się po kilku dniach, nawet po 2–3 tygodniach.',
+    lookalikes: [
+      {
+        name: 'zasłonak rudy',
+        edibility: 'smiertelny',
+        tip: 'Zasłonak rudy rośnie w lasach liściastych i nie ma spiczastego garbka ani żółtych zygzaków na trzonie; oba zabijają.',
+      },
+      {
+        name: 'pieprznik jadalny',
+        edibility: 'jadalny',
+        tip: 'Kurka ma grube, rozwidlone listewki zbiegające na trzon; zasłonak ma rdzawe blaszki i ślady zasnówki na trzonie.',
+      },
+      {
+        name: 'pieprznik trąbkowy',
+        edibility: 'jadalny',
+        tip: 'Pieprznik trąbkowy ma lejkowaty kapelusz, pusty trzon i szare listewki zamiast rdzawych blaszek.',
+      },
+    ],
+  },
+  {
+    id: 'czubajeczka-brazowoczerwona',
+    name: 'Czubajeczka brązowoczerwona',
+    latin: 'Lepiota brunneoincarnata',
+    shortName: 'czubajeczka',
+    rarity: 'epicki',
+    edibility: 'smiertelny',
+    habitat: 'Parki i skraje lasów',
+    habitats: ['park', 'laka', 'lisciasty'],
+    typical: { capCm: 4, heightCm: 4, weightG: 10 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.1, 0.5, 1, 0.9, 0.4, 0, 0],
+    description:
+      'Mały grzyb z kapeluszem pokrytym winnobrązowymi łuseczkami na różowawym tle, wolnymi kremowymi blaszkami i trzonem z brązowymi przepaskami łusek. Zawiera te same amatoksyny co muchomor zielonawy – nigdy nie zbieraj małych „kanii”.',
+    lookalikes: [
+      {
+        name: 'czubajka kania',
+        edibility: 'jadalny',
+        tip: 'Kania jest duża (kapelusz 15–30 cm), ma ruchomy pierścień i wężykowaty wzór na trzonie; małych czubajek nie zbieraj.',
+      },
+      {
+        name: 'czubajka czerwieniejąca',
+        edibility: 'jadalny',
+        tip: 'Czubajka czerwieniejąca jest duża, ma gruby ruchomy pierścień, a jej miąższ po przecięciu szybko czerwienieje.',
+      },
+      {
+        name: 'twardzioszek przydrożny',
+        edibility: 'jadalny',
+        tip: 'Twardzioszek ma gładki, beżowy kapelusz bez łusek, rzadkie blaszki i elastyczny, gładki trzon.',
+      },
+    ],
+  },
+  {
+    id: 'purchawica-olbrzymia',
+    name: 'Purchawica olbrzymia',
+    latin: 'Calvatia gigantea',
+    shortName: 'purchawica',
+    rarity: 'epicki',
+    edibility: 'jadalny',
+    habitat: 'Łąki i ogrody',
+    habitats: ['laka', 'park'],
+    typical: { capCm: 25, heightCm: 20, weightG: 1200 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.3, 0.8, 1, 0.8, 0.3, 0, 0],
+    description:
+      'Ogromna, biała, kulista „piłka” bez trzonu, zwykle 20–40 cm średnicy, na żyznych łąkach, w ogrodach i wśród pokrzyw. Jadalna tylko młoda, gdy wnętrze jest jednolicie białe i jędrne – żółknąca lub zielonkawa już nie. Zawsze przekrój owocnik.',
+    lookalikes: [
+      {
+        name: 'muchomor zielonawy',
+        edibility: 'smiertelny',
+        tip: 'Jajo muchomora jest małe, a w przekroju widać zarys kapelusza, blaszek i trzonu; purchawica jest jednolicie biała.',
+      },
+      {
+        name: 'tęgoskór pospolity',
+        edibility: 'trujacy',
+        tip: 'Tęgoskór ma twardą, żółtawą, spękaną skórkę i już za młodu fioletowoczarne wnętrze.',
+      },
+      {
+        name: 'purchawka chropowata',
+        edibility: 'jadalny',
+        tip: 'Purchawka chropowata jest mała (do 6 cm), gruszkowata i pokryta drobnymi kolcami.',
+      },
+    ],
+  },
+  {
+    id: 'krazkowka-zylkowana',
+    name: 'Krążkówka żyłkowana',
+    latin: 'Disciotis venosa',
+    shortName: 'krążkówka',
+    rarity: 'epicki',
+    edibility: 'jadalny',
+    habitat: 'Wiosną, łęgi na wapniu',
+    habitats: ['lisciasty', 'park'],
+    typical: { capCm: 10, heightCm: 3, weightG: 40 },
+    seasonWeights: [0, 0, 0.2, 1, 0.8, 0.1, 0, 0, 0, 0, 0, 0],
+    protection: 'scisla',
+    description:
+      'Duża, płaska lub miseczkowata czarka, wewnątrz brązowa i pomarszczona żyłkami zbiegającymi do środka, z zewnątrz biaława. Miąższ pachnie wyraźnie chlorem. Na surowo trująca, jadalna tylko po ugotowaniu. Gatunek pod ochroną ścisłą – nie zrywaj.',
+    lookalikes: [
+      {
+        name: 'koronica ozdobna',
+        edibility: 'smiertelny',
+        tip: 'Koronica ma fioletowe wnętrze, brzeg rozdarty w trójkątne płaty i nie pachnie chlorem.',
+      },
+      {
+        name: 'krążkownica wrębiasta',
+        edibility: 'niejadalny',
+        tip: 'Krążkownica rośnie na butwiejącym drewnie iglastym, ma krótki trzonek i nie pachnie chlorem.',
+      },
+    ],
+  },
+  {
+    id: 'gwiazdosz-czteropromienny',
+    name: 'Gwiazdosz czteropromienny',
+    latin: 'Geastrum quadrifidum',
+    shortName: 'gwiazdosz',
+    rarity: 'epicki',
+    edibility: 'niejadalny',
+    habitat: 'Świerczyny na wapieniu',
+    habitats: ['iglasty', 'mieszany'],
+    typical: { capCm: 3, heightCm: 3, weightG: 3 },
+    seasonWeights: [0.1, 0.1, 0.1, 0.1, 0, 0, 0.2, 0.7, 1, 0.8, 0.4, 0.2],
+    protection: 'czesciowa',
+    description:
+      'Jeden z najmniejszych gwiazdoszy: okrywa pęka zwykle na 4 ramiona wygięte w dół jak nóżki, unoszące szarobrązowy worek na krótkiej szyjce z otworem otoczonym wyraźną obwódką. Niejadalny. Gatunek pod ochroną częściową – nie zbieraj.',
+    lookalikes: [
+      {
+        name: 'gwiazdosz wzniesiony',
+        edibility: 'niejadalny',
+        tip: 'Gwiazdosz wzniesiony jest kilkakrotnie większy, a jego 4–5 ramion opiera się na dużej, osobnej miseczce.',
+      },
+      {
+        name: 'gwiazdosz frędzelkowany',
+        edibility: 'niejadalny',
+        tip: 'Frędzelkowany ma 5–10 ramion leżących płasko na ziemi i otwór z frędzelkami, bez wyraźnej obwódki.',
+      },
+    ],
+  },
+  {
+    id: 'kolczakowka-piekaca',
+    name: 'Kolczakówka piekąca',
+    latin: 'Hydnellum peckii',
+    shortName: 'kolczakówka',
+    rarity: 'legendarny',
+    edibility: 'niejadalny',
+    habitat: 'Górskie bory',
+    habitats: ['iglasty'],
+    typical: { capCm: 7, heightCm: 6, weightG: 50 },
+    seasonWeights: [0, 0, 0, 0, 0, 0, 0.5, 1, 0.9, 0.4, 0, 0],
+    protection: 'scisla',
+    description:
+      'Młody kapelusz białawy, filcowaty, „krwawiący” jaskrawoczerwonymi kroplami płynu; spód pokrywają drobne kolce zamiast blaszek. Starsze owocniki rdzawobrązowe do czarniawych. Smak piekąco ostry – niejadalna. Gatunek pod ochroną ścisłą – nie zrywaj.',
+    lookalikes: [
+      {
+        name: 'kolczakówka kasztanowata',
+        edibility: 'niejadalny',
+        tip: 'Kolczakówka kasztanowata też bywa kroplista, ale szybko rdzawobrązowieje i ma łagodny, niepiekący smak.',
+      },
+      {
+        name: 'kolczak obłączasty',
+        edibility: 'jadalny',
+        tip: 'Kolczak ma mięsisty, gładki, kremowopomarańczowy kapelusz, kruche kolce i nigdy nie wydziela czerwonych kropli.',
+      },
+    ],
+  },
+  {
+    id: 'soplowka-bukowa',
+    name: 'Soplówka bukowa',
+    latin: 'Hericium coralloides',
+    shortName: 'soplówka',
+    rarity: 'legendarny',
+    edibility: 'jadalny',
+    habitat: 'Martwe pnie buków',
+    habitats: ['drewno', 'lisciasty'],
+    typical: { capCm: 18, heightCm: 14, weightG: 250 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.1, 0.3, 0.7, 1, 0.9, 0.4, 0.1],
+    protection: 'czesciowa',
+    description:
+      'Śnieżnobiały, rozgałęziony jak koral owocnik na martwych, leżących pniach buków; z gałązek zwisają pęczki miękkich, cienkich kolców długości 0,5–1 cm. Z wiekiem kremowy, potem żółtawy. Gatunek pod ochroną częściową – nie zbieraj.',
+    lookalikes: [
+      {
+        name: 'soplówka jeżowata',
+        edibility: 'jadalny',
+        tip: 'Jeżowata to zwarta bryła bez rozgałęzień, z długimi (do 5 cm) kolcami zwisającymi jak broda.',
+      },
+      {
+        name: 'soplówka jodłowa',
+        edibility: 'jadalny',
+        tip: 'Soplówka jodłowa rośnie na jodłach i ma dłuższe kolce, zebrane w pędzelki na końcach gałązek.',
+      },
+    ],
+  },
+  {
+    id: 'zagiew-wieloglowa',
+    name: 'Żagiew wielogłowa',
+    latin: 'Polyporus umbellatus',
+    shortName: 'żagiew',
+    rarity: 'legendarny',
+    edibility: 'jadalny',
+    habitat: 'Korzenie buków, dębów',
+    habitats: ['lisciasty', 'mieszany'],
+    typical: { capCm: 25, heightCm: 18, weightG: 900 },
+    seasonWeights: [0, 0, 0, 0, 0, 0.4, 1, 1, 0.6, 0.2, 0, 0],
+    protection: 'czesciowa',
+    description:
+      'Krzaczasty owocnik z rozgałęzionego białego trzonu, niosący dziesiątki, a nawet setki małych (2–4 cm), szarobrązowych, pośrodku wklęsłych kapeluszy z białymi porami pod spodem. Wyrasta z ziemi przy korzeniach drzew liściastych. Gatunek pod ochroną częściową – nie zbieraj.',
+    lookalikes: [
+      {
+        name: 'żagwica listkowata',
+        edibility: 'jadalny',
+        tip: 'Żagwica ma dachówkowato ułożone, łopatkowate kapelusze przyrośnięte bokiem, a nie okrągłe na środkowych trzonkach.',
+      },
+    ],
+  },
+  {
+    id: 'gwiazda-wieloporowa',
+    name: 'Gwiazda wieloporowa',
+    latin: 'Myriostoma coliforme',
+    shortName: 'gwiazda',
+    rarity: 'legendarny',
+    edibility: 'niejadalny',
+    habitat: 'Nasłonecznione piaski',
+    habitats: ['laka', 'iglasty'],
+    typical: { capCm: 8, heightCm: 5, weightG: 12 },
+    seasonWeights: [0.1, 0.1, 0.1, 0, 0, 0, 0.1, 0.4, 0.9, 1, 0.6, 0.2],
+    protection: 'scisla',
+    description:
+      'Okrywa pęka na 5–12 promieni, a kulisty, szarobrązowy worek z zarodnikami stoi na wielu cienkich nóżkach i ma liczne drobne otworki zamiast jednego. Jeden z najrzadszych grzybów w Polsce, na ciepłych, piaszczystych zboczach. Gatunek pod ochroną ścisłą – nie zrywaj.',
+    lookalikes: [
+      {
+        name: 'gwiazdosz frędzelkowany',
+        edibility: 'niejadalny',
+        tip: 'Gwiazdosz frędzelkowany ma worek siedzący bez nóżek i tylko jeden otwór na szczycie.',
+      },
+      {
+        name: 'gwiazdosz czteropromienny',
+        edibility: 'niejadalny',
+        tip: 'Czteropromienny jest mniejszy, ma zwykle 4 ramiona i jeden otwór z obwódką na pojedynczej szyjce.',
+      },
+    ],
+  },
+  {
+    id: 'koronica-ozdobna',
+    name: 'Koronica ozdobna',
+    latin: 'Sarcosphaera coronaria',
+    shortName: 'koronica',
+    rarity: 'legendarny',
+    edibility: 'smiertelny',
+    habitat: 'Lasy na wapieniu',
+    habitats: ['mieszany', 'iglasty', 'lisciasty'],
+    typical: { capCm: 10, heightCm: 5, weightG: 50 },
+    seasonWeights: [0, 0, 0, 0.3, 1, 0.8, 0.3, 0, 0, 0, 0, 0],
+    protection: 'scisla',
+    description:
+      'Młody owocnik to pusta kula ukryta w ziemi, która wychodzi na powierzchnię i pęka na 5–10 trójkątnych płatów, tworząc koronę z fioletowym wnętrzem. Silnie trująca na surowo i kumuluje arsen – nie jeść. Gatunek pod ochroną ścisłą – nie zrywaj.',
+    lookalikes: [
+      {
+        name: 'krążkówka żyłkowana',
+        edibility: 'jadalny',
+        tip: 'Krążkówka ma brązowe, żyłkowane wnętrze i zapach chloru; koronica – fioletowe wnętrze i brzeg rozdarty w płaty.',
+      },
+      {
+        name: 'trufla letnia',
+        edibility: 'jadalny',
+        tip: 'Trufla ma czarną, brodawkowatą okrywę i pełne, marmurkowe wnętrze; młoda koronica to pusta w środku kula.',
+      },
+    ],
+  },
+  {
+    id: 'zylkowiec-rozowawy',
+    name: 'Żyłkowiec różowawy',
+    latin: 'Rhodotus palmatus',
+    shortName: 'żyłkowiec',
+    rarity: 'legendarny',
+    edibility: 'niejadalny',
+    habitat: 'Martwe pnie wiązów',
+    habitats: ['drewno', 'lisciasty'],
+    typical: { capCm: 5, heightCm: 3, weightG: 20 },
+    seasonWeights: [0, 0, 0, 0, 0.05, 0.15, 0.3, 0.6, 0.9, 1, 0.6, 0.1],
+    protection: 'scisla',
+    description:
+      'Łososioworóżowy kapelusz pokryty białą siateczką żyłek, krótki, często boczny trzon i bladoróżowe blaszki; rośnie na martwym drewnie wiązów, bywa obsypany kropelkami pomarańczowego płynu. Gorzki, niejadalny. Gatunek pod ochroną ścisłą, w Polsce znany z kilku stanowisk – nie zrywaj.',
+  },
+  {
+    id: 'trufla-letnia',
+    name: 'Trufla letnia',
+    latin: 'Tuber aestivum',
+    shortName: 'trufla',
+    rarity: 'legendarny',
+    edibility: 'jadalny',
+    habitat: 'Pod ziemią, grądy',
+    habitats: ['lisciasty', 'mieszany'],
+    typical: { capCm: 5, heightCm: 4, weightG: 60 },
+    seasonWeights: [0.05, 0.05, 0.05, 0.1, 0.2, 0.5, 0.8, 0.9, 1, 0.9, 0.6, 0.2],
+    description:
+      'Podziemna bulwa wielkości orzecha lub ziemniaka, czarna, pokryta piramidalnymi brodawkami; wnętrze jasnobrązowe z białymi marmurkowymi żyłkami i silnym, przyjemnym zapachem. Rośnie ok. 10 cm pod ziemią przy dębach, bukach, grabach i leszczynach na glebach wapiennych; szuka się jej z psem.',
+    lookalikes: [
+      {
+        name: 'tęgoskór pospolity',
+        edibility: 'trujacy',
+        tip: 'Tęgoskór rośnie na powierzchni, ma gładką lub spękaną żółtawą skórkę i fioletowoczarne wnętrze bez marmurka.',
+      },
+      {
+        name: 'jeleniak sarni',
+        edibility: 'niejadalny',
+        tip: 'Jeleniak ma żółtobrązową, drobnoziarnistą okrywę, a jego wnętrze rozpada się w czarny proszek zarodników.',
+      },
+    ],
   },
 ];
+
+/** Katalog z `lookalike` = pierwszy sobowtór (starsze miejsca w kodzie czytają tylko jego). */
+export const SPECIES: Species[] = CATALOG.map((s) => (s.lookalikes?.length ? { ...s, lookalike: s.lookalikes[0] } : s));
+
+/** Łączna liczba gatunków w atlasie (= cały katalog). */
+export const TOTAL_SPECIES = SPECIES.length;
 
 /** Gatunki, które użytkownik startowy ma w atlasie (23) – liczniki sumują się do 318 grzybów. */
 export const START_ATLAS: Record<string, number> = {

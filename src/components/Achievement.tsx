@@ -1,7 +1,9 @@
-import { Pressable, View } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import type { ReactNode } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { useUiStore } from '@/store/useUiStore';
-import { colors, shadows, tiers as tierTokens } from '@/theme/tokens';
+import { colors, diamondGradient, shadows, tiers as tierTokens } from '@/theme/tokens';
 import {
   formatProgress,
   TIER_LABEL,
@@ -48,6 +50,13 @@ export function AchievementMedal({ def, tier, size = 52 }: { def: AchievementDef
     );
   }
   const p = medalPalette(def, tier);
+  if (!def.secret && tierKind(def.tiers.length, tier) === 'diament') {
+    return (
+      <DiamondDisc size={size}>
+        <Icon name={def.icon} filled size={Math.round(size * 0.5)} color={p.ink} />
+      </DiamondDisc>
+    );
+  }
   return (
     <View
       style={{
@@ -61,6 +70,60 @@ export function AchievementMedal({ def, tier, size = 52 }: { def: AchievementDef
       }}
     >
       <Icon name={def.icon} filled size={Math.round(size * 0.5)} color={p.ink} />
+    </View>
+  );
+}
+
+/**
+ * Krążek „diamentowy”: lodowy gradient, chłodna obwódka, ukośny odblask i iskierka – bez animacji
+ * (warstwy View + expo-linear-gradient). Też odznaka poziomu Lv 100+ w profilu.
+ */
+export function DiamondDisc({ size, children }: { size: number; children?: ReactNode }) {
+  return (
+    <View
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        overflow: 'hidden',
+        borderWidth: Math.max(1.5, size * 0.04),
+        borderColor: diamondGradient.rim,
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <LinearGradient
+        pointerEvents="none"
+        colors={diamondGradient.colors}
+        locations={diamondGradient.locations}
+        start={{ x: 0.15, y: 0 }}
+        end={{ x: 0.85, y: 1 }}
+        style={StyleSheet.absoluteFill}
+      />
+      <View
+        pointerEvents="none"
+        style={{
+          position: 'absolute',
+          top: size * 0.1,
+          left: size * 0.14,
+          width: size * 0.44,
+          height: size * 0.18,
+          borderRadius: size * 0.09,
+          backgroundColor: diamondGradient.shine,
+          opacity: 0.6,
+          transform: [{ rotate: '-30deg' }],
+        }}
+      />
+      {children}
+      {size >= 28 ? (
+        <Icon
+          name="auto_awesome"
+          filled
+          size={Math.round(size * 0.24)}
+          color={colors.white}
+          style={{ position: 'absolute', top: size * 0.05, right: size * 0.06, opacity: 0.9 }}
+        />
+      ) : null}
     </View>
   );
 }
@@ -159,7 +222,7 @@ export function showAchievementDetails(state: AchievementState) {
     useUiStore.getState().showDialog({
       title: 'Sekretne osiągnięcie',
       icon: 'question_mark',
-      message: 'Warunek poznasz, gdy je zdobędziesz. Podpowiedź: szukaj rzadkich gatunków.',
+      message: 'Warunek poznasz, gdy je zdobędziesz. Podpowiedź: rzadkie gatunki, nietypowe pory i uparte zbieranie.',
       actions: [{ label: 'OK', style: 'primary' }],
     });
     return;

@@ -7,7 +7,8 @@ import { AppState, Platform } from 'react-native';
 /** mock (domyślnie) albo supabase – z .env.local (EXPO_PUBLIC_BACKEND). */
 export const BACKEND = process.env.EXPO_PUBLIC_BACKEND === 'supabase' ? 'supabase' : 'mock';
 export const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
-const SUPABASE_KEY = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? '';
+/** Klucz publiczny (publishable) – także dla klienta pomocniczego (sprzątanie osieroconego konta anonimowego). */
+export const SUPABASE_KEY = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? '';
 
 export const supabaseEnabled = BACKEND === 'supabase' && !!SUPABASE_URL && !!SUPABASE_KEY;
 

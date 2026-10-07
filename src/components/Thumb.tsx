@@ -1,5 +1,6 @@
 import { View, type StyleProp, type ViewStyle } from 'react-native';
 
+import { useFindPhotoSource } from '@/hooks/useFindPhotoSource';
 import { Placeholder } from './Placeholder';
 
 interface ThumbProps {
@@ -9,11 +10,14 @@ interface ThumbProps {
   borderColor: string;
   borderWidth?: number;
   stripe?: number;
+  /** Zdjęcie znaleziska (`Find.photoUri`) – bez niego (albo gdy nie da się go wczytać) paski z makiety. */
+  uri?: string;
   style?: StyleProp<ViewStyle>;
 }
 
-/** Miniatura znaleziska: paski + kolorowa ramka w kolorze rzadkości. */
-export function Thumb({ size, radius, borderColor, borderWidth = 3, stripe = 5, style }: ThumbProps) {
+/** Miniatura znaleziska: zdjęcie albo paski + kolorowa ramka w kolorze rzadkości. */
+export function Thumb({ size, radius, borderColor, borderWidth = 3, stripe = 5, uri, style }: ThumbProps) {
+  const source = useFindPhotoSource(uri);
   return (
     <View
       style={[
@@ -21,7 +25,7 @@ export function Thumb({ size, radius, borderColor, borderWidth = 3, stripe = 5, 
         style,
       ]}
     >
-      <Placeholder variant="sand" stripe={stripe} style={{ flex: 1 }} />
+      <Placeholder variant="sand" stripe={stripe} source={source} style={{ flex: 1 }} />
     </View>
   );
 }

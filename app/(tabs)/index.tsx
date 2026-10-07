@@ -5,28 +5,33 @@ import { AreaMapView } from '@/components/AreaMap';
 import { Avatar } from '@/components/Avatar';
 import { Button3D, Press3D } from '@/components/Button3D';
 import { Card } from '@/components/Card';
+import { ForecastPills } from '@/components/Forecast';
+import { ForestPill } from '@/components/ForestPill';
 import { Icon, type IconName } from '@/components/Icon';
 import { LiveDot } from '@/components/LiveDot';
+import { OfflineMapHint } from '@/components/OfflineMaps';
 import { Pill } from '@/components/Pill';
 import { ProgressBar } from '@/components/ProgressBar';
 import { Screen } from '@/components/Screen';
 import { SkeletonCard } from '@/components/Skeleton';
+import { ChanceStrip } from '@/components/SpeciesChances';
 import { Thumb } from '@/components/Thumb';
 import { Txt } from '@/components/Txt';
+import { DEV_TOOLS } from '@/config';
 import { useAreaMap } from '@/hooks/useAreaMap';
 import { useNow } from '@/hooks/useNow';
 import { useRegion, useRegionStore } from '@/hooks/useRegion';
 import { useServices } from '@/services';
-import { allQuests, finishTrip, startTrip } from '@/store/game';
+import { allQuests, finishTrip, startTrip, weeklyQuestList } from '@/store/game';
 import { useCatalogStore } from '@/store/useCatalogStore';
 import { useSimStore } from '@/store/useSimStore';
 import { tripElapsedMs, useActiveTrip, useTripStore } from '@/store/useTripStore';
 import { ui } from '@/store/useUiStore';
 import { useUserStore } from '@/store/useUserStore';
-import { colors, rarity as rarityTokens, shadows } from '@/theme/tokens';
+import { colors, mapColors, rarity as rarityTokens, shadows } from '@/theme/tokens';
 import type { ServiceErrorCode } from '@/services/types';
-import type { AreaMap, Find, Quest } from '@/types';
-import { fmtDistanceM, fmtInt, fmtKm, fmtTimer, fmtWeight, gminaSubtitle, gminaTitle } from '@/utils/format';
+import type { Find, Quest } from '@/types';
+import { fmtDistanceM, fmtInt, fmtKm, fmtTimer, fmtWeight, gminaSubtitle, gminaTitle, plural } from '@/utils/format';
 import { levelProgress, levelThreshold, levelTitle } from '@/utils/xp';
 
 export default function StartScreen() {
@@ -48,12 +53,13 @@ function Header() {
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
       <Pressable
         onPress={() => router.navigate('/profil')}
-        onLongPress={() => router.push('/dev')}
+        // Panel symulacji tylko z narzędziami dev (w wydaniu przytrzymanie nic nie robi).
+        onLongPress={DEV_TOOLS ? () => router.push('/dev') : undefined}
         delayLongPress={450}
-        accessibilityLabel="Profil (przytrzymaj: panel symulacji)"
+        accessibilityLabel={DEV_TOOLS ? 'Profil (przytrzymaj: panel symulacji)' : 'Profil'}
         style={{ width: 54, height: 54 }}
       >
-        <Avatar size={54} stripe={6} />
+        <Avatar size={54} stripe={6} avatar={user.avatar} />
         <View
           style={{
             position: 'absolute',
@@ -170,9 +176,38 @@ function RegionCard() {
   const area = useAreaMap(region);
   const g = region.gmina;
   const accuracy = region.position.accuracyM;
+  const openMap = () => router.push('/mapa');
   return (
     <Card radius={26} style={{ overflow: 'hidden' }}>
-      <AreaMapView map={area.data} failed={!!area.error} accuracyM={accuracy} height={150} />
+      <Pressable
+        onPress={openMap}
+        accessibilityRole="button"
+        accessibilityLabel="Mapa okolicy – otwórz na pełnym ekranie"
+        style={({ pressed }) => ({ opacity: pressed ? 0.94 : 1 })}
+      >
+        <AreaMapView map={area.data} failed={!!area.error} accuracyM={accuracy} height={150} />
+      </Pressable>
+      <Pressable
+        onPress={openMap}
+        hitSlop={7}
+        accessibilityRole="button"
+        accessibilityLabel="Pełny ekran"
+        style={({ pressed }) => ({
+          position: 'absolute',
+          top: 10,
+          right: 10,
+          width: 30,
+          height: 30,
+          borderRadius: 15,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: mapColors.mapButtonBg,
+          boxShadow: shadows.card,
+          transform: [{ scale: pressed ? 0.92 : 1 }],
+        })}
+      >
+        <Icon name="open_in_full" size={16} color={colors.ink} />
+      </Pressable>
       <View style={{ paddingVertical: 14, paddingHorizontal: 16, gap: 10 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           <Icon name="my_location" filled size={16} color={colors.primaryText} />
@@ -189,7 +224,12 @@ function RegionCard() {
           </Txt>
         </View>
         <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-          <ForestPill map={area.data} loading={area.loading} />
+          {/* Pigułki z makiety (Open-Meteo, kratka 0,1°) – bez sieci znikają, pigułki lasu zostają. */}
+          <ForecastPills point={region.position} gminaId={g.id} place={gminaTitle(g)} />
+          <ForestPill
+            info={area.data && { distanceM: area.data.forestDistanceM, radiusM: area.data.completeRadiusM ?? area.data.radiusM }}
+            loading={area.loading}
+          />
           {g.forestPct != null ? (
             <Pill label={`Lesistość ${Math.round(g.forestPct)}%`} bg={colors.infoBg} color={colors.infoText} />
           ) : null}
@@ -205,26 +245,12 @@ function RegionCard() {
             <Pill label="Przy granicy gminy" bg={colors.chip} color={colors.tagNeutralText} />
           ) : null}
         </View>
+        {/* „Najbardziej prawdopodobne tu: podgrzybek 78% · …” – jedna linijka; bez danych / poza sezonem znika. */}
+        <ChanceStrip gminaId={g.id} point={region.position} />
+        {/* Bez sieci i bez mapy offline – raz, dyskretnie (src/components/OfflineMaps.tsx). */}
+        <OfflineMapHint active={!!area.error && !area.data} />
       </View>
     </Card>
-  );
-}
-
-/** „Jesteś w lesie” / „Las 400 m stąd” – odległość liczona z mapy okolicy (lasy z OSM). */
-function ForestPill({ map, loading }: { map?: AreaMap; loading: boolean }) {
-  if (!map) {
-    return loading ? <Pill label="Szukam lasu…" icon="forest" bg={colors.chip} color={colors.muted} /> : null;
-  }
-  const d = map.forestDistanceM;
-  if (d === 0) return <Pill label="Jesteś w lesie" icon="forest" iconFilled />;
-  if (d != null) return <Pill label={`Las ${fmtDistanceM(d)} stąd`} icon="forest" />;
-  return (
-    <Pill
-      label={`Brak lasu w promieniu ${fmtDistanceM(map.radiusM)}`}
-      icon="forest"
-      bg={colors.chip}
-      color={colors.muted}
-    />
   );
 }
 
@@ -305,11 +331,16 @@ function LocationError({ code, onRetry, denied }: { code?: ServiceErrorCode; onR
   );
 }
 
+/** Zadania dnia (jak w makiecie) i pod nimi – mały nagłówek „Tygodniowe” z zadaniami tygodnia. */
 function QuestsCard() {
   const progress = useUserStore((s) => s.quests.progress);
+  const weekly = useUserStore((s) => s.weeklyQuests);
+  useUserStore((s) => s.quests.ids);
   useUserStore((s) => s.challenges);
   useCatalogStore((s) => s.dailyQuests);
   const quests = allQuests();
+  const weeklyList = weeklyQuestList();
+  const weekProgress = weekly?.progress ?? {};
   return (
     <Card radius={22} padding={16} gap={12}>
       <Txt f="b7" size={18}>
@@ -318,6 +349,22 @@ function QuestsCard() {
       {quests.map((q) => (
         <QuestRow key={q.id} q={q} progress={progress[q.id]?.progress ?? 0} done={!!progress[q.id]?.completed} />
       ))}
+      {weeklyList.length ? (
+        <>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+            <Txt f="n8" size={11} color={colors.muted} upper ls={0.08}>
+              Tygodniowe
+            </Txt>
+            <View style={{ flex: 1, height: 1.5, borderRadius: 1, backgroundColor: colors.track }} />
+            <Txt f="n7" size={11} color={colors.faint}>
+              do niedzieli
+            </Txt>
+          </View>
+          {weeklyList.map((q) => (
+            <QuestRow key={q.id} q={q} progress={weekProgress[q.id]?.progress ?? 0} done={!!weekProgress[q.id]?.completed} />
+          ))}
+        </>
+      ) : null}
     </Card>
   );
 }
@@ -418,7 +465,7 @@ function ActiveTrip() {
         </Txt>
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <TripStat value={fmtKm(trip.distanceKm)} label="dystans" />
-          <TripStat value={String(collected)} label="grzybów" />
+          <TripStat value={String(collected)} label={plural(collected, 'grzyb', 'grzyby', 'grzybów')} />
           <TripStat value={`+${fmtInt(trip.xp)}`} label="XP" accent />
         </View>
       </View>
@@ -517,7 +564,7 @@ function RecentFind({ find }: { find: Find }) {
       onPress={() => router.push(`/species/${find.speciesId}`)}
       style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}
     >
-      <Thumb size={48} radius={14} borderColor={r.color} />
+      <Thumb size={48} radius={14} borderColor={r.color} uri={find.photoUri} />
       <View style={{ flex: 1 }}>
         <Txt f="n8" size={14} numberOfLines={1}>
           {sp?.name}

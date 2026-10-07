@@ -104,8 +104,21 @@ export const tiers = {
   srebro: { color: '#D9D4CA', ink: '#3F3B33', text: '#6E685C' },
   zloto: { color: '#EFA831', ink: '#4A3200', text: '#8A6A1E' },
   platyna: { color: '#9FD7DE', ink: '#0F3A40', text: '#2C6B73' },
+  /** Diament – lodowy błękit; medal: gradient `diamondGradient` + odblask (components/Achievement.tsx). */
+  diament: { color: '#A9DDFB', ink: '#0B2C55', text: '#1F6FB2' },
   /** Sekretne – fiolet „epickiego”. */
   sekret: { color: '#A56CDE', ink: '#2A0D3A', text: '#7A41AF' },
+} as const;
+
+/**
+ * Diament: lodowy gradient (jasny szczyt → błękit → chłodny cyjan przy krawędzi), obwódka i odblask.
+ * Ten sam wygląd ma odznaka poziomu od Lv 100 w profilu.
+ */
+export const diamondGradient = {
+  colors: ['#EAF8FF', '#A9DDFB', '#6EC3F0', '#9BE3EC'] as const,
+  locations: [0, 0.38, 0.78, 1] as const,
+  rim: '#5AAFE3',
+  shine: 'rgba(255,255,255,0.75)',
 } as const;
 
 /** Mapa okolicy (karta „Wykryto region”) – płaska, w paletach placeholderów. */
@@ -121,6 +134,16 @@ export const mapColors = {
   track: '#B09A74',
   boundary: '#6B4A2B',
   attributionBg: 'rgba(255,255,255,0.72)',
+  /** Mapa pełnoekranowa: las w ciemniejszych paskach, z brzegiem i znacznikami drzew. */
+  forestRichA: '#C8DDA8',
+  forestRichB: '#BAD396',
+  forestEdge: '#9CBF72',
+  tree: '#5E8F2E',
+  treeHalo: 'rgba(255,255,255,0.7)',
+  /** Kreska „do najbliższego lasu”. */
+  forestLink: '#4C7A22',
+  /** Przycisk na mapie w karcie (rozwiń na pełny ekran). */
+  mapButtonBg: 'rgba(255,255,255,0.88)',
 } as const;
 
 /** Paski 135° placeholderów. */

@@ -1,37 +1,47 @@
 import { router } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Pressable, View } from 'react-native';
-import Animated, { FadeIn } from 'react-native-reanimated';
 
-import { Card } from '@/components/Card';
 import { Icon } from '@/components/Icon';
-import { OfflineCard } from '@/components/OfflineCard';
+import { OfflineCard, StateCard } from '@/components/OfflineCard';
 import { Screen } from '@/components/Screen';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { Bone, SkeletonRow } from '@/components/Skeleton';
 import { Txt } from '@/components/Txt';
+import { VoivodeshipHeatmap } from '@/components/VoivodeshipHeatmap';
+import { VoivodeshipPicker } from '@/components/VoivodeshipPicker';
+import { DESIGN_VOIVODESHIP } from '@/geo/voivodeships';
 import { useAsync } from '@/hooks/useAsync';
+import { useRegionStore } from '@/hooks/useRegion';
+import { useVoivodeship } from '@/hooks/useVoivodeship';
 import { useServices } from '@/services';
 import { useCatalogStore } from '@/store/useCatalogStore';
 import { useSimStore } from '@/store/useSimStore';
-import { ui, useUiStore } from '@/store/useUiStore';
+import { useStatsSync } from '@/store/useStatsSync';
 import { useUserStore } from '@/store/useUserStore';
-import { colors, heat as heatColors, medalDefault, medals, shadows } from '@/theme/tokens';
-import type { Gmina, RankingPeriod, RankingRow } from '@/types';
-import { fmtInt } from '@/utils/format';
-
-const TILE = 36;
-const GAP = 5;
-const COLS = 8;
-const ROWS = 7;
-const GRID_W = COLS * TILE + (COLS - 1) * GAP;
+import { useVoivodeshipStore } from '@/store/useVoivodeshipStore';
+import { colors, medalDefault, medals, shadows } from '@/theme/tokens';
+import type { Ranking, RankingPeriod, RankingRow } from '@/types';
+import { fmtInt, plural } from '@/utils/format';
 
 export default function GminyScreen() {
   const { stats } = useServices();
+  // Tryb Supabase: ranking z bazy – puste stany, opóźnienie prywatności 24 h; podlaskie bez rankingu z makiety.
+  const live = !!stats.live;
   const [period, setPeriod] = useState<RankingPeriod>('week');
   const network = useSimStore((s) => s.networkEnabled);
-  const ranking = useAsync(() => stats.getRanking(period), [period, network]);
+  const version = useStatsSync((s) => s.version);
+  const { voivodeship, picked, detected } = useVoivodeship();
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const ranking = useAsync(() => stats.getRanking(period, { voivodeship }), [period, network, voivodeship, version]);
+  // Podczas zmiany województwa nie pokazujemy rankingu poprzedniego.
+  const data = ranking.data && (ranking.data.voivodeship ?? voivodeship) === voivodeship ? ranking.data : undefined;
+  const design = voivodeship === DESIGN_VOIVODESHIP && !live;
   const homeId = useSimStore((s) => s.forcedGminaId) ?? useUserStore.getState().user.homeGminaId;
+  const regionGmina = useRegionStore((s) => s.region?.gmina);
+  const homeVoivodeship = useCatalogStore((s) => s.gminaById[homeId]?.voivodeship);
+  // Poza podlaskim „Twoja gmina” = wykryta z lokalizacji albo domowa, jeśli leży w tym województwie.
+  const mineId = regionGmina?.voivodeship === voivodeship ? regionGmina.id : homeVoivodeship === voivodeship ? homeId : null;
 
   return (
     <Screen tabs>
@@ -41,7 +51,8 @@ export default function GminyScreen() {
             Gminy
           </Txt>
           <Pressable
-            onPress={pickVoivodeship}
+            onPress={() => setPickerOpen(true)}
+            accessibilityLabel={`Województwo ${voivodeship} – zmień`}
             style={({ pressed }) => ({
               flexDirection: 'row',
               alignItems: 'center',
@@ -55,7 +66,7 @@ export default function GminyScreen() {
             })}
           >
             <Txt f="n8" size={14}>
-              podlaskie
+              {voivodeship}
             </Txt>
             <Icon name="expand_more" size={18} />
           </Pressable>
@@ -74,139 +85,133 @@ export default function GminyScreen() {
         {ranking.error ? (
           <OfflineCard onRetry={ranking.reload} />
         ) : (
-          <>
-            <Heatmap heat={ranking.data?.heat} homeId={homeId} loading={ranking.loading && !ranking.data} />
-            <LeaderBanner rows={ranking.data?.rows} homeId={homeId} contribution={ranking.data?.userContribution} />
-            <View style={{ gap: 8, paddingBottom: 8 }}>
-              {ranking.loading && !ranking.data
-                ? Array.from({ length: 5 }).map((_, i) => <SkeletonRow key={i} />)
-                : ranking.data?.rows.map((r) => <RankRow key={r.gminaId} row={r} mine={r.gminaId === homeId} />)}
-            </View>
-          </>
+          // Podlaskie (makieta): „Twoja gmina” = domowa / z symulacji jak w pliku; inne – wykryta albo domowa.
+          <VoivodeshipView key={voivodeship} voivodeship={voivodeship} data={data} mineId={design ? homeId : mineId} live={live} />
         )}
       </View>
+      <VoivodeshipPicker
+        visible={pickerOpen}
+        value={voivodeship}
+        picked={picked}
+        detected={detected}
+        onPick={(v) => useVoivodeshipStore.getState().pick(v)}
+        onClose={() => setPickerOpen(false)}
+      />
     </Screen>
   );
 }
 
-function pickVoivodeship() {
-  useUiStore.getState().showDialog({
-    title: 'Województwo',
-    message: 'W prototypie dostępne jest tylko podlaskie – pozostałe regiony pojawią się wkrótce.',
-    icon: 'map',
-    actions: [
-      { label: 'podlaskie ✓', style: 'primary' },
-      { label: 'mazowieckie', style: 'default', onPress: () => ui.soon('Mazowieckie') },
-      { label: 'Zamknij', style: 'cancel' },
-    ],
-  });
-}
+const PAGE = 10;
 
-function Heatmap({ heat, homeId, loading }: { heat?: Record<string, number>; homeId: string; loading: boolean }) {
-  const all = useCatalogStore((s) => s.gminy);
-  // Na heatmapie tylko gminy z kaflem (wykryte z GPS spoza danych gry jej nie mają).
-  const gminy = useMemo(() => all.filter((g): g is Gmina & { tile: NonNullable<Gmina['tile']> } => !!g.tile), [all]);
-  const [selected, setSelected] = useState<string>(homeId);
-  const [cardW, setCardW] = useState(350);
-  const [tipW, setTipW] = useState(170);
-  const byCell = useMemo(() => {
-    const m = new Map<string, Gmina>();
-    gminy.forEach((g) => m.set(`${g.tile.row},${g.tile.col}`, g));
-    return m;
-  }, [gminy]);
+/** „w tym tygodniu” / „w tym sezonie” (rekordy liczą się w sezonie). */
+const PERIOD_PHRASE: Record<RankingPeriod, string> = { week: 'w tym tygodniu', season: 'w tym sezonie', records: 'w tym sezonie' };
 
-  const sel = gminy.find((g) => g.id === selected);
-  const inner = cardW - 32;
-  const x0 = 16 + (inner - GRID_W) / 2;
-  const tipPos = sel
-    ? (() => {
-        const tx = x0 + sel.tile.col * (TILE + GAP);
-        const ty = 16 + sel.tile.row * (TILE + GAP);
-        const left = Math.max(8, Math.min(tx - 40.5, cardW - tipW - 8));
-        const top = ty - 63 < 4 ? ty + TILE + 8 : ty - 63;
-        return { left, top };
-      })()
-    : null;
+/** Pusty ranking z bazy (tryb Supabase): nikt w województwie nie ma jeszcze punktów w okresie. */
+const EMPTY_TEXT: Record<RankingPeriod, string> = {
+  week: 'W tym tygodniu nikt jeszcze nie zbierał w tym województwie – bądź pierwszy!',
+  season: 'W tym sezonie nikt jeszcze nie zbierał w tym województwie – bądź pierwszy!',
+  records: 'W tym sezonie nikt jeszcze nie ustanowił tu rekordu – bądź pierwszy!',
+};
 
-  const onTile = (g: Gmina) => {
-    if (g.id === selected) router.push(`/gminy/${g.id}`);
-    else setSelected(g.id);
-  };
-
+/**
+ * Województwo: mapa cieplna z konturów PRG (przybliżana), ranking – w podlaskim 5 gmin z makiety,
+ * w pozostałych wszystkie gminy (pierwsza dziesiątka + „Twoja gmina” + dociąganie kolejnych).
+ * Tryb Supabase (`live`): tylko gminy z punktami w okresie, pusty stan i podpis o opóźnieniu 24 h.
+ */
+function VoivodeshipView({ voivodeship, data, mineId, live }: { voivodeship: string; data?: Ranking; mineId: string | null; live: boolean }) {
+  const [limit, setLimit] = useState(PAGE);
+  const rows = data?.rows;
+  const mine = rows?.find((r) => r.gminaId === mineId);
+  const period = data?.period ?? 'week';
   return (
-    <Card radius={26} padding={16} gap={12} style={{ position: 'relative' }}>
-      <View onLayout={(e) => setCardW(e.nativeEvent.layout.width + 32)} style={{ alignItems: 'center' }}>
-        <View style={{ width: GRID_W, gap: GAP }}>
-          {Array.from({ length: ROWS }).map((_, r) => (
-            <View key={r} style={{ flexDirection: 'row', gap: GAP }}>
-              {Array.from({ length: COLS }).map((__, c) => {
-                const g = byCell.get(`${r},${c}`);
-                if (!g) return <View key={c} style={{ width: TILE, height: TILE }} />;
-                const level = heat?.[g.id] ?? 0;
-                const isSel = g.id === selected;
-                return (
-                  <Pressable
-                    key={c}
-                    accessibilityLabel={`Gmina ${g.name}`}
-                    onPress={() => onTile(g)}
-                    style={{
-                      width: TILE,
-                      height: TILE,
-                      borderRadius: 11,
-                      backgroundColor: loading ? colors.chip : heatColors[level],
-                      boxShadow: isSel ? shadows.selectedTile : undefined,
-                      zIndex: isSel ? 2 : 0,
-                    }}
-                  />
-                );
-              })}
-            </View>
-          ))}
-        </View>
-      </View>
-      {sel && tipPos && !loading ? (
-        <Animated.View
-          key={sel.id}
-          entering={FadeIn.duration(150)}
-          onLayout={(e) => setTipW(e.nativeEvent.layout.width)}
-          style={{
-            position: 'absolute',
-            left: tipPos.left,
-            top: tipPos.top,
-            backgroundColor: colors.ink,
-            borderRadius: 14,
-            paddingVertical: 7,
-            paddingHorizontal: 11,
-            boxShadow: shadows.tooltip,
-            zIndex: 5,
-          }}
-        >
-          <Pressable onPress={() => router.push(`/gminy/${sel.id}`)}>
-            <Txt f="n8" size={12} color={colors.bg}>
-              {sel.name} · {fmtInt(sel.mushroomers)} grzybiarzy
+    <>
+      <VoivodeshipHeatmap
+        voivodeship={voivodeship}
+        heat={data?.heat}
+        mushroomers={data?.mushroomers}
+        mineId={mineId}
+        defaultId={rows?.[0]?.gminaId}
+        loading={!data}
+      />
+      <LeaderBanner rows={rows} homeId={mineId} contribution={data?.userContribution} live={live} period={period} />
+      <View style={{ gap: 8, paddingBottom: 8 }}>
+        {!rows ? (
+          Array.from({ length: 5 }).map((_, i) => <SkeletonRow key={i} />)
+        ) : live && !rows.length ? (
+          <StateCard icon="emoji_events" title="Ranking jest jeszcze pusty" text={EMPTY_TEXT[period]} />
+        ) : (
+          <>
+            {rows.slice(0, limit).map((r) => (
+              <RankRow key={r.gminaId} row={r} mine={r.gminaId === mineId} />
+            ))}
+            {mine && mine.rank > limit ? (
+              <>
+                <Txt f="b7" size={18} color={colors.faint} align="center" lh={1}>
+                  ⋯
+                </Txt>
+                <RankRow row={mine} mine />
+              </>
+            ) : null}
+            {rows.length > limit ? (
+              <Pressable
+                onPress={() => setLimit((l) => l + 2 * PAGE)}
+                style={({ pressed }) => ({
+                  borderRadius: 18,
+                  borderWidth: 2.5,
+                  borderColor: colors.outline,
+                  paddingVertical: 11,
+                  alignItems: 'center',
+                  backgroundColor: pressed ? colors.outlineHover : 'transparent',
+                })}
+              >
+                <Txt f="b7" size={16} color={colors.outlineText}>
+                  Pokaż kolejne gminy ({rows.length - limit})
+                </Txt>
+              </Pressable>
+            ) : null}
+          </>
+        )}
+        {live && rows ? (
+          // Prywatność: serwer liczy rankingi z XP starszych niż 24 h – świeża wyprawa dojdzie później.
+          <View style={{ flexDirection: 'row', gap: 8, alignItems: 'flex-start', paddingHorizontal: 4, paddingTop: 2 }}>
+            <Icon name="schedule" size={16} color={colors.muted} />
+            <Txt f="n6" size={12} color={colors.muted} style={{ flex: 1 }}>
+              Ranking uwzględnia wyprawy sprzed 24 h – tak chronimy lokalizację grzybiarzy.
             </Txt>
-          </Pressable>
-        </Animated.View>
-      ) : null}
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'center' }}>
-        <Txt f="n7" size={12} color={colors.muted}>
-          mniej
-        </Txt>
-        <View style={{ flexDirection: 'row', gap: 3 }}>
-          {heatColors.map((c) => (
-            <View key={c} style={{ width: 14, height: 14, borderRadius: 5, backgroundColor: c }} />
-          ))}
-        </View>
-        <Txt f="n7" size={12} color={colors.muted}>
-          więcej zbiorów
-        </Txt>
+          </View>
+        ) : null}
       </View>
-    </Card>
+    </>
   );
 }
 
-function LeaderBanner({ rows, homeId, contribution }: { rows?: RankingRow[]; homeId: string; contribution?: number }) {
-  const gmina = useCatalogStore((s) => s.gminaById[homeId]);
+/** Tytuł banera z bazy: miejsce gminy gracza albo brak punktów w okresie (ranking ma tylko gminy z punktami). */
+function liveTitle(rows: RankingRow[], homeId: string | null, period: RankingPeriod): string {
+  const what = period === 'records' ? 'rekordów' : 'punktów';
+  const mine = rows.find((r) => r.gminaId === homeId);
+  if (!homeId) {
+    return rows.length
+      ? `${fmtInt(rows.length)} ${plural(rows.length, 'gmina walczy', 'gminy walczą', 'gmin walczy')} o podium!`
+      : `Żadna gmina nie ma jeszcze ${what} ${PERIOD_PHRASE[period]}`;
+  }
+  if (!mine) return `Twoja gmina nie ma jeszcze ${what} ${PERIOD_PHRASE[period]}`;
+  return mine.rank === 1 ? 'Twoja gmina prowadzi w województwie!' : `Twoja gmina jest ${mine.rank}. w województwie`;
+}
+
+function LeaderBanner({
+  rows,
+  homeId,
+  contribution,
+  live,
+  period,
+}: {
+  rows?: RankingRow[];
+  homeId: string | null;
+  contribution?: number;
+  live: boolean;
+  period: RankingPeriod;
+}) {
+  const gmina = useCatalogStore((s) => (homeId ? s.gminaById[homeId] : undefined));
   if (!rows) {
     return (
       <View style={{ backgroundColor: colors.forest, borderRadius: 20, padding: 14, gap: 8, boxShadow: shadows.forest }}>
@@ -216,11 +221,17 @@ function LeaderBanner({ rows, homeId, contribution }: { rows?: RankingRow[]; hom
     );
   }
   const mine = rows.find((r) => r.gminaId === homeId);
-  const title = !mine
-    ? `Gmina ${gmina?.name} walczy o podium!`
-    : mine.rank === 1
-      ? 'Twoja gmina prowadzi w województwie!'
-      : `Twoja gmina jest na ${mine.rank}. miejscu!`;
+  const title = live
+    ? liveTitle(rows, homeId, period)
+    : !homeId
+      ? `${fmtInt(rows.length)} ${plural(rows.length, 'gmina walczy', 'gminy walczą', 'gmin walczy')} o podium!`
+      : !mine
+        ? `Gmina ${gmina?.name} walczy o podium!`
+        : mine.rank === 1
+          ? 'Twoja gmina prowadzi w województwie!'
+          : `Twoja gmina jest na ${mine.rank}. miejscu!`;
+  // Mocki: zawsze wkład tygodnia (makieta); z bazą – wkład w okresie rankingu (rekordy: w sezonie).
+  const contributionLabel = live ? `Twój wkład ${PERIOD_PHRASE[period]}` : 'Twój wkład w tym tygodniu';
   return (
     <View
       style={{
@@ -239,7 +250,7 @@ function LeaderBanner({ rows, homeId, contribution }: { rows?: RankingRow[]; hom
           {title}
         </Txt>
         <Txt f="n7" size={12} color={colors.onDark} style={{ opacity: 0.85 }}>
-          Twój wkład w tym tygodniu: {fmtInt(contribution ?? 0)} pkt
+          {contributionLabel}: {fmtInt(contribution ?? 0)} pkt
         </Txt>
       </View>
     </View>

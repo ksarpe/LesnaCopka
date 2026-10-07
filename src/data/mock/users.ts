@@ -1,4 +1,5 @@
 import type { PostAuthor, User } from '@/types';
+import { EMPTY_COUNTERS, type PlayerCounters } from '@/utils/counters';
 
 export const START_USER: User = {
   id: 'u-kuba',
@@ -13,14 +14,43 @@ export const START_USER: User = {
   homeGminaId: 'suprasl',
 };
 
-/** Liczniki postępu odznak i osiągnięć na starcie (9 borowików → dziesiąty odblokuje „Króla Puszczy”). */
-export const START_COUNTERS = {
+/**
+ * Liczniki postępu odznak i osiągnięć gracza demo (9 borowików → dziesiąty odblokuje „Króla Puszczy”). Spójne
+ * z makietą: 42 wyprawy, 196,4 km, 318 okazów w atlasie (lato + jesień), odznaki „Ranny ptaszek” i „Seria 7 dni”.
+ */
+export const START_COUNTERS: PlayerCounters = {
+  ...EMPTY_COUNTERS,
   borowikiKnyszynska: 9,
   totalKm: 196.4,
   streakDays: 3,
   legendaryFinds: 0,
   /** Okazy XXL – osiągnięcie „Okazy XXL” (brąz zdobyty, srebro przy 5). */
   xxlFinds: 3,
+  epicFinds: 7,
+  rareFinds: 65,
+  poisonPhotos: 6,
+  trips: 42,
+  maxTripKm: 9.6,
+  maxTripMin: 205,
+  earlyTrips: 1,
+  maxTripFinds: 18,
+  gminy: ['suprasl', 'wasilkow', 'czarna-bialostocka', 'knyszyn'],
+  voivodeships: ['podlaskie'],
+  forests: ['Puszcza Knyszyńska'],
+  awayFinds: 41,
+  months: [6, 7, 8, 9, 10, 11],
+  summerFinds: 74,
+  autumnFinds: 244,
+  maxStreak: 7,
+  activeDays: 38,
+  reactionsGiven: 23,
+  reactionsReceived: 37,
+  comments: 6,
+  friends: 6,
+  published: 5,
+  challengesDone: 2,
+  dailyQuestsDone: 34,
+  weeklyQuestsDone: 3,
 };
 
 export const START_BADGES = ['ranny-ptaszek', 'km-100', 'seria-7'];

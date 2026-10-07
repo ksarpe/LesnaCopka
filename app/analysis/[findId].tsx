@@ -9,6 +9,7 @@ import {
   GminaSeasonCard,
   isPoisonous,
   PoisonBanner,
+  ProtectedBanner,
   SafetyBanner,
   Sheet,
   SpeciesHero,
@@ -25,6 +26,7 @@ import { useTripStore } from '@/store/useTripStore';
 import { colors, shadows } from '@/theme/tokens';
 import type { Find } from '@/types';
 import { fmtWeight } from '@/utils/format';
+import { speciesLookalikes } from '@/utils/species';
 
 const LOW_CONFIDENCE = 0.6;
 
@@ -71,6 +73,8 @@ function AnalysisBody({ find, onClaimStart }: { find: Find; onClaimStart: () => 
     [find.id],
   );
   const poison = isPoisonous(species.edibility);
+  // Trujący albo chroniony – tylko zdjęcie (decyzja z createPendingFind: collected = false).
+  const photoOnly = poison || !find.collected;
   const d = find.dimensions;
 
   const claim = () => {
@@ -81,12 +85,18 @@ function AnalysisBody({ find, onClaimStart }: { find: Find; onClaimStart: () => 
 
   return (
     <Screen hero>
-      <SpeciesHero rarity={find.rarity} confidence={find.confidence} onBack={() => rescan(find.id)} />
+      <SpeciesHero
+        rarity={find.rarity}
+        confidence={find.confidence}
+        photoUri={find.photoUri}
+        onBack={() => rescan(find.id)}
+      />
       <Sheet>
         <SpeciesTitle species={species} />
-        <SpeciesTags species={species} xxl={find.xxl && !poison} />
+        <SpeciesTags species={species} xxl={find.xxl && !photoOnly} />
         {poison ? <PoisonBanner deadly={species.edibility === 'smiertelny'} /> : null}
-        {species.lookalike ? <SafetyBanner lookalike={species.lookalike} /> : null}
+        {species.protection ? <ProtectedBanner protection={species.protection} /> : null}
+        <SafetyBanner lookalikes={speciesLookalikes(species)} />
         <StatGrid
           items={[
             { label: 'Kapelusz Ø', value: `${d.capCm} cm` },
@@ -98,7 +108,7 @@ function AnalysisBody({ find, onClaimStart }: { find: Find; onClaimStart: () => 
           ]}
         />
         <GminaSeasonCard gminaName={gmina?.name ?? '—'} data={pct.data} loading={pct.loading} error={!!pct.error} />
-        {poison ? (
+        {photoOnly ? (
           <Button3D title="Zapisz w atlasie" icon="photo_library" onPress={claim} style={{ marginBottom: 8 }} />
         ) : (
           <Button3D title="Odbierz nagrodę" icon="redeem" onPress={claim} style={{ marginBottom: 8 }} />
@@ -118,6 +128,7 @@ function LowConfidence({ find }: { find: Find }) {
         confidence={find.confidence}
         lowConfidence
         label="niewyraźne ujęcie"
+        photoUri={find.photoUri}
         onBack={() => rescan(find.id)}
       />
       <Sheet>

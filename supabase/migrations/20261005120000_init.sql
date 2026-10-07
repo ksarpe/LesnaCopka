@@ -1158,7 +1158,8 @@ grant execute on function
 -- Storage
 --   avatars      publiczny odczyt, zapis do własnego folderu {user_id}/…
 --   scan-photos  prywatny: {user_id}/{scan_id}/{część}.jpg – tylko właściciel (+ Edge Function)
---   post-media   publiczny odczyt; zapisuje wyłącznie serwer przy publikacji (nieodgadywalne ścieżki)
+--   post-media   publiczny odczyt; zapis do własnego folderu {user_id}/… (okładka wpisu, nieodgadywalne ścieżki)
+--   Limity, typy plików i pełne polityki: 20261010100000_storage.sql (etap 5).
 -- ─────────────────────────────────────────────────────────────────────────────
 
 insert into storage.buckets (id, name, public) values

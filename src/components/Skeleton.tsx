@@ -18,6 +18,12 @@ function usePulse() {
   return useAnimatedStyle(() => ({ opacity: v.value }));
 }
 
+/** Pulsująca pigułka (wysokość jak `Pill` 13 px) – np. prognoza grzybowa w trakcie pobierania. */
+export function SkeletonPill({ width = 150 }: { width?: number }) {
+  const pulse = usePulse();
+  return <Animated.View style={[{ width, height: 28, borderRadius: 999, backgroundColor: colors.chip }, pulse]} />;
+}
+
 /** Pojedynczy „kość” w kolorze tła chipów. */
 export function Bone({ w, h, r = 8, style }: { w: DimensionValue; h: number; r?: number; style?: StyleProp<ViewStyle> }) {
   return <View style={[{ width: w, height: h, borderRadius: r, backgroundColor: colors.chip }, style]} />;

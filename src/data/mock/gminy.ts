@@ -1,4 +1,5 @@
-import type { Gmina, GminaStats, Rarity, RankingPeriod } from '@/types';
+import type { Gmina, GminaKind, GminaStats, Rarity, RankingPeriod, RankingRow } from '@/types';
+import { fmtInt, fmtMushroomers, placeLabel } from '@/utils/format';
 import { hashString, mulberry32 } from '@/utils/random';
 
 /** Wzór heatmapy 8×7 z makiety ('S' = gmina użytkownika, cyfra = stopień heatmapy 1–4). */
@@ -212,4 +213,74 @@ export function buildGminaStats(gmina: Gmina, rank: number): GminaStats {
 
 function order(r: Rarity) {
   return ['pospolity', 'rzadki', 'epicki', 'legendarny'].indexOf(r);
+}
+
+/* ───────────── Gminy spoza danych gry (dowolna gmina z PRG, inne województwa) ───────────── */
+
+/** Liczba grzybiarzy dla gminy bez danych gry – deterministycznie; więcej w miastach i gminach lesistych. */
+export function mockMushroomers(g: { id: string; kind?: GminaKind; forestPct?: number | null }): number {
+  const rnd = mulberry32(hashString(`grzybiarze:${g.id}`));
+  const base = g.kind === 'miejska' ? 160 + rnd() * 520 : 70 + rnd() * 380;
+  return Math.round(base + (g.forestPct ?? 25) * (5 + rnd() * 7));
+}
+
+/**
+ * Zbiory liczą się w gminie znaleziska – grzybiarze z miast jeżdżą do lasów,
+ * więc punkty rosną z lesistością (ok. ×0,6 przy 5% lasów, ×1,4 przy 55%).
+ */
+function forestFactor(forestPct?: number | null) {
+  return 0.5 + Math.min(80, Math.max(0, forestPct ?? 25)) / 60;
+}
+
+export interface VoivodeshipRanking {
+  /** Wszystkie gminy województwa, od pierwszego miejsca. */
+  rows: RankingRow[];
+  /** Stopień mapy cieplnej 0–4 (kwintyle rankingu). */
+  heat: Record<string, number>;
+  mushroomers: Record<string, number>;
+}
+
+/**
+ * Ranking województwa spoza makiety: punkty z liczby grzybiarzy, lesistości i seeda okresu
+ * (tydzień ≈ 9–16 pkt na grzybiarza, sezon ≈ 110–190, rekordy ≈ grzybiarze / 45; × czynnik lesistości).
+ */
+export function buildVoivodeshipRanking(
+  gminy: {
+    id: string;
+    name: string;
+    kind?: GminaKind;
+    powiat?: string;
+    forest?: string;
+    forestPct?: number | null;
+    mushroomers: number;
+  }[],
+  period: RankingPeriod,
+): VoivodeshipRanking {
+  const scored = gminy.map((g) => {
+    const rnd = mulberry32(hashString(`${period}:${g.id}`));
+    const f = forestFactor(g.forestPct);
+    const score =
+      period === 'records'
+        ? Math.max(1, Math.round((g.mushroomers / 45) * f + rnd() * 9))
+        : Math.round(g.mushroomers * f * (period === 'week' ? 9 + rnd() * 7 : 110 + rnd() * 80));
+    const trend = Math.round((rnd() - 0.5) * 6);
+    return { g, score, trend: trend === 0 ? null : trend };
+  });
+  scored.sort((a, b) => b.score - a.score || a.g.name.localeCompare(b.g.name, 'pl'));
+  const n = scored.length;
+  const heat: Record<string, number> = {};
+  const mushroomers: Record<string, number> = {};
+  const rows: RankingRow[] = scored.map(({ g, score, trend }, i) => {
+    heat[g.id] = Math.max(0, 4 - Math.floor((i / n) * 5));
+    mushroomers[g.id] = g.mushroomers;
+    return {
+      gminaId: g.id,
+      rank: i + 1,
+      name: g.name,
+      sub: `${g.forest ?? placeLabel(g)} · ${fmtMushroomers(g.mushroomers)}`,
+      points: period === 'records' ? `${score} rek.` : fmtInt(score),
+      trend,
+    };
+  });
+  return { rows, heat, mushroomers };
 }

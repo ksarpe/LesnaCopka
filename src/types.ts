@@ -30,7 +30,26 @@ export interface Species {
   clustered?: boolean;
   /** Typowe wymiary okazu – używane przez mock rozpoznawania. */
   typical: { capCm: number; heightCm: number; weightG: number };
+  /**
+   * Względna częstość owocnikowania w miesiącach I–XII (12 liczb 0..1, szczyt = 1).
+   * Brak = domyślna krzywa sezonu (lipiec–październik) – patrz utils sezonu.
+   */
+  seasonWeights?: number[];
+  /** Siedliska, w których rośnie (pierwsze = najczęstsze). */
+  habitats?: Habitat[];
+  /** Ochrona gatunkowa w Polsce – chronionego nie zbieramy (tylko zdjęcie). */
+  protection?: Protection;
+  /** Krótki opis do karty gatunku (1–3 zdania, cechy rozpoznawcze). */
+  description?: string;
+  /** Wszystkie sobowtóry (pierwszy = `lookalike`, zostaje dla zgodności). */
+  lookalikes?: Lookalike[];
 }
+
+/** Siedlisko: bór (iglasty), las liściasty, mieszany, łąka / pastwisko, na drewnie, torfowisko, park / ogród. */
+export type Habitat = 'iglasty' | 'lisciasty' | 'mieszany' | 'laka' | 'drewno' | 'torfowisko' | 'park';
+
+/** Ochrona gatunkowa grzybów w Polsce (rozporządzenie o ochronie gatunkowej grzybów). */
+export type Protection = 'scisla' | 'czesciowa';
 
 export interface Dimensions {
   capCm: number;
@@ -63,6 +82,8 @@ export interface ScanResult {
   id: string;
   parts: ScanPart[];
   capturedAt: ISODate;
+  /** Zdjęcie z aparatu zrobione spustem (lokalny URI; brak = symulacja / brak kamery). */
+  photoUri?: string;
 }
 
 export interface XpLine {
@@ -99,6 +120,13 @@ export interface Find {
   foundAt: ISODate;
   /** Alternatywy z rozpoznania (ekran niskiej pewności). */
   candidates?: Candidate[];
+  /**
+   * Zdjęcie znaleziska z aparatu (lokalny URI) – brak = paskowany placeholder. Tryb Supabase na webie: zdjęcie
+   * z serwera poza budżetem localStorage to znacznik `sb-photo:<ścieżka>` (utils/findPhoto.ts).
+   */
+  photoUri?: string;
+  /** Tryb Supabase: ścieżka zdjęcia w prywatnym koszyku `scan-photos` (`{uid}/{findId}.jpg`), gdy jest już na serwerze. */
+  photoPath?: string;
   xp?: XpBreakdown;
   /** Informacje wyliczone przy odbiorze nagrody (do ekranu Nagroda). */
   reward?: {
@@ -150,8 +178,11 @@ export interface GminaChallenge {
   speciesId: string;
   description: string;
   xp: number;
-  badgeId: string;
-  badgeName: string;
+  /** Odznaka za wyzwanie – serwer może prowadzić wyzwanie bez odznaki (mocki zawsze ją mają). */
+  badgeId?: string;
+  badgeName?: string;
+  /** Koniec wyzwania (tryb Supabase); brak = bez terminu. */
+  endsAt?: ISODate;
 }
 
 export type GminaKind = 'miejska' | 'wiejska' | 'miejsko-wiejska';
@@ -170,22 +201,31 @@ export interface Gmina {
   voivodeship: string;
   /** Lesistość w % (GUS BDL). */
   forestPct?: number | null;
-  /** Pozycja na heatmapie (kolumna/wiersz siatki 8×7) – tylko gminy z heatmapy. */
+  /** Pozycja na siatce 8×7 z makiety (wzór stopni heatmapy, seed bazy) – ekran Gminy rysuje już mapę z granic PRG. */
   tile?: { col: number; row: number };
   mushroomers: number;
-  /** Prognoza grzybowa – jeszcze bez źródła danych (API pogodowe). */
+  /** Prognoza z danych makiety (mocki, nieużywana w UI) – prawdziwa prognoza: `services.weather` (Open-Meteo). */
   forecast?: { score: number; daysAfterRain: number };
 }
 
 export interface GminaStats {
   gminaId: string;
-  rank: number;
+  /** Nazwa z serwera (gmina spoza katalogu w telefonie). */
+  name?: string;
+  /** Miejsce w tygodniowym rankingu województwa; null = gmina bez punktów (tryb Supabase). */
+  rank: number | null;
   mushroomers: number;
   mushrooms: number;
   species: number;
+  /** Puste = brak rekordów w tym sezonie (tryb Supabase). */
   records: GminaRecord[];
+  /** Puste = nikt jeszcze nic tu nie zebrał w tym sezonie (tryb Supabase). */
   distribution: { name: string; pct: number }[];
   challenge: GminaChallenge | null;
+  /** Stan gracza z serwera (tryb Supabase); brak = mocki (stan tylko w telefonie). */
+  challengeAccepted?: boolean;
+  challengeCompleted?: boolean;
+  followed?: boolean;
 }
 
 export type RankingPeriod = 'week' | 'season' | 'records';
@@ -205,11 +245,16 @@ export interface Ranking {
   /** 0–4 dla każdej gminy na heatmapie. */
   heat: Record<string, number>;
   userContribution: number;
+  /** Województwo rankingu (brak = podlaskie z makiety). */
+  voivodeship?: string;
+  /** Liczba grzybiarzy w gminach z mapy (podpowiedź na mapie województwa). */
+  mushroomers?: Record<string, number>;
 }
 
 export interface SpeciesPercentile {
   speciesId: string;
   gminaId: string;
+  /** Okazy gatunku w gminie w tym sezonie; 0 = brak danych (tryb Supabase – „pierwszy taki okaz”). */
   collected: number;
   mushroomers: number;
   /** Pozycja okazu w gminie w sezonie (1 = największy). */
@@ -262,7 +307,50 @@ export interface AreaMap {
   forestDistanceM: number | null;
   /** Zasięg pobranych danych (m) – dalej nie szukamy lasu. */
   radiusM: number;
+  /**
+   * Kafle niedostępne (offline, poza zapisaną mapą) – zostają puste. 0 / brak = mapa kompletna.
+   */
+  missingTiles?: number;
+  /** Promień (m), w którym dane są kompletne (do najbliższego brakującego kafla); odległość do lasu tylko w nim. */
+  completeRadiusM?: number;
   attribution: string;
+}
+
+/** Dzień z danych pogodowych (Open-Meteo, doba w strefie Europe/Warsaw). Brak pomiaru = null. */
+export interface WeatherDay {
+  /** YYYY-MM-DD */
+  date: string;
+  /** Suma opadów (mm) – dla dnia dzisiejszego i przyszłych to prognoza. */
+  precipMm: number | null;
+  tMinC: number | null;
+  tMaxC: number | null;
+  /** Średnia dobowa temperatura (°C). */
+  tMeanC: number | null;
+  /** Średnia dobowa wilgotność względna (%). */
+  humidityPct: number | null;
+  /** Kod pogody WMO (ikona w prognozie na najbliższe dni). */
+  weatherCode: number | null;
+}
+
+export type ForecastLabel = 'Słaba' | 'Umiarkowana' | 'Dobra' | 'Bardzo dobra' | 'Wyśmienita';
+
+/** Prognoza grzybowa (heurystyka z pogody – src/utils/forecast.ts). */
+export interface MushroomForecast {
+  /** 1–5 */
+  score: number;
+  label: ForecastLabel;
+  /** Dni od ostatniego dnia z opadem ≥ 3 mm (0 = dziś, maks. 14); null = brak takiego dnia w 14 dniach. */
+  daysAfterRain: number | null;
+  /** Suma opadów z ostatnich 14 dni (mm, z dzisiejszym). */
+  rain14Mm: number;
+  /** Uzasadnienie oceny po polsku („Dużo deszczu w ostatnich 2 tygodniach (38 mm)”, „Ciepło, 14 °C”). */
+  reasons: string[];
+  /** Dziś i 2 kolejne dni. */
+  outlook: WeatherDay[];
+  /** Kiedy pobrano dane pogodowe. */
+  updatedAt: ISODate;
+  /** open-meteo = prawdziwe dane; sim = prognoza symulowana (panel dev / makieta). */
+  source: 'open-meteo' | 'sim';
 }
 
 export interface Badge {
@@ -274,7 +362,31 @@ export interface Badge {
   description: string;
 }
 
-export type QuestKind = 'scans' | 'rare' | 'distance' | 'challenge';
+/**
+ * Rodzaj zadania (postęp liczy src/utils/quests.ts – `questDelta`; serwer: enum `quest_kind`, snake_case).
+ * `challenge` – przyjęte wyzwanie gminy (nie z puli zadań).
+ */
+export type QuestKind =
+  | 'scans'
+  | 'rare'
+  | 'epic'
+  | 'distance'
+  | 'species'
+  | 'tripMinutes'
+  | 'newSpecies'
+  | 'poisonPhoto'
+  | 'awayGmina'
+  | 'xxl'
+  | 'edible'
+  | 'variety'
+  | 'publish'
+  | 'reactions'
+  | 'earlyStart'
+  | 'trips'
+  | 'challenge';
+
+/** Zadania dnia (reset o północy) i tygodnia (reset w poniedziałek). */
+export type QuestPeriod = 'daily' | 'weekly';
 
 export interface Quest {
   id: string;
@@ -286,8 +398,18 @@ export interface Quest {
   iconColor: string;
   xp: number;
   target: number;
-  /** Dla wyzwań gminy: gatunek do znalezienia. */
+  /** Dla wyzwań gminy i zadań „znajdź gatunek”: gatunek do znalezienia. */
   speciesId?: string;
+  /** Brak = dzienne. */
+  period?: QuestPeriod;
+  /** 1 = łatwe, 2 = średnie, 3 = trudne (losowanie dzienne: zawsze co najmniej jedno łatwe). */
+  difficulty?: 1 | 2 | 3;
+  /** Miesiące (1–12), w których zadanie może wypaść (sezon gatunku); brak = cały rok. */
+  months?: number[];
+  /** `tripMinutes`: minimalny czas wyprawy (min). */
+  minutes?: number;
+  /** `earlyStart`: start przed tą godziną. */
+  beforeHour?: number;
 }
 
 export interface QuestProgress {
@@ -303,6 +425,12 @@ export interface AtlasEntry {
   bestWeightG: number;
 }
 
+/**
+ * Avatar gracza: gotowy motyw (ikona na kolorze) albo własne zdjęcie (lokalny URI / data URI na webie; innych graczy
+ * i z serwera – publiczny adres z koszyka `avatars`). `path` – ścieżka zdjęcia w Storage, gdy jest już na serwerze.
+ */
+export type UserAvatar = { kind: 'preset'; id: string } | { kind: 'photo'; uri: string; path?: string };
+
 export interface User {
   id: string;
   name: string;
@@ -315,6 +443,10 @@ export interface User {
   tripsCount: number;
   mushroomsCount: number;
   homeGminaId: string;
+  /** Brak = domyślny paskowany placeholder z makiety. */
+  avatar?: UserAvatar;
+  /** Krótki opis w profilu (opcjonalny). */
+  bio?: string;
 }
 
 export interface PostAuthor {
@@ -322,6 +454,10 @@ export interface PostAuthor {
   name: string;
   level: number;
   ringRarity: Rarity | 'primary';
+  /** „@ola.w” – z serwera (tryb Supabase); mocki mają go tylko w SocialUser. */
+  handle?: string;
+  /** Avatar autora: motyw z serwera (`avatarPreset`); własne wpisy – avatar gracza. Brak = paski z makiety. */
+  avatar?: UserAvatar;
 }
 
 export type PostScope = 'friends' | 'gmina';
@@ -348,6 +484,12 @@ export interface TripPost extends PostBase {
   xp: number;
   routePrecision: RoutePrecision;
   highlight?: { rarity: Rarity; text: string };
+  /** Wyprawa, z której powstał wpis (tryb Supabase – łączy wpis czekający w telefonie z wpisem z serwera). */
+  tripId?: string;
+  /** Własny wpis: znalezisko, którego zdjęcie (Find.photoUri) jest okładką – lokalne zdjęcie ma pierwszeństwo. */
+  coverFindId?: string;
+  /** Tryb Supabase: publiczny adres okładki z koszyka `post-media` (serwer: `coverPath`). */
+  coverUrl?: string;
   reactions: number;
   reacted: boolean;
   comments: number;
@@ -370,3 +512,127 @@ export interface CompactPost extends PostBase {
 }
 
 export type Post = TripPost | LevelUpPost | CompactPost;
+
+export interface PostComment {
+  id: string;
+  postId: string;
+  author: PostAuthor;
+  text: string;
+  createdAt: ISODate;
+  /** Komentarz gracza. */
+  mine?: boolean;
+}
+
+/**
+ * Relacja z graczem: `outgoing` – gracz wysłał zaproszenie, `incoming` – zaprasza gracza.
+ * W mockach zaproszenie jest przyjmowane od razu (`none` → `friends`).
+ */
+export type FriendStatus = 'none' | 'friends' | 'outgoing' | 'incoming';
+
+/** Inny grzybiarz (znajomy, wynik wyszukiwania, mini profil z feedu). */
+export interface SocialUser extends PostAuthor {
+  /** Imię i nazwisko – wyszukiwanie działa też po nim (mocki; serwer go nie udostępnia → ''). */
+  fullName: string;
+  /** „@ola.w” */
+  handle: string;
+  /** '' = gmina nieznana. */
+  homeGminaId: string;
+  tripsCount: number;
+  mushroomsCount?: number;
+  /** Tylko mini profil (get_user). */
+  speciesCount?: number;
+  friendStatus: FriendStatus;
+  /** Czy jest na liście znajomych gracza (= friendStatus === 'friends'). */
+  friend: boolean;
+  /** Gracz go zablokował (mini profil pokazuje „Odblokuj” zamiast przycisków znajomości). */
+  blocked?: boolean;
+}
+
+/** Zablokowany grzybiarz (Ustawienia → Prywatność → Zablokowani). */
+export interface BlockedUser extends PostAuthor {
+  handle: string;
+  blockedAt: ISODate;
+}
+
+/** Ekran Znajomi: znajomi i zaproszenia w obie strony. */
+export interface FriendsOverview {
+  friends: SocialUser[];
+  /** Zaproszenia do gracza (czekają na „Akceptuj” / „Odrzuć”). */
+  incoming: SocialUser[];
+  /** Zaproszenia wysłane przez gracza. */
+  outgoing: SocialUser[];
+}
+
+export type ActivityKind = 'reaction' | 'comment' | 'friend_request' | 'friend_accepted';
+
+/** Aktywność innych wobec gracza (tryb Supabase) – źródło powiadomień społecznościowych. */
+export interface ActivityItem {
+  /** Stabilny identyfikator (klucz powiadomienia). */
+  id: string;
+  kind: ActivityKind;
+  actor: PostAuthor;
+  postId: string | null;
+  /** Treść komentarza (kind = 'comment'). */
+  text: string | null;
+  createdAt: ISODate;
+}
+
+/* ───────── Szanse na gatunki i mapa gatunku (src/utils/chances.ts) – tylko agregaty gmin, nigdy punkty ───────── */
+
+/**
+ * Zbiory gatunków w gminie z ostatnich dni: tylko odebrane znaleziska po opóźnieniu prywatności, gatunki z co najmniej
+ * 2 znalazcami (k-anonimowość). Za mało danych w gminie → `total = 0` i pusta lista.
+ */
+export interface GminaSpeciesEvidence {
+  gminaId: string;
+  days: number;
+  /** Wszystkie znaleziska w oknie – także gatunków pominiętych na liście (< 2 znalazców). */
+  total: number;
+  species: { speciesId: string; finds: number; finders: number }[];
+}
+
+/** „Dziś” albo „Ten tydzień” (średnio na wyprawę w najbliższych 7 dniach). */
+export type ChanceHorizon = 'day' | 'week';
+
+export interface SpeciesChance {
+  speciesId: string;
+  /** Szansa trafienia gatunku na ok. 3-godzinnej wyprawie: 0,01–0,95. */
+  chance: number;
+  /** Oczekiwana liczba znalezisk gatunku na takiej wyprawie (λ). */
+  expected: number;
+  /** Krótkie uzasadnienia, najważniejsze pierwsze („Szczyt sezonu”, „Po deszczu – lubi wilgoć”). */
+  reasons: string[];
+  /** Gatunek jest w zbiorach gminy z ostatnich 2 tygodni (ocena nie tylko z sezonu). */
+  local: boolean;
+}
+
+export interface GminaChances {
+  gminaId: string;
+  /** YYYY-MM-DD */
+  date: string;
+  horizon: ChanceHorizon;
+  /** Oczekiwana liczba znalezisk (wszystkich gatunków) na typowej wyprawie. */
+  expectedFinds: number;
+  /** Prognoza grzybowa użyta w modelu (null = typowy dzień sezonu). */
+  forecastScore: number | null;
+  /** Znaleziska w gminie z ostatnich 14 dni (0 = szacunek tylko z sezonu i rzadkości). */
+  evidenceTotal: number;
+  /** Wszystkie gatunki katalogu, od najbardziej prawdopodobnego. */
+  species: SpeciesChance[];
+}
+
+/** Okres mapy gatunku: ostatnie 7 dni albo sezon (od 1 stycznia). */
+export type SpeciesMapPeriod = 'week' | 'season';
+
+/** Gdzie zbiera się gatunek – agregaty gmin województwa (gminy z < 2 znalazcami pominięte). */
+export interface SpeciesMap {
+  speciesId: string;
+  voivodeship: string;
+  period: SpeciesMapPeriod;
+  /** 1–4 (kwartyle liczby znalezisk); gminy bez wpisu = brak danych. */
+  heat: Record<string, number>;
+  /** Do 5 gmin z największą liczbą znalezisk. */
+  top: { gminaId: string; name: string; finds: number }[];
+  /** Znaleziska gatunku w pokazanych gminach. */
+  total: number;
+}

@@ -12,12 +12,15 @@ import { Placeholder } from '@/components/Placeholder';
 import { XpBarAnimated } from '@/components/ProgressBar';
 import { Burst, Glow, Rays } from '@/components/RewardFx';
 import { Screen } from '@/components/Screen';
+import { FIRST_IN_GMINA } from '@/components/SpeciesSheet';
 import { Txt } from '@/components/Txt';
 import { useAsync } from '@/hooks/useAsync';
 import { useCountUp } from '@/hooks/useCountUp';
+import { useFindPhotoSource } from '@/hooks/useFindPhotoSource';
 import { useServices } from '@/services';
 import { achievementTitle, grantPendingRewards } from '@/store/game';
 import { useCatalogStore } from '@/store/useCatalogStore';
+import { holdHydration } from '@/store/useOutboxStore';
 import { useTripStore } from '@/store/useTripStore';
 import { colors, rarity as rarityTokens } from '@/theme/tokens';
 import type { AchievementUnlock, XpLine } from '@/types';
@@ -31,7 +34,10 @@ const BAR_DURATION = 1600;
 
 export default function RewardScreen() {
   const { findId } = useLocalSearchParams<{ findId: string }>();
+  // Tryb Supabase: stan z serwera nie podmienia liczb w trakcie animacji (przyjmiemy go po wyjściu z ekranu).
+  useEffect(() => holdHydration(), []);
   const find = useTripStore((s) => s.finds[findId]);
+  const photo = useFindPhotoSource(find?.photoUri);
   const species = useCatalogStore((s) => (find ? s.speciesById[find.speciesId] : undefined));
   const gmina = useCatalogStore((s) => (find ? s.gminaById[find.gminaId] : undefined));
   const badgeById = useCatalogStore((s) => s.badgeById);
@@ -120,7 +126,13 @@ export default function RewardScreen() {
               overflow: 'hidden',
             }}
           >
-            <Placeholder variant="dark" stripe={8} label="zdjęcie grzyba" style={{ flex: 1 }} />
+            <Placeholder
+              variant="dark"
+              stripe={8}
+              label="zdjęcie grzyba"
+              source={photo}
+              style={{ flex: 1 }}
+            />
           </View>
           <Burst trigger={leveled ? 1 : 0} color={colors.scanGreen} />
         </View>
@@ -219,15 +231,18 @@ export default function RewardScreen() {
         {reward.unlockedAchievements?.length ? <AchievementCard unlocks={reward.unlockedAchievements} /> : null}
 
         <Txt f="n7" size={13} color={colors.onDarkMuted} align="center">
-          {pct.data
-            ? `${pct.data.mushroomers} ${plural(pct.data.mushroomers, 'osoba znalazła', 'osoby znalazły', 'osób znalazło')} ten gatunek w gminie w tym sezonie – ${
-                pct.data.biggerCount === 0
-                  ? 'Twój okaz jest największy!'
-                  : `tylko ${pct.data.biggerCount} ${plural(pct.data.biggerCount, 'okaz był większy', 'okazy były większe', 'okazów było większych')}.`
-              }`
-            : pct.error
-              ? 'Porównanie z gminą pojawi się, gdy wróci zasięg.'
-              : ' '}
+          {/* collected = 0 (tryb Supabase): nikt jeszcze nie zebrał tu tego gatunku w tym sezonie. */}
+          {pct.data?.collected === 0
+            ? FIRST_IN_GMINA
+            : pct.data
+              ? `${pct.data.mushroomers} ${plural(pct.data.mushroomers, 'osoba znalazła', 'osoby znalazły', 'osób znalazło')} ten gatunek w gminie w tym sezonie – ${
+                  pct.data.biggerCount === 0
+                    ? 'Twój okaz jest największy!'
+                    : `tylko ${pct.data.biggerCount} ${plural(pct.data.biggerCount, 'okaz był większy', 'okazy były większe', 'okazów było większych')}.`
+                }`
+              : pct.error
+                ? 'Porównanie z gminą pojawi się, gdy wróci zasięg.'
+                : ' '}
         </Txt>
 
         <Button3D title="Zbieram dalej" onDark onPress={onContinue} style={{ width: '100%' }} />
