@@ -17,7 +17,7 @@ interface CatalogState {
   load: (svc: CatalogService) => Promise<void>;
   /**
    * Nowszy katalog (tryb Supabase: start z pamięci telefonu albo z mocków, świeży z serwera w tle –
-   * src/services/supabase/catalogCache.ts). Gminy zostają (także dopisane z GPS).
+   * src/services/supabase/catalogCache.ts). Gminy zostają (także dopisane z GPS); liczba gatunków w atlasie = katalog.
    */
   applyCatalog: (p: Pick<CatalogState, 'species' | 'badges' | 'dailyQuests'>) => void;
   /** Dopisuje / uzupełnia gminę wykrytą z GPS (np. spoza danych gry). */
@@ -59,6 +59,7 @@ export const useCatalogStore = create<CatalogState>()((set, get) => ({
     set({
       species,
       speciesById: Object.fromEntries(species.map((s) => [s.id, s])),
+      totalSpecies: species.length,
       badges,
       badgeById: Object.fromEntries(badges.map((b) => [b.id, b])),
       dailyQuests,

@@ -26,7 +26,10 @@ const app = {
   ...(await tsImport('../src/utils/quests.ts', import.meta.url)),
   ...(await tsImport('../src/utils/counters.ts', import.meta.url)),
   QUEST_POOL: (await tsImport('../src/data/mock/game.ts', import.meta.url)).QUEST_POOL,
+  SPECIES: (await tsImport('../src/data/mock/species.ts', import.meta.url)).SPECIES,
 };
+/** Liczba gatunków w katalogu aplikacji (seed z tego samego pliku). */
+const N_SPECIES = app.SPECIES.length;
 const db = await PGlite.create({ extensions: { postgis, citext, unaccent } });
 
 let passed = 0;
@@ -92,8 +95,8 @@ const counts = await one(
           (select count(*) from gminy where teryt is not null and kind is not null and powiat is not null) prg`,
 );
 ok(
-  Number(counts.sp) === 120 && Number(counts.gm) === 2479 && Number(counts.b) === 5 && Number(counts.game) === 38 && Number(counts.prg) === 2479,
-  'seed: 120 gatunków, 2479 gmin z PRG (38 z danymi gry zachowane), 5 odznak',
+  Number(counts.sp) === N_SPECIES && Number(counts.gm) === 2479 && Number(counts.b) === 5 && Number(counts.game) === 38 && Number(counts.prg) === 2479,
+  `seed: ${N_SPECIES} gatunków, 2479 gmin z PRG (38 z danymi gry zachowane), 5 odznak`,
   counts,
 );
 const supraslRow = await one(`select teryt, kind, powiat, forest_region_id, tile_row from gminy where id = 'suprasl'`);
@@ -3232,9 +3235,9 @@ ok(
   const appScisla = (speciesSrc.match(/protection: 'scisla'/g) ?? []).length;
   const appCzesciowa = (speciesSrc.match(/protection: 'czesciowa'/g) ?? []).length;
   ok(
-    Number(cat.n) === 120 && Number(cat.season) === 120 && Number(cat.habitats) === 120 && Number(cat.described) === 120 &&
+    Number(cat.n) === N_SPECIES && Number(cat.season) === N_SPECIES && Number(cat.habitats) === N_SPECIES && Number(cat.described) === N_SPECIES &&
       Number(cat.scisla) === appScisla && Number(cat.czesciowa) === appCzesciowa && appScisla > 0 && appCzesciowa > 0,
-    `katalog: 120 gatunków z sezonem (12 miesięcy, szczyt 1), siedliskami i opisem; ochrona jak w aplikacji (${appScisla} ścisła, ${appCzesciowa} częściowa)`,
+    `katalog: ${N_SPECIES} gatunków z sezonem (12 miesięcy, szczyt 1), siedliskami i opisem; ochrona jak w aplikacji (${appScisla} ścisła, ${appCzesciowa} częściowa)`,
     cat,
   );
   const looks = await one(

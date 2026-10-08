@@ -642,3 +642,21 @@ Skan z prawdziwym aparatem na telefonie z czujnikami ruchu to teraz skan 3D: gra
 - **Nie sprawdzone w tej sesji:** prawdziwe czujniki i seria zdjęć na telefonie (iOS / Android) – progi kątów i prędkości
   mogą wymagać strojenia w lesie; `deno check` / `functions serve` funkcji z kilkoma ujęciami.
 
+## Atlas 360 gatunków (2026-10-08)
+
+Katalog rozszerzony ze 120 do 360 gatunków – pod przyszły własny model rozpoznawania i zbiór testowy.
+
+- **Dobór:** 198 gatunków najczęściej fotografowanych w Polsce (GBIF, ≥ 15 obserwacji ze zdjęciami, bez mikrogrzybów
+  i synonimów) + 42 ważne dla grzybiarzy (sobowtóry z opisów, mleczaje, gołąbki, koźlarze, piestrzenice). 6 kandydatów
+  odpadło (synonimy, brak polskiej nazwy). Szczegóły, decyzje o nazwach i jadalności: docs/species-sources.md.
+- **Treść:** sprawdzana w pl.wiki, grzyby.pl, en.wiki i GBIF (13 równoległych partii), scalona skryptem z walidacją
+  jak w testach katalogu. Nowe gatunki dopisane na końcu (pozycje 121–360, po rzadkości) – `atlas_no` w bazie się nie
+  zmienia, atlas graczy zostaje.
+- **`gbifKey`** przy każdym gatunku (klucz nazwy z katalogu, synonimy zachowują własny klucz) i docs/species-catalog.csv
+  (`npm run species:csv`, test pilnuje aktualności) – do mapowania etykiet modelu.
+- **Gra:** osiągnięcia bez zmian (67 / 249 stopni; zestawy-rodziny rosną same); aktywność sezonu zimą nie jest już ≈ 0
+  (płomiennica, uszaki, trzęsaki, huby) – testy szans dopasowane. Schemat odpowiedzi Edge Function `identify` ma teraz
+  enum 360 id – **do sprawdzenia przy pierwszym prawdziwym wywołaniu Claude** (limit złożoności gramatyki structured
+  outputs); Gemini przy 400 sam ponawia w trybie JSON.
+- **Do decyzji:** nazewnictwo (tradycyjne vs rekomendowane PTMyk – zasada w docs), wariant ostrożny przy spornych
+  gatunkach (np. piestrzenica infułowata jako śmiertelna, mleczaje kiszone jako trujące), siedzuń sosnowy (bez zmian).

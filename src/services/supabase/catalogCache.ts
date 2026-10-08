@@ -2,7 +2,8 @@
  * Słowniki w trybie Supabase bez czekania na sieć przy starcie: aplikacja rusza od ostatniego katalogu z serwera
  * zapisanego w telefonie, a przy pierwszym uruchomieniu – od katalogu z mocków (to seed bazy, scripts/gen-seed.ts).
  * Świeży katalog pobiera się w tle; jeśli różni się od tego, od którego ruszyliśmy, trafia do pamięci telefonu
- * i do useCatalogStore (ekrany przerysują się same). Gminy i liczba gatunków w atlasie – zawsze z `fallback`.
+ * i do useCatalogStore (ekrany przerysują się same). Gminy – zawsze z `fallback`; liczba gatunków w atlasie = długość
+ * katalogu, od którego ruszyliśmy (serwer / pamięć telefonu), a bez niego – z `fallback`.
  */
 import type { CatalogService } from '../types';
 import { persistStorage, STORAGE_KEYS } from '@/store/storage';
@@ -104,6 +105,6 @@ export function cachedCatalog(
     getBadges: async () => (await current())?.badges ?? fallback.getBadges(),
     getDailyQuests: async () => (await current())?.quests ?? fallback.getDailyQuests(),
     getGminy: () => fallback.getGminy(),
-    getTotalSpecies: () => fallback.getTotalSpecies(),
+    getTotalSpecies: async () => (await current())?.species.length || fallback.getTotalSpecies(),
   };
 }

@@ -157,7 +157,7 @@ erDiagram
 
 ## Katalog gatunków (treść, ochrona)
 
-Migracja `20261013100000_species_content.sql`; treść z `src/data/mock/species.ts` (120 gatunków) przez `npm run db:seed`
+Migracja `20261013100000_species_content.sql`; treść z `src/data/mock/species.ts` (360 gatunków) przez `npm run db:seed`
 (upsert – poprawki katalogu wchodzą przy kolejnym seedzie; `atlas_no` tylko przy wstawieniu). Źródła:
 [species-sources.md](species-sources.md).
 
@@ -948,7 +948,7 @@ Migracja [`20261014100000_identify.sql`](../supabase/migrations/20261014100000_i
   [{ speciesId, confidence }] (≤ 3, enum id z katalogu), visibleParts, count, capCm, heightCm, maturity }`. Błędy: `{ error, message?,
   retryAfter? }` – `bad_request` (400), `rate_limited` (429), `not_configured` / `model_unavailable` (503), `model_error` (502), `internal` (500).
 - **Model:** `IDENTIFY_MODEL` (domyślnie `claude-opus-5-5`), `effort: low`, structured outputs (`output_config.format` – schemat
-  z `contract.ts`), serwerowy fallback przy odmowie (`fallbacks: "default"`), prompt systemowy stały (cache) z katalogiem 120 gatunków.
+  z `contract.ts`), serwerowy fallback przy odmowie (`fallbacks: "default"`), prompt systemowy stały (cache) z katalogiem 360 gatunków (enum `speciesId` w schemacie – 360 wartości).
   Odmowa modelu → 200 z `verdict: 'unclear'`. Odpowiedź modelu i odpowiedź funkcji (w aplikacji) przechodzą przez `normalizeIdent`.
 - **Limit (`identify_begin(p_user)` → id wywołania, przed modelem):** jedno rozpoznanie naraz (niezamknięty wiersz młodszy niż
   `identify_busy_s` = 60 s) i `identify_per_day` = 60 w kroczącym oknie 24 h (bez `failed`); odrzucenie jak w etapie 7: `P0001 rate_limited`,
@@ -1081,7 +1081,7 @@ brak możliwości dopisania sobie XP, RLS na cudzych wyprawach i śladzie GPS, o
 znajomych, „Darz grzyb!”, statystyki gminy, ranking, `gmina_at` i LEVEL UP, a dla osiągnięć: stopnie bez XP
 na start, „Znam wroga” i „Epicka kolekcja” przy `claim_find`, wpis w księdze, idempotentność, brak zapisu
 i wywołań funkcji wewnętrznych przez klienta oraz parytet z aplikacją (atlas startowy → 20 / 48 stopni).
-Katalog: 120 gatunków z sezonem (12 wag, szczyt 1), siedliskami i opisem, liczba chronionych jak w `species.ts`, wiele
+Katalog: wszystkie gatunki z sezonem (12 wag, szczyt 1), siedliskami i opisem, liczba chronionych jak w `species.ts`, wiele
 sobowtórów z jednym głównym (`sort` 0, `lookalike_id` tylko przy nim); gatunek chroniony (soplówka jeżowata) →
 `collected = false` i rozpiska ½ bazy + „Zostawiony w lesie” + nowy gatunek (480 XP), idempotentny `claim_find`;
 chroniony i trujący (borowik szatański) → ta sama rozpiska; `mushrooms_count` bez zmian.

@@ -20,6 +20,11 @@ export interface Species {
   id: string;
   name: string;
   latin: string;
+  /**
+   * Klucz taksonu w GBIF (nazwa łacińska z katalogu, także gdy GBIF prowadzi ją jako synonim) – mapowanie na etykiety
+   * modelu rozpoznawania i zbiorów testowych mimo zmian nazw łacińskich. Lista: docs/species-catalog.csv.
+   */
+  gbifKey?: number;
   /** Krótka nazwa w dopełniaczu/mianowniku do etykiet XP, np. „borowik”. */
   shortName: string;
   rarity: Rarity;

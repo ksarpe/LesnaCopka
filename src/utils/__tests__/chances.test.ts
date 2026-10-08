@@ -141,9 +141,9 @@ describe('siedlisko, lesistość, wilgoć, prognoza', () => {
     expect(findsForScore(9)).toBe(12);
   });
 
-  it('aktywność sezonu: jesień ≈ 1, zima ≈ 0', () => {
+  it('aktywność sezonu: jesień ≈ 1, zima niska (tylko grzyby zimowe i huby widoczne cały rok)', () => {
     expect(seasonActivity(SPECIES, '2026-09-20')).toBeGreaterThan(0.9);
-    expect(seasonActivity(SPECIES, '2026-01-15')).toBeLessThan(0.05);
+    expect(seasonActivity(SPECIES, '2026-01-15')).toBeLessThan(0.2);
   });
 });
 
@@ -269,7 +269,7 @@ describe('computeChances', () => {
 
   it('zima: prawie zero znalezisk, wszystkie szanse na minimum', () => {
     const c = computeChances(base({ species: SPECIES, date: '2026-01-15', forecast: { score: 1, daysAfterRain: null } }));
-    expect(c.expectedFinds).toBeLessThan(0.2);
+    expect(c.expectedFinds).toBeLessThan(0.4);
     expect(c.species.every((x) => x.chance <= 0.1)).toBe(true);
   });
 

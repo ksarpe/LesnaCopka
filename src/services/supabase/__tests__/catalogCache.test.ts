@@ -62,6 +62,8 @@ describe('cachedCatalog', () => {
     server.resolve(SERVER);
     await ticks();
     expect(useCatalogStore.getState().speciesById.borowik).toMatchObject({ name: 'Borowik' });
+    // Liczba gatunków w atlasie = katalog z serwera (nie stała z aplikacji – serwer może mieć inny seed).
+    expect(useCatalogStore.getState().totalSpecies).toBe(SERVER.species.length);
     expect(useBackendStatus.getState().catalogSource).toBe('supabase');
     expect(AsyncStorage.setItem).toHaveBeenCalledWith(STORAGE_KEYS.catalog, JSON.stringify({ state: SERVER, version: CATALOG_CACHE_VERSION }));
   });
@@ -73,6 +75,7 @@ describe('cachedCatalog', () => {
     const svc = cachedCatalog(() => server.promise, fallback);
     await load(svc);
     expect(useCatalogStore.getState().species).toEqual(SERVER.species);
+    expect(useCatalogStore.getState().totalSpecies).toBe(SERVER.species.length);
     expect(useBackendStatus.getState().catalogSource).toBe('cache');
 
     const before = useCatalogStore.getState().species;

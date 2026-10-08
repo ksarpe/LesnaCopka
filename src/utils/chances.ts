@@ -272,7 +272,7 @@ const potential = (s: SpeciesLike) => RARITY_WEIGHT[s.rarity] * abundanceOf(s);
 
 /**
  * Aktywność sezonu 0..1: suma krzywych sezonu katalogu (ważona rzadkością i popularnością) w dniu `date`
- * względem najlepszego miesiąca. Wrzesień–październik ≈ 1, zima ≈ 0.
+ * względem najlepszego miesiąca. Wrzesień–październik ≈ 1, zima niska (~0,1: płomiennica, uszaki, trzęsaki, huby).
  */
 export function seasonActivity(species: SpeciesLike[], date: string): number {
   let now = 0;

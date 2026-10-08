@@ -177,8 +177,11 @@ i nadpisuje swoim stanem – patrz [Backend (Supabase)](#backend-supabase).
 
 ## Katalog gatunków
 
-**120 gatunków występujących w Polsce** (`src/data/mock/species.ts`, w bazie z `npm run db:seed`): 55 pospolitych,
-35 rzadkich, 20 epickich, 10 legendarnych; 70 jadalnych, 20 niejadalnych, 21 trujących, 9 śmiertelnie trujących.
+**360 gatunków występujących w Polsce** (`src/data/mock/species.ts`, w bazie z `npm run db:seed`): 174 pospolite,
+124 rzadkie, 44 epickie, 18 legendarnych; 129 jadalnych, 143 niejadalne, 74 trujące, 14 śmiertelnie trujących;
+37 chronionych. Pozycje 121–360 to gatunki najczęściej fotografowane w Polsce (GBIF) i ważne dla grzybiarzy – dobór
+i decyzje w [docs/species-sources.md](docs/species-sources.md). Każdy gatunek ma klucz GBIF (`gbifKey`), a lista do
+mapowania etykiet modelu rozpoznawania to [docs/species-catalog.csv](docs/species-catalog.csv) (`npm run species:csv`).
 Atlas pokazuje cały katalog (`TOTAL_SPECIES` = długość katalogu). Każdy gatunek ma nazwę polską i aktualną łacińską,
 jadalność (konserwatywnie – wątpliwe jako trujące, „tylko po ugotowaniu” z ostrzeżeniem w opisie), siedliska
 (`habitats`), typowe wymiary, sezon (`seasonWeights` – 12 wag I–XII, szczyt = 1), opis z cechami rozpoznawczymi
@@ -461,7 +464,7 @@ anonimowe). Przyjmuje `{ image: JPEG w base64, month, voivodeship }` – bez gmi
 unclear, `reason` po polsku, do 3 kandydatów z enum id katalogu z pewnością, widoczne części, liczba owocników, rozmiar tylko
 przy odniesieniu skali na zdjęciu, dojrzałość) z serwerowym fallbackiem przy odmowie modelu. Prompt każe być ostrożnym (niższa
 pewność, groźny sobowtór na liście kandydatów); aplikacja dodatkowo obniża pewność jadalnego gatunku poniżej 60%, gdy wśród
-kandydatów jest trujący. Stały prompt systemowy (instrukcje + 120 gatunków) idzie do cache promptu. Bez skali na zdjęciu
+kandydatów jest trujący. Stały prompt systemowy (instrukcje + 360 gatunków) idzie do cache promptu. Bez skali na zdjęciu
 wymiary = typowe dla gatunku (bez XXL, nic nie jest losowane).
 
 **Koszty i limit.** 60 rozpoznań na gracza w kroczącym oknie 24 h i jedno naraz (RPC `identify_begin` / `identify_finish`,

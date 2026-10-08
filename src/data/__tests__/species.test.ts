@@ -2,9 +2,13 @@
  * Katalog gatunków (src/data/mock/species.ts): integralność danych i zasady bezpieczeństwa.
  * Źródła treści: docs/species-sources.md.
  */
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+
 import { describe, expect, it } from '@jest/globals';
 
 import { SPECIES, START_ATLAS, TOTAL_SPECIES } from '../mock/species';
+import { buildSpeciesCsv } from '../speciesCsv';
 import type { Edibility, Habitat, Rarity } from '../../types';
 import { isPhotoOnlySpecies, speciesLookalikes } from '../../utils/species';
 
@@ -27,13 +31,20 @@ const nameKey = (name: string) => name.toLowerCase().replace(/ \(.*\)$/, '');
 const byName = new Map(SPECIES.map((s) => [nameKey(s.name), s]));
 
 describe('katalog gatunków', () => {
-  it('120 gatunków o unikalnych id, nazwach i nazwach łacińskich; TOTAL_SPECIES = długość katalogu', () => {
-    expect(SPECIES).toHaveLength(120);
+  it('360 gatunków o unikalnych id, nazwach i nazwach łacińskich; TOTAL_SPECIES = długość katalogu', () => {
+    expect(SPECIES).toHaveLength(360);
     expect(TOTAL_SPECIES).toBe(SPECIES.length);
-    expect(new Set(SPECIES.map((s) => s.id)).size).toBe(120);
-    expect(new Set(SPECIES.map((s) => nameKey(s.name))).size).toBe(120);
-    expect(new Set(SPECIES.map((s) => s.latin)).size).toBe(120);
+    expect(new Set(SPECIES.map((s) => s.id)).size).toBe(360);
+    expect(new Set(SPECIES.map((s) => nameKey(s.name))).size).toBe(360);
+    expect(new Set(SPECIES.map((s) => s.latin)).size).toBe(360);
     SPECIES.forEach((s) => expect(s.id).toMatch(/^[a-z]+(-[a-z]+)+$/));
+  });
+
+  it('każdy gatunek ma unikalny klucz GBIF; docs/species-catalog.csv aktualny (npm run species:csv)', () => {
+    SPECIES.forEach((s) => expect(Number.isInteger(s.gbifKey)).toBe(true));
+    expect(new Set(SPECIES.map((s) => s.gbifKey)).size).toBe(SPECIES.length);
+    const file = path.resolve(__dirname, '..', '..', '..', 'docs', 'species-catalog.csv');
+    expect(readFileSync(file, 'utf8').replace(/\r\n/g, '\n')).toBe(buildSpeciesCsv(SPECIES));
   });
 
   it('zachowuje wszystkie dotychczasowe gatunki, pierwsze 9 w kolejności siatki z makiety', () => {
@@ -41,9 +52,9 @@ describe('katalog gatunków', () => {
     Object.keys(START_ATLAS).forEach((id) => expect(LEGACY_IDS).toContain(id));
   });
 
-  it('rzadkość gry: 55 pospolitych / 35 rzadkich / 20 epickich / 10 legendarnych', () => {
+  it('rzadkość gry: 174 pospolite / 124 rzadkie / 44 epickie / 18 legendarnych', () => {
     const count = (r: Rarity) => SPECIES.filter((s) => s.rarity === r).length;
-    expect([count('pospolity'), count('rzadki'), count('epicki'), count('legendarny')]).toEqual([55, 35, 20, 10]);
+    expect([count('pospolity'), count('rzadki'), count('epicki'), count('legendarny')]).toEqual([174, 124, 44, 18]);
   });
 
   it('sezon: 12 wag 0..1 ze szczytem = 1', () => {

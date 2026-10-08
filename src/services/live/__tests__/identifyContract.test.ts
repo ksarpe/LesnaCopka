@@ -43,7 +43,7 @@ describe('katalog Edge Function', () => {
         ...(s.clustered ? { clustered: true } : {}),
       })),
     );
-    expect(new Set(IDS).size).toBe(120);
+    expect(new Set(IDS).size).toBe(360);
   });
 
   it('województwa w kontrakcie = src/geo/voivodeships.ts', () => {
