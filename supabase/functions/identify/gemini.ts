@@ -33,13 +33,20 @@ const BLOCKED = new Set([
  * { status: 'ok' | 'refused', result, meta } albo { status: 'failed', error, meta? }.
  */
 export async function classifyGemini(opts) {
-  const { apiKey, model, systemPrompt, schema, image, text, signal, isKnown, refused } = opts;
+  const { apiKey, model, systemPrompt, schema, images, text, signal, isKnown, refused } = opts;
   const body = (withSchema) => ({
     systemInstruction: { parts: [{ text: systemPrompt }] },
     contents: [
       {
         role: 'user',
-        parts: [{ inlineData: { mimeType: 'image/jpeg', data: image } }, { text }],
+        // Zdjęcie główne i ujęcia skanu 3D z podpisami (requestImages w ./contract.ts), na końcu kontekst.
+        parts: [
+          ...images.flatMap(({ image, label }) => [
+            ...(label ? [{ text: label }] : []),
+            { inlineData: { mimeType: 'image/jpeg', data: image } },
+          ]),
+          { text },
+        ],
       },
     ],
     generationConfig: {

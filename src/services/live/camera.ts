@@ -1,7 +1,8 @@
 /**
  * Prawdziwy aparat (expo-camera): zgoda systemowa, dostępność kamery i zdjęcie znaleziska zmniejszone
  * expo-image-manipulator (JPEG bez EXIF). To zdjęcie rozpoznaje Edge Function `identify` (./identify.ts) i ono
- * trafia do znaleziska. Bez zdjęcia nie ma rozpoznania (poza wymuszonym wynikiem z panelu dev).
+ * trafia do znaleziska. Bez zdjęcia nie ma rozpoznania (poza wymuszonym wynikiem z panelu dev). Skan 3D robi w czasie
+ * obchodzenia grzyba serię mniejszych ujęć (captureScanView) – bez dźwięku migawki.
  */
 import { Camera, CameraView, type PermissionResponse } from 'expo-camera';
 import { ImageManipulator, SaveFormat, type ImageRef } from 'expo-image-manipulator';
@@ -68,6 +69,8 @@ export async function isCameraAvailable(): Promise<boolean> {
 
 /** Zdjęcie natywnie: dłuższy bok 720 px, JPEG 0,6 (~60–120 KB w katalogu dokumentów). */
 const NATIVE_PHOTO = { edge: 720, compress: 0.6 };
+/** Ujęcie skanu 3D: dłuższy bok 640 px, JPEG 0,55 (~40–90 KB) – do 14 ujęć na skan. */
+const VIEW_PHOTO = { edge: 640, compress: 0.55 };
 /** Web: data URI trafia do localStorage – mniejsze kroki, aż zmieści się w limicie. */
 const WEB_PHOTO = [
   { edge: 480, compress: 0.5 },
@@ -102,11 +105,11 @@ async function shrink(uri: string, edge: number): Promise<ImageRef> {
   }
 }
 
-async function nativePhoto(uri: string): Promise<string> {
-  const ref = await shrink(uri, NATIVE_PHOTO.edge);
+async function nativePhoto(uri: string, size = NATIVE_PHOTO): Promise<string> {
+  const ref = await shrink(uri, size.edge);
   try {
-    const out = await ref.saveAsync({ compress: NATIVE_PHOTO.compress, format: SaveFormat.JPEG });
-    return await persistFindPhoto(out.uri, `${makeId('photo')}.jpg`);
+    const out = await ref.saveAsync({ compress: size.compress, format: SaveFormat.JPEG });
+    return await persistFindPhoto(out.uri, `${makeId(size === VIEW_PHOTO ? 'view' : 'photo')}.jpg`);
   } finally {
     release(ref);
     deleteTempFile(uri);
@@ -135,14 +138,14 @@ async function webPhoto(uri: string): Promise<string | undefined> {
   return fallback;
 }
 
-async function shoot(camera: CameraView): Promise<string | undefined> {
+async function shoot(camera: CameraView, view = false): Promise<string | undefined> {
   try {
     // skipProcessing pomijamy: na iOS i tak jest ignorowane, a na Androidzie gubi orientację (EXIF).
     const pic = await camera.takePictureAsync(
-      Platform.OS === 'web' ? { quality: 0.85, imageType: 'jpg' } : { quality: 0.5 },
+      Platform.OS === 'web' ? { quality: 0.85, imageType: 'jpg' } : { quality: 0.5, shutterSound: !view },
     );
     if (!pic?.uri) return undefined;
-    return Platform.OS === 'web' ? await webPhoto(pic.uri) : await nativePhoto(pic.uri);
+    return Platform.OS === 'web' ? await webPhoto(pic.uri) : await nativePhoto(pic.uri, view ? VIEW_PHOTO : NATIVE_PHOTO);
   } catch (e) {
     if (__DEV__) console.warn('[camera] nie udało się zrobić zdjęcia', e);
     return undefined;
@@ -151,24 +154,37 @@ async function shoot(camera: CameraView): Promise<string | undefined> {
 
 /** Dłużej nie czekamy na zdjęcie – ekran skanu pokazuje wtedy „nie udało się zrobić zdjęcia”. */
 const CAPTURE_TIMEOUT_MS = 10_000;
+/** Dłużej nie czekamy na ujęcie skanu 3D – obchodzenie idzie dalej, sektor dostanie zdjęcie przy następnej okazji. */
+const VIEW_TIMEOUT_MS = 6_000;
+
+function withTimeout(work: Promise<string | undefined>, ms: number): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      resolve(undefined);
+      // Spóźnione zdjęcie nie trafi do znaleziska – sprzątamy plik.
+      work.then((late) => deleteFindPhoto(late));
+    }, ms);
+    work.then((uri) => {
+      clearTimeout(timer);
+      resolve(uri);
+    });
+  });
+}
 
 /**
  * Zdjęcie znaleziska spustem skanu. Natywnie: plik w `dokumenty/finds/`, web: data URI.
  * Nigdy nie rzuca – bez zdjęcia (błąd, brak gotowości aparatu, timeout) zwraca undefined.
  */
 export function captureFindPhoto(camera: CameraView): Promise<string | undefined> {
-  const work = shoot(camera);
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => {
-      resolve(undefined);
-      // Spóźnione zdjęcie nie trafi do znaleziska – sprzątamy plik.
-      work.then((late) => deleteFindPhoto(late));
-    }, CAPTURE_TIMEOUT_MS);
-    work.then((uri) => {
-      clearTimeout(timer);
-      resolve(uri);
-    });
-  });
+  return withTimeout(shoot(camera), CAPTURE_TIMEOUT_MS);
+}
+
+/**
+ * Ujęcie skanu 3D w czasie obchodzenia grzyba: bez dźwięku migawki, 640 px, plik w `dokumenty/finds/` (jak zdjęcie
+ * znaleziska – sprząta je ekran skanu albo porzucenie znaleziska). Nigdy nie rzuca – bez zdjęcia undefined.
+ */
+export function captureScanView(camera: CameraView): Promise<string | undefined> {
+  return withTimeout(shoot(camera, true), VIEW_TIMEOUT_MS);
 }
 
 /**

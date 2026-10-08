@@ -616,3 +616,29 @@ grzyba od razu kończy się „Nie wykryłem grzyba”. Konfiguracja, koszty i l
 - **Do zrobienia:** podpis wyniku rozpoznania przez serwer (dziś `find.submit` przyjmuje gatunek od telefonu – Edge Function
   może zapisać znalezisko sama albo zwrócić podpis do `submit_find`), rozpoznanie odłożone na później bez zasięgu,
   weryfikacja prawna przekazania zdjęć do Anthropic, `deno.json` z przypiętą wersją `@anthropic-ai/sdk`.
+
+## Skan 3D (2026-10-08)
+
+Skan z prawdziwym aparatem na telefonie z czujnikami ruchu to teraz skan 3D: gracz obchodzi grzyba, a analiza rusza sama.
+
+- **Postęp** (`src/scan/orbit.ts`, testy w `src/scan/__tests__`) – `DeviceMotion` (expo-sensors, ~15 Hz) → kierunek tylnego
+  aparatu z kątów W3C złożonych w macierz (iOS i Android podają tę samą konwencję; odporne na blokadę przegubu w pionie).
+  12 sektorów po 30° względem kierunku ze startu – do zaliczenia 9 (270°, pełne koło bywa w lesie niemożliwe) po 250 ms
+  spokojnego ruchu; do tego z góry (aparat ≤ -60°) i nisko przy ziemi (≥ -20°) po 500 ms. Udział: obejście 60%, z góry 20%,
+  przy ziemi 20%. Machanie telefonem (> 90°/s) nic nie zalicza i podpowiada „Wolniej”.
+- **Ekran** – pierścień z 12 sektorami (mapa z góry: start na dole, kropka = bieżąca pozycja) i grzybek w prawym górnym
+  rogu wypełniający się od dołu na zielono (`MushroomMeter`). Podpowiedzi po kolei: obejdź → nisko przy ziemi → z góry.
+  Pełny grzybek = analiza sama; spust w trakcie = „Analizuj teraz” z tym, co już jest (bez ujęć – jedno zdjęcie).
+  Bez czujników (web) – dawny skan jednym zdjęciem.
+- **Ujęcia** – w czasie obchodzenia ciche zdjęcia 640 px (bez dźwięku migawki i mignięcia podglądu), przy obrocie ≤ 45°/s:
+  po jednym na sektor boku, z góry i przy ziemi (do 14). Do rozpoznania idą najwyżej 4 (`src/scan/views.ts`): główne
+  (pierwszy bok), przy ziemi, z góry i bok najdalej od głównego. Zdjęcie znaleziska = główne; reszta zostaje w `Find.views`
+  tylko w telefonie (na serwer – jak dotąd jedno zdjęcie; synchronizacja zachowuje lokalne ujęcia).
+- **Podgląd 3D** (`Spin3D`) – obrotowy „stolik” z ujęć boku (przenikanie tylko przy połowie drogi, bezwładność, obrót sam
+  bez dotyku): w nagłówku Analizy, w kółku „Analizuję skan 3D…”, na pełnym ekranie `/podglad3d/[findId]` (w pionie –
+  ujęcia z góry / od spodu) i ze znaczka 3D przy miniaturze w dzienniku znalezisk. To podgląd z prawdziwych zdjęć, nie siatka
+  3D – model 3D (np. rekonstrukcja na serwerze) to możliwy następny krok.
+- **Narzędzia dev** – aparat „Symulacja” symuluje obchodzenie (`src/dev/simOrbit.ts`, ~11 s, bez zdjęć).
+- **Nie sprawdzone w tej sesji:** prawdziwe czujniki i seria zdjęć na telefonie (iOS / Android) – progi kątów i prędkości
+  mogą wymagać strojenia w lesie; `deno check` / `functions serve` funkcji z kilkoma ujęciami.
+

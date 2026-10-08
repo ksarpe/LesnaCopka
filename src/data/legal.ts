@@ -126,8 +126,9 @@ export const REGULAMIN: LegalDoc = {
             'gra działa offline, a dane wysyłają się po odzyskaniu połączenia.',
         ),
         p(
-          'Gatunek grzyba rozpoznaje ze zdjęcia model sztucznej inteligencji (Claude firmy Anthropic): po naciśnięciu ' +
-            'spustu zdjęcie trafia przez nasz serwer do modelu wyłącznie w celu rozpoznania. Wynik jest orientacyjny ' +
+          'Gatunek grzyba rozpoznaje ze zdjęcia model sztucznej inteligencji (Claude firmy Anthropic): po skanie ' +
+            '(spustem albo skanem 3D – obejściem grzyba z telefonem) zdjęcie, a przy skanie 3D do 4 ujęć tego samego ' +
+            'grzyba, trafia przez nasz serwer do modelu wyłącznie w celu rozpoznania. Wynik jest orientacyjny ' +
             'i może być błędny (§ 4). Gdy na zdjęciu nie widać grzyba albo ujęcie jest niewyraźne, Aplikacja nie zapisuje ' +
             'znaleziska. Liczba rozpoznań jest ograniczona (obecnie 60 na dobę), a bez internetu rozpoznanie nie działa.',
         ),
@@ -411,18 +412,25 @@ export const POLITYKA_PRYWATNOSCI: LegalDoc = {
             'chcesz – do zdjęcia profilowego. Zdjęcie profilowe możesz też wybrać z galerii: systemowy wybór zdjęć ' +
             'udostępnia Aplikacji tylko wskazane zdjęcie. Aplikacja nie nagrywa filmów ani dźwięku.',
         ),
+        p(
+          'Przy **skanie 3D** Aplikacja w czasie obchodzenia grzyba robi serię zdjęć i odczytuje czujniki ruchu ' +
+            'telefonu (żyroskop, akcelerometr) – tylko na otwartym ekranie skanu i tylko po to, by pokazać postęp ' +
+            'obchodzenia. Odczytów czujników nie zapisujemy ani nie wysyłamy.',
+        ),
         list(
           'Zdjęcia zmniejszamy i zapisujemy od nowa, co usuwa metadane EXIF – w tym współrzędne GPS, datę wykonania ' +
             'i model telefonu.',
-          '**Rozpoznanie gatunku** – zdjęcie zrobione spustem skanu (już bez EXIF) wraz z bieżącym miesiącem ' +
+          '**Rozpoznanie gatunku** – zdjęcie ze skanu (przy skanie 3D – do 4 ujęć tego samego grzyba; już bez EXIF) ' +
+            'wraz z bieżącym miesiącem ' +
             'i województwem wysyłamy przez nasz serwer do Anthropic (model AI Claude) wyłącznie po to, by rozpoznać ' +
             'grzyba. Nie wysyłamy gminy, współrzędnych, nicku ani innych danych Konta, a Aplikacja nie używa tego ' +
             'zdjęcia do żadnego innego celu. Na serwerze zapisujemy tylko dziennik wywołań (czas, status, zużycie – bez ' +
             'zdjęcia i wyniku) do limitu rozpoznań i kontroli kosztów. [Do weryfikacji prawnej: rola Anthropic jako ' +
             'podmiotu przetwarzającego, umowa powierzenia, okres przechowywania zapytań u dostawcy, transfer do USA.]',
           '**Zdjęcia znalezisk** przechowujemy na telefonie, a po synchronizacji także w prywatnym magazynie plików ' +
-            'powiązanym z Twoim Kontem – dostęp do nich masz tylko Ty. Zdjęcie odrzucone przy rozpoznaniu („to nie ' +
-            'grzyb”, niewyraźne ujęcie) od razu usuwamy z telefonu.',
+            'powiązanym z Twoim Kontem – dostęp do nich masz tylko Ty. Ujęcia skanu 3D (podgląd 3D znaleziska) zostają ' +
+            'tylko na telefonie – na serwer trafia jedno zdjęcie znaleziska. Zdjęcie odrzucone przy rozpoznaniu („to ' +
+            'nie grzyb”, niewyraźne ujęcie) – razem z ujęciami skanu 3D – od razu usuwamy z telefonu.',
           '**Okładka wpisu** (zdjęcie znaleziska dołączone do opublikowanej wyprawy) i **zdjęcie profilowe** są ' +
             'publiczne: widzą je inni Użytkownicy, a technicznie może je otworzyć każdy, kto zna ich losowy adres.',
         ),

@@ -91,6 +91,8 @@ function AnalysisBody({ find, onClaimStart }: { find: Find; onClaimStart: () => 
         rarity={find.rarity}
         confidence={find.confidence}
         photoUri={find.photoUri}
+        views={find.views}
+        onOpen3d={() => router.push(`/podglad3d/${find.id}`)}
         onBack={() => rescan(find.id)}
       />
       <Sheet>
@@ -140,6 +142,8 @@ function LowConfidence({ find }: { find: Find }) {
         lowConfidence
         label="niewyraźne ujęcie"
         photoUri={find.photoUri}
+        views={find.views}
+        onOpen3d={() => router.push(`/podglad3d/${find.id}`)}
         onBack={() => rescan(find.id)}
       />
       <Sheet>

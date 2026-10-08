@@ -148,6 +148,10 @@ function AppStack() {
           />
           <Stack.Screen name="analysis/[findId]" options={{ freezeOnBlur: false }} />
           <Stack.Screen
+            name="podglad3d/[findId]"
+            options={{ presentation: 'fullScreenModal', animation: 'fade', contentStyle: { backgroundColor: colors.camera } }}
+          />
+          <Stack.Screen
             name="reward/[findId]"
             options={{
               presentation: 'fullScreenModal',

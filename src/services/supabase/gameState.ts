@@ -354,7 +354,7 @@ export function mapReward(raw: unknown): { xp?: XpBreakdown; reward?: NonNullabl
 }
 
 /**
- * Znalezisko z serwera; zdjęcie i alternatywy z rozpoznania zostają z telefonu. `photoPath` (zdjęcie na serwerze)
+ * Znalezisko z serwera; zdjęcie, ujęcia skanu 3D i alternatywy z rozpoznania zostają z telefonu. `photoPath` (zdjęcie na serwerze)
  * – z serwera (starszy serwer bez pola → z telefonu); znacznik `sb-photo:` innej ścieżki niż serwerowa znika.
  */
 export function mapFind(sf: ServerFind, local?: Find): Find {
@@ -384,6 +384,7 @@ export function mapFind(sf: ServerFind, local?: Find): Find {
   if (photoPath) find.photoPath = photoPath;
   const marker = remotePhotoPath(local?.photoUri);
   if (local?.photoUri && (!marker || marker === photoPath)) find.photoUri = local.photoUri;
+  if (local?.views?.length) find.views = local.views;
   if (claimed) {
     find.xp = xp ?? (sf.xp ? { lines: [{ label: 'XP za znalezisko', xp: sf.xp }], total: sf.xp } : local?.xp);
     const rw = reward ?? local?.reward;

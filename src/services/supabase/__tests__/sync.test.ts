@@ -264,6 +264,7 @@ jest.mock('@react-native-async-storage/async-storage', () => require('@react-nat
 jest.mock('@/geo', () => ({ missingGminy: () => Promise.resolve([]) }));
 jest.mock('@/services/live/findPhotos', () => ({
   deleteFindPhoto: () => {},
+  deleteScanViews: () => {},
   clearFindPhotos: () => {},
   resolveFindPhoto: (uri: string) => uri,
   downloadFindPhoto: async (url: string, findId: string) => {

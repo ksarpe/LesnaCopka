@@ -184,11 +184,18 @@ function DevPanel() {
           </Chips>
           {sim.cameraSource === 'device' ? (
             <Txt f="n6" size={12} color={colors.muted}>
-              Prawdziwy podgląd w skanie i zdjęcie spustem (expo-camera) – to zdjęcie rozpoznaje serwer. Zgodę nadaje
-              system; bez kamery (np. komputer) skan pokazuje „Brak aparatu” z wyborem zdjęcia z galerii (tylko dev).
+              Prawdziwy podgląd w skanie (expo-camera). Telefon z czujnikami ruchu robi skan 3D: obejście grzyba, seria
+              ujęć i analiza sama po zapełnieniu grzybka; bez czujników (web) – zdjęcie spustem. Zgodę nadaje system;
+              bez kamery (np. komputer) skan pokazuje „Brak aparatu” z wyborem zdjęcia z galerii (tylko dev).
             </Txt>
           ) : (
-            <PermissionRow kind="camera" label="Zgoda: aparat" />
+            <>
+              <Txt f="n6" size={12} color={colors.muted}>
+                Paskowany podgląd i symulowane obchodzenie grzyba (skan 3D bez zdjęć, ~11 s) – bez wymuszonego wyniku
+                kończy się „Brak aparatu”.
+              </Txt>
+              <PermissionRow kind="camera" label="Zgoda: aparat" />
+            </>
           )}
         </Section>
 

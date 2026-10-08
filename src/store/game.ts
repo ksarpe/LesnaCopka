@@ -6,7 +6,7 @@ import * as Haptics from 'expo-haptics';
 import { Platform } from 'react-native';
 
 import { pruneAvatarFiles } from '@/services/live/avatarPhoto';
-import { clearFindPhotos, deleteFindPhoto } from '@/services/live/findPhotos';
+import { clearFindPhotos, deleteFindPhoto, deleteScanViews } from '@/services/live/findPhotos';
 import { clearWeatherCache } from '@/services/live/weather';
 import type {
   AchievementUnlock,
@@ -16,6 +16,7 @@ import type {
   Quest,
   Rarity,
   ScanPart,
+  ScanView,
   Trip,
   User,
 } from '@/types';
@@ -392,12 +393,13 @@ export function noteSocial(e: SocialEvent) {
 
 /**
  * Znalezisko z rozpoznania zdjęcia (IdentifyOutcome „mushroom”). `parts` – części owocnika widoczne na zdjęciu
- * (podpowiedź na Analizie, wysyłane z rozpoznaniem na serwer jako ujęcia skanu).
+ * (podpowiedź na Analizie, wysyłane z rozpoznaniem na serwer jako ujęcia skanu). `views` – ujęcia skanu 3D
+ * (podgląd 3D, tylko w telefonie; web ich nie zapisuje – localStorage ma miejsce na jedno zdjęcie).
  */
 export function createPendingFind(
   id: Identification,
   gminaId: string,
-  opts?: { photoUri?: string; parts?: ScanPart[] },
+  opts?: { photoUri?: string; parts?: ScanPart[]; views?: ScanView[] },
 ): Find {
   const species = catalog().speciesById[id.speciesId];
   // Trujący albo chroniony → tylko zdjęcie (serwer: submit_find liczy collected tak samo).
@@ -417,6 +419,7 @@ export function createPendingFind(
     candidates: id.candidates,
     ...(opts?.parts?.length ? { visibleParts: opts.parts } : {}),
     photoUri: opts?.photoUri,
+    ...(opts?.views?.length && !isDataUri(opts.views[0].uri) ? { views: opts.views } : {}),
   };
   useTripStore.getState().upsertFind(find);
   // Web: zdjęcia (data URI) siedzą w localStorage – najstarsze oddają miejsce nowym.
@@ -452,6 +455,7 @@ export function discardPendingFind(findId: string) {
   if (f && f.status === 'pending') {
     useTripStore.getState().removeFind(findId);
     deleteFindPhoto(f.photoUri);
+    deleteScanViews(f.views);
     emit({ type: 'find.discard', payload: { findId } });
     // Zdjęcie zdążyło trafić na serwer – usuwamy je też ze Storage (kolejką, więc także po powrocie sieci).
     if (f.photoPath) emit({ type: 'photo.delete', payload: { bucket: 'scan-photos', paths: [f.photoPath] } });

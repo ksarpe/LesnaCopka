@@ -1,12 +1,13 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import type { ReactNode } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 
 import { AI_RESULT_NOTICE } from '@/data/legal';
 import { useFindPhotoSource } from '@/hooks/useFindPhotoSource';
 import { useTopInset } from '@/hooks/useInsets';
+import { hasSpin } from '@/scan/views';
 import { colors, rarity as rarityTokens, shadows } from '@/theme/tokens';
-import type { Edibility, Lookalike, Protection, Rarity, Species, SpeciesPercentile } from '@/types';
+import type { Edibility, Lookalike, Protection, Rarity, ScanView, Species, SpeciesPercentile } from '@/types';
 import { HABITAT_LABEL, habitatsOf } from '@/utils/chances';
 import { plural } from '@/utils/format';
 import { PROTECTION_LABEL } from '@/utils/species';
@@ -15,6 +16,7 @@ import { IconButton } from './IconButton';
 import { Pill, RarityPill } from './Pill';
 import { Placeholder } from './Placeholder';
 import { Bone } from './Skeleton';
+import { Spin3D } from './Spin3D';
 import { StatTile } from './StatTile';
 import { Txt } from './Txt';
 
@@ -29,7 +31,10 @@ export function isPoisonous(e: Edibility) {
   return e === 'trujacy' || e === 'smiertelny';
 }
 
-/** Zdjęcie 320 px z przyciskiem wstecz, pigułką pewności i rzadkości. */
+/**
+ * Zdjęcie 320 px z przyciskiem wstecz, pigułką pewności i rzadkości. Po skanie 3D zamiast zdjęcia obraca się grzyb
+ * z ujęć obchodzenia (przeciąganie w bok), a „Podgląd 3D” otwiera go na pełnym ekranie.
+ */
 export function SpeciesHero({
   rarity,
   onBack,
@@ -37,6 +42,8 @@ export function SpeciesHero({
   label = 'Zdjęcie grzyba',
   lowConfidence,
   photoUri,
+  views,
+  onOpen3d,
 }: {
   rarity: Rarity;
   onBack: () => void;
@@ -46,16 +53,24 @@ export function SpeciesHero({
   lowConfidence?: boolean;
   /** Zdjęcie z aparatu (`Find.photoUri`) – bez niego kafel w kolorze rzadkości ze znakiem grzyba. */
   photoUri?: string;
+  /** Ujęcia skanu 3D (`Find.views`) – od 3 boków obrotowy podgląd zamiast zdjęcia. */
+  views?: ScanView[];
+  onOpen3d?: () => void;
 }) {
   const top = useTopInset();
   const source = useFindPhotoSource(photoUri);
+  const spin = views && hasSpin(views) ? views : null;
   return (
     <Placeholder
       source={source}
       tile={{ tint: rarityTokens[rarity].color, glyph: 'mushroom', glyphSize: 104 }}
       style={{ height: 320 }}
     >
-      <View accessible accessibilityRole="image" accessibilityLabel={label} style={StyleSheet.absoluteFill} />
+      {spin ? (
+        <Spin3D views={spin} style={StyleSheet.absoluteFill} />
+      ) : (
+        <View accessible accessibilityRole="image" accessibilityLabel={label} style={StyleSheet.absoluteFill} />
+      )}
       <IconButton
         icon="arrow_back"
         variant="photo"
@@ -76,6 +91,17 @@ export function SpeciesHero({
         />
       ) : null}
       {!lowConfidence ? <RarityPill rarity={rarity} style={{ position: 'absolute', left: 20, bottom: 40 }} /> : null}
+      {spin && onOpen3d ? (
+        <Pressable
+          onPress={onOpen3d}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Podgląd 3D na pełnym ekranie"
+          style={({ pressed }) => ({ position: 'absolute', right: 20, bottom: 40, opacity: pressed ? 0.85 : 1 })}
+        >
+          <Pill label="Podgląd 3D" icon="3d_rotation" bg={colors.white} color={colors.ink} iconColor={colors.primaryText} padV={7} padH={12} />
+        </Pressable>
+      ) : null}
     </Placeholder>
   );
 }

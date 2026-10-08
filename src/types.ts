@@ -80,12 +80,25 @@ export interface Identification {
 /** Części owocnika: kapelusz z wierzchu, spód kapelusza (blaszki / rurki), trzon, podstawa trzonu. */
 export type ScanPart = 'cap' | 'underside' | 'stem' | 'base';
 
-/** Zdjęcie do rozpoznania (spust skanu). */
+/** Ujęcie skanu 3D: zdjęcie z obchodzenia grzyba – z boku, z góry albo nisko przy ziemi (src/scan/orbit.ts). */
+export interface ScanView {
+  /** Lokalny URI zdjęcia (jak Find.photoUri). */
+  uri: string;
+  kind: 'side' | 'top' | 'low';
+  /** Azymut aparatu względem początku skanu (0–360°) – kolejność klatek w podglądzie 3D. */
+  az: number;
+  /** Elewacja aparatu (°): -90 = prosto z góry, 0 = poziomo. */
+  el: number;
+}
+
+/** Zdjęcie do rozpoznania (spust skanu albo koniec skanu 3D). */
 export interface ScanResult {
   id: string;
   capturedAt: ISODate;
   /** Zdjęcie z aparatu (lokalny URI). Brak – tylko wymuszony wynik skanu z panelu dev. */
   photoUri?: string;
+  /** Skan 3D: wszystkie ujęcia z obchodzenia (photoUri jest jednym z nich); do rozpoznania idzie najwyżej 4. */
+  views?: ScanView[];
 }
 
 /**
@@ -143,6 +156,8 @@ export interface Find {
    * z serwera poza budżetem localStorage to znacznik `sb-photo:<ścieżka>` (utils/findPhoto.ts).
    */
   photoUri?: string;
+  /** Skan 3D: ujęcia z obchodzenia grzyba (podgląd 3D) – tylko w telefonie, na serwer idzie samo photoUri. */
+  views?: ScanView[];
   /** Tryb Supabase: ścieżka zdjęcia w prywatnym koszyku `scan-photos` (`{uid}/{findId}.jpg`), gdy jest już na serwerze. */
   photoPath?: string;
   xp?: XpBreakdown;

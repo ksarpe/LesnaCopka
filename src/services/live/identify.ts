@@ -6,12 +6,14 @@
  *
  * Bez serwera – ServiceError('UNAVAILABLE'), nigdy wynik zmyślony. Wymuszony wynik skanu z panelu dev (tylko
  * narzędzia dev: gatunek / nie grzyb / niewyraźne) zastępuje rozpoznanie – bez zdjęcia, bez sieci i bez kosztów.
- * Do serwera idą tylko: zdjęcie, miesiąc i województwo (nie gmina, nie współrzędne).
+ * Do serwera idą tylko: zdjęcie (skan 3D: do 4 ujęć – src/scan/views.ts), miesiąc i województwo (nie gmina,
+ * nie współrzędne).
  */
 import { FunctionsFetchError, FunctionsHttpError, FunctionsRelayError } from '@supabase/supabase-js';
 
 import { DEV_TOOLS } from '@/config';
 import { SPECIES } from '@/data/mock/species';
+import { identifyViews } from '@/scan/views';
 import { useCatalogStore } from '@/store/useCatalogStore';
 import { useSimStore } from '@/store/useSimStore';
 import type { IdentifyOutcome, Species } from '@/types';
@@ -21,6 +23,7 @@ import { sleep } from '@/utils/random';
 
 import {
   normalizeIdent,
+  type IdentExtraView,
   type IdentifyErrorBody,
   type IdentifyRequestBody,
 } from '../../../supabase/functions/identify/contract';
@@ -96,9 +99,16 @@ export const liveIdentify: IdentifyService = {
 
     const bytes = await readImageBytes(scan.photoUri);
     if (!bytes) throw new ServiceError('NO_PHOTO', 'Nie udało się odczytać zdjęcia – zrób nowe.');
+    // Skan 3D: dodatkowe ujęcia (przy ziemi, z góry, druga strona) – nieczytelne pomijamy, główne wystarczy.
+    const views: IdentExtraView[] = [];
+    for (const v of identifyViews(scan.views ?? []).filter((v) => v.uri !== scan.photoUri)) {
+      const extra = await readImageBytes(v.uri);
+      if (extra) views.push({ image: bytesToBase64(extra), view: v.kind });
+    }
     const ctx = opts?.context ?? {};
     const body: IdentifyRequestBody = {
       image: bytesToBase64(bytes),
+      ...(views.length ? { views } : {}),
       month: ctx.month ?? new Date().getMonth() + 1,
       ...(ctx.voivodeship ? { voivodeship: ctx.voivodeship } : {}),
     };

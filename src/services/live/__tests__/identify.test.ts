@@ -90,6 +90,29 @@ describe('liveIdentify – prawdziwe rozpoznanie (Edge Function identify)', () =
     expect(out.kind === 'mushroom' && out.visibleParts).toEqual(['cap', 'underside', 'stem']);
   });
 
+  it('skan 3D: główne zdjęcie i najwyżej 3 ujęcia (przy ziemi, z góry, druga strona) z rodzajem widoku', async () => {
+    mockServer.invoke.mockResolvedValue({ data: OK, error: null });
+    const side = (az: number) => ({ uri: `file:///finds/view-${az}.jpg`, kind: 'side' as const, az, el: -40 });
+    const views = [
+      { ...side(0), uri: SCAN.photoUri },
+      side(30),
+      { uri: 'file:///finds/view-top.jpg', kind: 'top' as const, az: 60, el: -75 },
+      side(180),
+      { uri: 'file:///finds/view-low.jpg', kind: 'low' as const, az: 200, el: -10 },
+    ];
+    await liveIdentify.identify({ ...SCAN, views }, { context: { month: 10 } });
+    const [, opts] = mockServer.invoke.mock.calls[0];
+    expect(opts.body).toEqual({
+      image: '/9j/4AECAw==',
+      views: [
+        { image: '/9j/4AECAw==', view: 'low' },
+        { image: '/9j/4AECAw==', view: 'top' },
+        { image: '/9j/4AECAw==', view: 'side' },
+      ],
+      month: 10,
+    });
+  });
+
   it('nie grzyb → odrzucenie z powodem modelu (bez znaleziska)', async () => {
     mockServer.invoke.mockResolvedValue({
       data: { ...OK, verdict: 'not_mushroom', reason: 'Nie widzę tu grzyba – to wygląda na liść.', candidates: [] },

@@ -943,7 +943,8 @@ Migracja [`20261014100000_identify.sql`](../supabase/migrations/20261014100000_i
 [`supabase/functions/identify/`](../supabase/functions/identify/) (Deno; konfiguracja i koszty – README „Rozpoznawanie grzyba (AI)”).
 
 - **Żądanie** (`POST /functions/v1/identify`, sesja gracza – JWT, także konto anonimowe; bez tokenu → 401): `{ image: JPEG w base64,
-  month?: 1–12, voivodeship?: '<z listy 16>' }`. Odpowiedź 200: `{ verdict: 'mushroom' | 'not_mushroom' | 'unclear', reason, candidates:
+  views?: [{ image, view: 'side' | 'top' | 'low' }] (skan 3D – ≤ 3 dodatkowe ujęcia, razem ≤ 4 mln znaków base64), month?: 1–12,
+  voivodeship?: '<z listy 16>' }`. Ujęcia idą do modelu w jednej wiadomości z podpisami („Ujęcie 2 – z góry:”). Odpowiedź 200: `{ verdict: 'mushroom' | 'not_mushroom' | 'unclear', reason, candidates:
   [{ speciesId, confidence }] (≤ 3, enum id z katalogu), visibleParts, count, capCm, heightCm, maturity }`. Błędy: `{ error, message?,
   retryAfter? }` – `bad_request` (400), `rate_limited` (429), `not_configured` / `model_unavailable` (503), `model_error` (502), `internal` (500).
 - **Model:** `IDENTIFY_MODEL` (domyślnie `claude-opus-5-5`), `effort: low`, structured outputs (`output_config.format` – schemat

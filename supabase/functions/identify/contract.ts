@@ -37,10 +37,22 @@ export interface IdentifyResponse {
   maturity: IdentMaturity;
 }
 
+/** Skąd jest dodatkowe ujęcie skanu 3D: z boku (inna strona), z góry, nisko przy ziemi (spód kapelusza, trzon). */
+export type IdentView = 'side' | 'top' | 'low';
+
+/** Dodatkowe ujęcie skanu 3D – ten sam grzyb z innej strony. */
+export interface IdentExtraView {
+  /** JPEG w base64, jak `image`. */
+  image: string;
+  view: IdentView;
+}
+
 /** Żądanie aplikacji → Edge Function (`supabase.functions.invoke('identify', { body })`). */
 export interface IdentifyRequestBody {
-  /** Zdjęcie JPEG w base64 (bez prefiksu `data:`), ~720 px – camera.ts. */
+  /** Zdjęcie główne: JPEG w base64 (bez prefiksu `data:`), ~640–720 px – camera.ts. */
   image: string;
+  /** Skan 3D: najwyżej 3 dodatkowe ujęcia tego samego grzyba (src/scan/views.ts) – opcjonalnie. */
+  views?: IdentExtraView[];
   /** Miesiąc 1–12 (sezon) – opcjonalnie. */
   month?: number;
   /** Województwo (nazwa z listy VOIVODESHIPS) – opcjonalnie, nic dokładniejszego. */
@@ -75,9 +87,14 @@ export interface IdentCatalogEntry {
 export const IDENT_VERDICTS: readonly IdentVerdict[] = ['mushroom', 'not_mushroom', 'unclear'];
 export const IDENT_PARTS: readonly IdentPart[] = ['cap', 'underside', 'stem', 'base'];
 export const IDENT_MATURITY: readonly IdentMaturity[] = ['young', 'mature', 'old', 'unknown'];
+export const IDENT_VIEWS: readonly IdentView[] = ['side', 'top', 'low'];
 export const MAX_CANDIDATES = 3;
 /** Najwięcej znaków base64 zdjęcia (~1,1 MB JPEG; zdjęcie z aparatu ma ~60–150 KB). */
 export const MAX_IMAGE_B64 = 1_500_000;
+/** Najwięcej dodatkowych ujęć skanu 3D (razem z głównym – 4 zdjęcia). */
+export const MAX_EXTRA_VIEWS = 3;
+/** Najwięcej znaków base64 wszystkich zdjęć żądania razem (~3 MB JPEG). */
+export const MAX_TOTAL_B64 = 4_000_000;
 /** Najdłuższy powód odrzucenia pokazywany graczowi. */
 export const MAX_REASON = 200;
 
@@ -181,6 +198,11 @@ export function buildSystemPrompt(catalog: readonly IdentCatalogEntry[]): string
     'Jesteś modułem rozpoznawania grzybów w polskiej grze mobilnej „Grzybobranie”. Gracz robi telefonem zdjęcie',
     'grzyba znalezionego w lesie, a Ty oceniasz to zdjęcie i odpowiadasz wyłącznie obiektem JSON zgodnym ze schematem.',
     '',
+    'Czasem dostajesz kilka ujęć (skan 3D): to ten sam owocnik sfotografowany z różnych stron – z boku, z góry, nisko',
+    'przy ziemi. Łącz cechy widoczne na wszystkich ujęciach; visibleParts to części widoczne na którymkolwiek z nich.',
+    'Oceniasz owocnik z pierwszego ujęcia – ujęcie, które pokazuje coś innego, pomiń. Pojedyncze rozmazane albo ciemne',
+    'ujęcie nie przesądza o "unclear", jeśli inne pokazują grzyba dobrze.',
+    '',
     'To gra, ale gracze mogą zjeść to, co znaleźli. Dlatego:',
     '- Oceniasz tylko to, co naprawdę widać na zdjęciu. Nie zgadujesz.',
     '- Gdy nie masz pewności, obniż confidence. Wartość 0,6 lub wyższą dawaj tylko wtedy, gdy cechy widoczne na zdjęciu',
@@ -226,12 +248,32 @@ export function buildSystemPrompt(catalog: readonly IdentCatalogEntry[]): string
   ].join('\n');
 }
 
+const VIEW_LABEL: Record<IdentView, string> = {
+  side: 'z boku, z innej strony',
+  top: 'z góry',
+  low: 'nisko przy ziemi (spód kapelusza, trzon)',
+};
+
 /**
- * Tekst wiadomości obok zdjęcia – tylko zweryfikowany kontekst (miesiąc 1–12, województwo z listy), więc żądanie
- * nie wstrzyknie modelowi własnych poleceń.
+ * Zdjęcia żądania w kolejności dla modelu z krótkimi podpisami („Ujęcie 2 – z góry:”). Jedno zdjęcie – bez podpisu
+ * (ta sama wiadomość co przed skanem 3D).
  */
-export function buildRequestText(ctx: { month?: number; voivodeship?: string }): string {
-  const parts = ['Oceń zdjęcie z telefonu gracza.'];
+export function requestImages(body: Pick<IdentifyRequestBody, 'image' | 'views'>): { image: string; label: string | null }[] {
+  const extra = body.views ?? [];
+  if (!extra.length) return [{ image: body.image, label: null }];
+  return [
+    { image: body.image, label: 'Ujęcie 1 – główne:' },
+    ...extra.map((v, i) => ({ image: v.image, label: `Ujęcie ${i + 2} – ${VIEW_LABEL[v.view]}:` })),
+  ];
+}
+
+/**
+ * Tekst wiadomości po zdjęciach – tylko zweryfikowany kontekst (liczba ujęć, miesiąc 1–12, województwo z listy),
+ * więc żądanie nie wstrzyknie modelowi własnych poleceń.
+ */
+export function buildRequestText(ctx: { month?: number; voivodeship?: string; views?: readonly unknown[] }): string {
+  const n = 1 + Math.min(MAX_EXTRA_VIEWS, ctx.views?.length ?? 0);
+  const parts = [n > 1 ? `Oceń skan 3D z telefonu gracza – ${n} ujęcia tego samego grzyba.` : 'Oceń zdjęcie z telefonu gracza.'];
   if (isMonth(ctx.month)) parts.push(`Miesiąc: ${MONTHS[ctx.month - 1]}.`);
   if (ctx.voivodeship && VOIVODESHIPS.includes(ctx.voivodeship)) parts.push(`Województwo: ${ctx.voivodeship}.`);
   return parts.join(' ');
@@ -241,20 +283,40 @@ export function buildRequestText(ctx: { month?: number; voivodeship?: string }):
 
 const isMonth = (m: unknown): m is number => typeof m === 'number' && Number.isInteger(m) && m >= 1 && m <= 12;
 
+/** JPEG w base64 (sygnatura FF D8 FF → „/9j/”) bez prefiksu i białych znaków albo powód odrzucenia. */
+function cleanJpeg(raw: unknown): { image: string } | { message: string } {
+  if (typeof raw !== 'string' || !raw) return { message: 'Brak zdjęcia' };
+  const image = raw.replace(/^data:image\/jpeg;base64,/, '').replace(/\s+/g, '');
+  if (image.length > MAX_IMAGE_B64) return { message: 'Zdjęcie jest za duże' };
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(image) || !image.startsWith('/9j/')) return { message: 'Zdjęcie musi być plikiem JPEG' };
+  return { image };
+}
+
 /**
- * Walidacja żądania w Edge Function: JPEG w base64 (sygnatura FF D8 FF → „/9j/”), rozmiar, opcjonalny kontekst.
- * Nieznany miesiąc / województwo są pomijane (nie odrzucane).
+ * Walidacja żądania w Edge Function: zdjęcie główne i najwyżej 3 ujęcia skanu 3D (każde JPEG w base64, razem do
+ * MAX_TOTAL_B64), opcjonalny kontekst. Nieznany miesiąc / województwo są pomijane (nie odrzucane).
  */
 export function parseRequestBody(raw: unknown): { ok: true; body: IdentifyRequestBody } | { ok: false; message: string } {
   if (!raw || typeof raw !== 'object') return { ok: false, message: 'Brak treści żądania' };
   const r = raw as Record<string, unknown>;
-  if (typeof r.image !== 'string' || !r.image) return { ok: false, message: 'Brak zdjęcia' };
-  const image = r.image.replace(/^data:image\/jpeg;base64,/, '').replace(/\s+/g, '');
-  if (image.length > MAX_IMAGE_B64) return { ok: false, message: 'Zdjęcie jest za duże' };
-  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(image) || !image.startsWith('/9j/')) {
-    return { ok: false, message: 'Zdjęcie musi być plikiem JPEG' };
+  const main = cleanJpeg(r.image);
+  if ('message' in main) return { ok: false, message: main.message };
+  const body: IdentifyRequestBody = { image: main.image };
+  if (r.views != null) {
+    if (!Array.isArray(r.views) || r.views.length > MAX_EXTRA_VIEWS) return { ok: false, message: 'Za dużo ujęć skanu' };
+    const views: IdentExtraView[] = [];
+    let total = main.image.length;
+    for (const v of r.views) {
+      const o = (v && typeof v === 'object' ? v : {}) as Record<string, unknown>;
+      const view = IDENT_VIEWS.find((k) => k === o.view);
+      const img = cleanJpeg(o.image);
+      if (!view || 'message' in img) return { ok: false, message: 'Nieprawidłowe ujęcie skanu' };
+      total += img.image.length;
+      views.push({ image: img.image, view });
+    }
+    if (total > MAX_TOTAL_B64) return { ok: false, message: 'Zdjęcia są za duże' };
+    if (views.length) body.views = views;
   }
-  const body: IdentifyRequestBody = { image };
   if (isMonth(r.month)) body.month = r.month;
   if (typeof r.voivodeship === 'string' && VOIVODESHIPS.includes(r.voivodeship)) body.voivodeship = r.voivodeship;
   return { ok: true, body };

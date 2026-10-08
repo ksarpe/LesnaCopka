@@ -77,6 +77,11 @@ export function deleteFindPhoto(uri?: string) {
   }
 }
 
+/** Usuwa pliki ujęć skanu 3D (best effort). */
+export function deleteScanViews(views?: readonly { uri: string }[]) {
+  for (const v of views ?? []) deleteFindPhoto(v.uri);
+}
+
 /** Usuwa wszystkie zdjęcia znalezisk (reset stanu w panelu dev). */
 export function clearFindPhotos() {
   if (Platform.OS === 'web') return;

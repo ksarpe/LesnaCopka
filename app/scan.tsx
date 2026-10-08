@@ -19,17 +19,23 @@ import Svg, { Path } from 'react-native-svg';
 import { hapticLight } from '@/components/Button3D';
 import { Icon, type IconName } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
+import { MushroomMeter } from '@/components/MushroomMeter';
+import { OrbitRing } from '@/components/OrbitRing';
 import { Placeholder } from '@/components/Placeholder';
 import { ProgressRing } from '@/components/ProgressRing';
 import { ScanSweep } from '@/components/ScanSweep';
+import { Spin3D } from '@/components/Spin3D';
 import { Txt } from '@/components/Txt';
 import { UiHost } from '@/components/UiHost';
 import { DEV_TOOLS } from '@/config';
 import { detectRegion, useRegionStore } from '@/hooks/useRegion';
 import { useBottomPadding, useTopInset } from '@/hooks/useInsets';
+import { ORBIT, type OrbitHint } from '@/scan/orbit';
+import { useOrbitScan } from '@/scan/useOrbitScan';
+import { hasSpin, heroView } from '@/scan/views';
 import { ServiceError, useServices, type ServiceErrorCode } from '@/services';
-import { captureFindPhoto, isCameraAvailable, pickDevFindPhoto } from '@/services/live/camera';
-import { deleteFindPhoto, findPhotoSource } from '@/services/live/findPhotos';
+import { captureFindPhoto, captureScanView, isCameraAvailable, pickDevFindPhoto } from '@/services/live/camera';
+import { deleteFindPhoto, deleteScanViews, findPhotoSource } from '@/services/live/findPhotos';
 import { devScanForced } from '@/services/live/identify';
 import { createPendingFind } from '@/store/game';
 import { useCatalogStore } from '@/store/useCatalogStore';
@@ -37,13 +43,20 @@ import { useSimStore } from '@/store/useSimStore';
 import { ui } from '@/store/useUiStore';
 import { useUserStore } from '@/store/useUserStore';
 import { colors } from '@/theme/tokens';
-import type { IdentifyOutcome, ScanResult } from '@/types';
+import type { IdentifyOutcome, ScanResult, ScanView } from '@/types';
+import { plural } from '@/utils/format';
 import { makeId } from '@/utils/random';
 
 /**
- * Skan grzyba (02): podgląd aparatu z pierścieniem-kadrem → spust (zdjęcie) → „Analizuję…” (Edge Function
- * `identify`, model Claude) → grzyb: Analiza (03); „to nie grzyb” / niewyraźne ujęcie: karta z powodem i „Spróbuj
- * ponownie” bez tworzenia znaleziska. Bez aparatu nie ma rozpoznania (poza wymuszonym wynikiem z panelu dev).
+ * Skan grzyba (02): podgląd aparatu z pierścieniem-kadrem → „Analizuję…” (Edge Function `identify`, model Claude)
+ * → grzyb: Analiza (03); „to nie grzyb” / niewyraźne ujęcie: karta z powodem i „Spróbuj ponownie” bez tworzenia
+ * znaleziska. Bez aparatu nie ma rozpoznania (poza wymuszonym wynikiem z panelu dev).
+ *
+ * Skan 3D (telefon z czujnikami ruchu; w narzędziach dev także aparat „Symulacja”): gracz obchodzi grzyba – z boku,
+ * nisko przy ziemi i z góry (src/scan/orbit.ts). Pierścień zapala obejrzane strony, grzybek w rogu wypełnia się od
+ * dołu na zielono, a aparat w tym czasie zbiera ujęcia. Pełny grzybek = analiza rusza sama (do 4 ujęć naraz);
+ * spust w trakcie = „Analizuj teraz” z tym, co już jest. Ujęcia zostają przy znalezisku jako podgląd 3D.
+ * Bez czujników (web) – zwykły skan: spust robi jedno zdjęcie.
  */
 type Phase = 'permission' | 'denied' | 'live' | 'analyzing' | 'rejected' | 'nophoto' | 'error';
 type Rejection = Extract<IdentifyOutcome, { kind: 'not_mushroom' | 'unclear' }>;
@@ -51,11 +64,35 @@ type ScanFailure = { code: ServiceErrorCode | null; message: string };
 
 const RING = 270;
 const RING_THICK = 13.5;
+/** Obejście do zaliczenia w stopniach (podpowiedź „90° z 270°”). */
+const SECTOR_DEG = 360 / ORBIT.sectors;
+const NEEDED_DEG = ORBIT.sectorsNeeded * SECTOR_DEG;
 /** Kadr wewnątrz pierścienia – tam, gdzie w makiecie placeholder „grzyb w kadrze”. */
 const FRAME_INSET = 26;
 
 function hapticWarning() {
   if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+}
+
+/** Podpowiedź skanu 3D: co teraz zrobić, żeby grzybek się zapełnił. */
+function orbitStatus(hint: OrbitHint, coveredDeg: number): { title: string; sub: string } {
+  switch (hint) {
+    case 'start':
+      return { title: 'Wyceluj w grzyba', sub: 'Grzyb w kółku – skan 3D rusza sam' };
+    case 'orbit':
+      return {
+        title: 'Obejdź grzyba dookoła',
+        sub: `Powoli, aparat cały czas na grzybie · ${Math.min(coveredDeg, NEEDED_DEG)}° z ${NEEDED_DEG}°`,
+      };
+    case 'low':
+      return { title: 'Teraz nisko, przy ziemi', sub: 'Pokaż spód kapelusza i trzon' };
+    case 'top':
+      return { title: 'Teraz z góry', sub: 'Unieś telefon nad kapelusz' };
+    case 'slow':
+      return { title: 'Wolniej', sub: 'Przy szybkim ruchu zdjęcia wychodzą rozmazane' };
+    case 'done':
+      return { title: 'Mam wszystko!', sub: 'Analizuję skan 3D…' };
+  }
 }
 
 export default function ScanScreen() {
@@ -79,6 +116,8 @@ export default function ScanScreen() {
   const [readyFlag, setReadyFlag] = useState(false);
   /** Zdjęcie w analizie: URI, '' = bez zdjęcia (wynik wymuszony w dev), null = podgląd. */
   const [shot, setShot] = useState<string | null>(null);
+  /** Ujęcia skanu 3D w analizie (obracają się w kółku „Analizuję…”). */
+  const [shotViews, setShotViews] = useState<ScanView[] | null>(null);
   const [appActive, setAppActive] = useState(AppState.currentState !== 'background');
   const [frame, setFrame] = useState<LayoutRectangle | null>(null);
   const focused = useIsFocused();
@@ -100,6 +139,26 @@ export default function ScanScreen() {
   const cameraOn = liveView && camGranted && shot === null && focused && appActive;
 
   const camReady = cameraOn && readyFlag;
+
+  // Skan 3D: z prawdziwym aparatem (czujniki ruchu urządzenia) albo symulowany z aparatem „Symulacja” (tylko dev).
+  const orbitWanted = simCamera ? DEV_TOOLS : !camFailed;
+  const cameraOnRef = useRef(false);
+  useEffect(() => {
+    cameraOnRef.current = cameraOn;
+  }, [cameraOn]);
+  const captureView = useCallback(async () => {
+    const cam = cameraRef.current;
+    return cam && cameraOnRef.current ? captureScanView(cam) : undefined;
+  }, []);
+  const orbit = useOrbitScan({
+    active: orbitWanted && phase === 'live' && (simCamera || camReady),
+    source: simCamera ? 'sim' : 'device',
+    capture: simCamera ? null : captureView,
+    onDone: () => void finishOrbit(),
+  });
+  // Czujniki jeszcze sprawdzane – już ekran skanu 3D (bez mignięcia zwykłego skanu).
+  const orbitMode = orbitWanted && orbit.available !== false;
+  const resetOrbit = orbit.reset;
   // Podgląd gaśnie po wyjściu z ekranu i w tle – po powrocie czekamy na nowe „gotowe” z aparatu.
   useFocusEffect(
     useCallback(() => {
@@ -139,13 +198,18 @@ export default function ScanScreen() {
     setPhase((p) => (p === 'permission' || p === 'denied' ? 'live' : p));
   }, []);
 
-  /** Zdjęcie, które nie trafiło do znaleziska, nie zostaje na dysku. */
+  /** Zdjęcie (i ujęcia skanu 3D), które nie trafiło do znaleziska, nie zostaje na dysku; skan 3D od nowa. */
   const discardShot = useCallback(() => {
-    const photo = capturedRef.current?.photoUri;
+    const scan = capturedRef.current;
     capturedRef.current = null;
-    if (photo && !handedOffRef.current) deleteFindPhoto(photo);
+    if (scan && !handedOffRef.current) {
+      deleteFindPhoto(scan.photoUri);
+      deleteScanViews(scan.views);
+    }
     setShot(null);
-  }, []);
+    setShotViews(null);
+    resetOrbit();
+  }, [resetOrbit]);
 
   // Uprawnienie do aparatu: w symulacji mockowy prompt przy pierwszym skanie, z aparatem urządzenia – systemowe
   // (bez promptu, gdy już rozstrzygnięte).
@@ -170,8 +234,11 @@ export default function ScanScreen() {
       alive = false;
       unmountedRef.current = true;
       abortRef.current?.abort();
-      const photo = capturedRef.current?.photoUri;
-      if (photo && !handedOffRef.current) deleteFindPhoto(photo);
+      const scan = capturedRef.current;
+      if (scan && !handedOffRef.current) {
+        deleteFindPhoto(scan.photoUri);
+        deleteScanViews(scan.views);
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -228,6 +295,7 @@ export default function ScanScreen() {
         const find = createPendingFind(outcome.identification, where?.gmina.id ?? home, {
           photoUri: scan.photoUri,
           parts: outcome.visibleParts,
+          views: scan.views,
         });
         handedOffRef.current = true;
         router.replace(`/analysis/${find.id}`);
@@ -285,6 +353,42 @@ export default function ScanScreen() {
     await analyze();
   };
 
+  /**
+   * Skan 3D: grzybek pełny (samo) albo spust w trakcie („Analizuj teraz”) – ujęcia z obchodzenia → rozpoznanie.
+   * Zdjęcie główne to pierwsze ujęcie z boku; bez żadnego ujęcia – „nie udało się zrobić zdjęcia”.
+   */
+  const finishOrbit = async () => {
+    if (busyRef.current || phase !== 'live') return;
+    busyRef.current = true;
+    let views: ScanView[] = [];
+    try {
+      views = await orbit.finish();
+    } finally {
+      busyRef.current = false;
+    }
+    if (unmountedRef.current) {
+      deleteScanViews(views);
+      return;
+    }
+    const hero = heroView(views);
+    if (!hero && !devScanForced()) {
+      setNoPhoto(liveView ? 'capture_failed' : 'no_camera');
+      setPhase('nophoto');
+      hapticWarning();
+      return;
+    }
+    capturedRef.current = {
+      id: makeId('scan'),
+      capturedAt: new Date().toISOString(),
+      photoUri: hero?.uri,
+      ...(views.length ? { views } : {}),
+    };
+    setShot(hero?.uri ?? '');
+    setShotViews(views.length ? views : null);
+    setReadyFlag(false);
+    await analyze();
+  };
+
   /** Tylko narzędzia dev: zdjęcie z galerii zamiast aparatu (w wydaniu – nigdy, anty-cheat). */
   const pickFromGallery = async () => {
     if (!DEV_TOOLS || busyRef.current) return;
@@ -316,7 +420,15 @@ export default function ScanScreen() {
 
   // Latarka: w symulacji jak w makiecie, z aparatem – tylko natywnie i przy działającym podglądzie.
   const torchOk = simCamera || (cameraOn && Platform.OS !== 'web');
-  const camLabel = simCamera ? 'podgląd kamery' : camFailed ? 'podgląd kamery niedostępny' : ' ';
+  const camLabel = simCamera
+    ? orbitMode
+      ? 'symulacja skanu 3D'
+      : 'podgląd kamery'
+    : camFailed
+      ? 'podgląd kamery niedostępny'
+      : orbitMode
+        ? 'skan 3D'
+        : ' ';
 
   const onFlash = () => {
     if (!torchOk) {
@@ -348,7 +460,13 @@ export default function ScanScreen() {
     });
   };
 
-  const status = !liveView
+  const status = orbitMode
+    ? simCamera || camReady
+      ? orbitStatus(orbit.hint, orbit.coverage.covered * SECTOR_DEG)
+      : phase === 'permission' || !camGranted
+        ? { title: 'Aparat…', sub: 'Potrzebujemy dostępu do aparatu' }
+        : { title: 'Uruchamiam aparat…', sub: 'Za chwilę zaczniesz skan 3D' }
+    : !liveView
     ? forced
       ? { title: 'Wynik wymuszony (dev)', sub: 'Spust działa bez zdjęcia – panel dev' }
       : { title: 'Brak aparatu', sub: 'Rozpoznawanie wymaga zdjęcia grzyba' }
@@ -367,6 +485,8 @@ export default function ScanScreen() {
           ref={cameraRef}
           style={StyleSheet.absoluteFill}
           facing="back"
+          // Skan 3D robi zdjęcia w trakcie obchodzenia – bez mignięcia podglądu przy każdym ujęciu.
+          animateShutter={!orbitMode}
           enableTorch={flash && Platform.OS !== 'web'}
           onCameraReady={onCameraReady}
           onMountError={onMountError}
@@ -397,14 +517,24 @@ export default function ScanScreen() {
           onLayout={(e) => setFrame(e.nativeEvent.layout)}
           style={{ width: RING, height: RING, alignSelf: 'center', marginTop: 6 }}
         >
-          <ProgressRing
-            size={RING}
-            thickness={RING_THICK}
-            progress={ringFill}
-            color={colors.scanGreen}
-            track="rgba(255,255,255,0.16)"
-            style={StyleSheet.absoluteFill}
-          />
+          {orbitMode ? (
+            <OrbitRing
+              size={RING}
+              thickness={RING_THICK}
+              sectors={orbit.coverage.sectors}
+              heading={orbit.heading}
+              style={StyleSheet.absoluteFill}
+            />
+          ) : (
+            <ProgressRing
+              size={RING}
+              thickness={RING_THICK}
+              progress={ringFill}
+              color={colors.scanGreen}
+              track="rgba(255,255,255,0.16)"
+              style={StyleSheet.absoluteFill}
+            />
+          )}
           {liveView ? (
             // Na żywym obrazie kadr jest przezroczysty – tylko cienka przerywana linia.
             <View style={styles.frame} />
@@ -448,18 +578,30 @@ export default function ScanScreen() {
         >
           <Icon name="tips_and_updates" size={20} color={colors.tipIcon} />
           <Txt f="n6" size={13} color={colors.onDarkTip} style={{ flex: 1 }}>
-            Zrób zdjęcie z boku i z bliska: kapelusz, spód i trzon. Odsłoń delikatnie podstawę trzonu – to klucz do
-            odróżnienia gatunków trujących.
+            {orbitMode
+              ? 'Obejdź grzyba z aparatem na nim: z boku, nisko przy ziemi i z góry – pełny grzybek w rogu sam uruchomi analizę. Odsłoń delikatnie podstawę trzonu. Nie da się obejść? Naciśnij spust.'
+              : 'Zrób zdjęcie z boku i z bliska: kapelusz, spód i trzon. Odsłoń delikatnie podstawę trzonu – to klucz do odróżnienia gatunków trujących.'}
           </Txt>
         </View>
 
-        <Shutter enabled={phase === 'live'} ready={phase === 'live' && (camReady || forced)} onPress={shoot} />
+        <Shutter
+          enabled={phase === 'live'}
+          ready={!orbitMode && phase === 'live' && (camReady || forced)}
+          label={orbitMode ? 'Analizuj teraz, bez pełnego obejścia' : 'Zrób zdjęcie i rozpoznaj'}
+          onPress={orbitMode ? finishOrbit : shoot}
+        />
       </View>
+
+      {orbitMode ? (
+        <MushroomMeter progress={orbit.progress} done={orbit.coverage.done} style={[styles.meter, { top: top + 62 }]} />
+      ) : null}
 
       {phase === 'rejected' && rejection ? (
         <RejectionCard rejection={rejection} bottom={bottom} onRetry={backToLive} onClose={close} />
       ) : null}
-      {phase === 'analyzing' ? <Analyzing photoUri={shot || undefined} onCancel={backToLive} /> : null}
+      {phase === 'analyzing' ? (
+        <Analyzing photoUri={shot || undefined} views={shotViews ?? undefined} onCancel={backToLive} />
+      ) : null}
       {phase === 'denied' ? <CameraDenied onOpenSettings={openSettings} /> : null}
       {phase === 'nophoto' ? (
         <NoPhoto
@@ -514,7 +656,17 @@ function CameraScrim({ frame }: { frame: LayoutRectangle | null }) {
   );
 }
 
-function Shutter({ enabled, ready, onPress }: { enabled: boolean; ready: boolean; onPress: () => void }) {
+function Shutter({
+  enabled,
+  ready,
+  label,
+  onPress,
+}: {
+  enabled: boolean;
+  ready: boolean;
+  label: string;
+  onPress: () => void;
+}) {
   const pulse = useSharedValue(1);
   useEffect(() => {
     pulse.value = ready
@@ -526,7 +678,7 @@ function Shutter({ enabled, ready, onPress }: { enabled: boolean; ready: boolean
     <Animated.View style={[{ alignSelf: 'center' }, style]}>
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel="Zrób zdjęcie i rozpoznaj"
+        accessibilityLabel={label}
         accessibilityState={{ disabled: !enabled }}
         disabled={!enabled}
         onPress={() => {
@@ -565,17 +717,23 @@ function Shutter({ enabled, ready, onPress }: { enabled: boolean; ready: boolean
 const SPIN = 168;
 const SPIN_THICK = 10;
 
-/** „Analizuję…” na czas żądania do serwera: zdjęcie w pierścieniu z obracającym się „sweepem” (zwykły wskaźnik). */
-function Analyzing({ photoUri, onCancel }: { photoUri?: string; onCancel: () => void }) {
+/**
+ * „Analizuję…” na czas żądania do serwera: zdjęcie w pierścieniu z obracającym się „sweepem” (zwykły wskaźnik);
+ * po skanie 3D w pierścieniu obraca się grzyb z ujęć obchodzenia.
+ */
+function Analyzing({ photoUri, views, onCancel }: { photoUri?: string; views?: ScanView[]; onCancel: () => void }) {
   const total = useCatalogStore((s) => s.totalSpecies || s.species.length);
   const src = findPhotoSource(photoUri);
   const inner = SPIN - 2 * SPIN_THICK - 8;
+  const spin = views && hasSpin(views);
   return (
     <Animated.View entering={FadeIn.duration(180)} style={[StyleSheet.absoluteFill, styles.overlay]}>
       <View style={{ width: SPIN, height: SPIN, alignItems: 'center', justifyContent: 'center' }}>
         <ProgressRing size={SPIN} thickness={SPIN_THICK} value={0} color={colors.scanGreen} track="rgba(255,255,255,0.14)" style={StyleSheet.absoluteFill} />
         <ScanSweep size={SPIN} thickness={SPIN_THICK} running />
-        {src ? (
+        {spin ? (
+          <Spin3D views={views} interactive={false} spinMs={3600} style={{ width: inner, height: inner, borderRadius: inner / 2 }} />
+        ) : src ? (
           <Image source={src} style={{ width: inner, height: inner, borderRadius: inner / 2 }} resizeMode="cover" />
         ) : (
           <View style={[styles.bigIcon, { marginBottom: 0, backgroundColor: colors.scanGreen }]}>
@@ -584,10 +742,12 @@ function Analyzing({ photoUri, onCancel }: { photoUri?: string; onCancel: () => 
         )}
       </View>
       <Txt f="b7" size={30} color={colors.onDark} style={{ marginTop: 26 }}>
-        Analizuję…
+        {views?.length ? 'Analizuję skan 3D…' : 'Analizuję…'}
       </Txt>
       <Txt f="n7" size={15} color={colors.onDarkSoft} align="center">
-        Porównuję zdjęcie z atlasem{total ? ` ${total} gatunków` : ''}
+        {views && views.length > 1
+          ? `${views.length} ${plural(views.length, 'ujęcie', 'ujęcia', 'ujęć')} · porównuję z atlasem${total ? ` ${total} gatunków` : ''}`
+          : `Porównuję zdjęcie z atlasem${total ? ` ${total} gatunków` : ''}`}
       </Txt>
       <Pressable onPress={onCancel} hitSlop={8} style={{ marginTop: 18 }}>
         <Txt f="n8" size={14} color={colors.onDarkMuted}>
@@ -787,6 +947,15 @@ function ScanError({
 }
 
 const styles = StyleSheet.create({
+  meter: {
+    position: 'absolute',
+    right: 14,
+    backgroundColor: 'rgba(20,28,16,0.55)',
+    borderRadius: 18,
+    paddingTop: 8,
+    paddingBottom: 6,
+    paddingHorizontal: 8,
+  },
   frame: {
     position: 'absolute',
     left: FRAME_INSET,

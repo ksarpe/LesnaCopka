@@ -1,6 +1,7 @@
 // Wygenerowane z MaterialSymbolsRounded.ttf (ligatura -> glyph -> codepoint PUA).
 // Codepointy zamiast ligatur: działa identycznie na iOS / Android / web.
 export const ICON_CODEPOINTS = {
+  '3d_rotation': 0xe84d,
   ac_unit: 0xeb3b,
   account_circle: 0xe853,
   add: 0xe145,
@@ -65,6 +66,7 @@ export const ICON_CODEPOINTS = {
   emoji_nature: 0xea1c,
   error: 0xe000,
   event_repeat: 0xeb7b,
+  expand_less: 0xe5ce,
   expand_more: 0xe5cf,
   explore: 0xe87a,
   face: 0xe87c,
@@ -182,6 +184,7 @@ export const ICON_CODEPOINTS = {
   stars: 0xe739,
   straighten: 0xe41c,
   swap_horiz: 0xe8d4,
+  swipe: 0xe9ec,
   switch_account: 0xe9ed,
   sync: 0xe627,
   task_alt: 0xe2e6,
@@ -201,6 +204,7 @@ export const ICON_CODEPOINTS = {
   verified: 0xe031,
   verified_user: 0xe8e8,
   videocam_off: 0xe04c,
+  view_in_ar: 0xefc9,
   visibility: 0xe417,
   visibility_off: 0xe8f5,
   warning: 0xe002,

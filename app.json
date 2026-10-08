@@ -68,7 +68,7 @@
           "locationWhenInUsePermission": "Lokalizacja wskazuje gminę, pokazuje lasy w okolicy i liczy dystans wyprawy. Nigdy nie publikujemy jej na żywo.",
           "locationAlwaysAndWhenInUsePermission": "Grzybobranie używa lokalizacji tylko przy otwartej aplikacji: wskazuje gminę i liczy dystans wyprawy. Nigdy nie publikujemy jej na żywo.",
           "locationAlwaysPermission": "Grzybobranie używa lokalizacji tylko przy otwartej aplikacji: wskazuje gminę i liczy dystans wyprawy. Nigdy nie publikujemy jej na żywo.",
-          "motionUsagePermission": "Grzybobranie nie korzysta z czujników ruchu."
+          "motionUsagePermission": "Grzybobranie używa czujników ruchu tylko w czasie skanu 3D grzyba (postęp obchodzenia) – nie śledzi Twojej aktywności."
         }
       ],
       [

@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { memo, useCallback, useDeferredValue, useMemo, useState } from 'react';
-import { FlatList, Pressable, View } from 'react-native';
+import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 
 import { Card } from '@/components/Card';
 import { ChoiceChips } from '@/components/ChoiceChips';
@@ -15,6 +15,7 @@ import { TextField } from '@/components/TextField';
 import { Thumb } from '@/components/Thumb';
 import { Txt } from '@/components/Txt';
 import { useBottomPadding } from '@/hooks/useInsets';
+import { hasSpin } from '@/scan/views';
 import { useCatalogStore } from '@/store/useCatalogStore';
 import { useTripStore } from '@/store/useTripStore';
 import { useUserStore } from '@/store/useUserStore';
@@ -245,42 +246,78 @@ const FindRow = memo(function FindRow({ find, name, place }: { find: Find; name:
   const d = find.dimensions;
   const amount = d.pieces ? `${d.pieces} szt.` : fmtWeight(d.weightG);
   const date = fmtDayMonth(new Date(find.foundAt));
+  const spin = hasSpin(find.views);
+  const thumb = <Thumb size={56} radius={16} borderColor={r.color} uri={find.photoUri} />;
   return (
-    <Pressable
-      onPress={() => router.push(`/species/${find.speciesId}`)}
-      accessibilityRole="button"
-      accessibilityLabel={`${name}, ${r.labelLower}, ${find.collected ? amount : 'tylko zdjęcie'}, ${date}`}
-      style={({ pressed }) => ({
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 12,
-        backgroundColor: colors.card,
-        borderRadius: 20,
-        padding: 12,
-        boxShadow: shadows.card,
-        opacity: pressed ? 0.9 : 1,
-      })}
-    >
-      <Thumb size={56} radius={16} borderColor={r.color} uri={find.photoUri} />
-      <View style={{ flex: 1, gap: 3 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-          <Txt f="n8" size={15} numberOfLines={1} style={{ flex: 1 }}>
-            {name}
-          </Txt>
-          <Txt f="n8" size={13} color={colors.primaryText}>
-            +{fmtInt(find.xp?.total ?? 0)}
+    <View style={styles.row}>
+      {spin ? (
+        // Skan 3D: miniatura otwiera podgląd 3D, reszta wiersza – kartę gatunku (dwa przyciski obok siebie, nie
+        // zagnieżdżone – web nie pozwala na <button> w <button>).
+        <Pressable
+          onPress={() => router.push(`/podglad3d/${find.id}`)}
+          hitSlop={4}
+          accessibilityRole="button"
+          accessibilityLabel={`Podgląd 3D: ${name}`}
+          style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1 })}
+        >
+          {thumb}
+          <View style={styles.badge3d}>
+            <Icon name="3d_rotation" size={14} color={colors.white} />
+          </View>
+        </Pressable>
+      ) : null}
+      <Pressable
+        onPress={() => router.push(`/species/${find.speciesId}`)}
+        accessibilityRole="button"
+        accessibilityLabel={`${name}, ${r.labelLower}, ${find.collected ? amount : 'tylko zdjęcie'}, ${date}`}
+        style={({ pressed }) => ({ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, opacity: pressed ? 0.9 : 1 })}
+      >
+        {spin ? null : thumb}
+        <View style={{ flex: 1, gap: 3 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Txt f="n8" size={15} numberOfLines={1} style={{ flex: 1 }}>
+              {name}
+            </Txt>
+            <Txt f="n8" size={13} color={colors.primaryText}>
+              +{fmtInt(find.xp?.total ?? 0)}
+            </Txt>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <SmallRarityPill rarity={find.rarity} />
+            <Txt f="n8" size={12} color={find.collected ? colors.bodyDark : colors.danger} numberOfLines={1} style={{ flex: 1 }}>
+              {find.collected ? `${amount}${find.xxl ? ' · XXL' : ''}` : 'Tylko zdjęcie'}
+            </Txt>
+          </View>
+          <Txt f="n7" size={12} color={colors.muted} numberOfLines={1}>
+            {place ? `${date} · ${place}` : date}
           </Txt>
         </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          <SmallRarityPill rarity={find.rarity} />
-          <Txt f="n8" size={12} color={find.collected ? colors.bodyDark : colors.danger} numberOfLines={1} style={{ flex: 1 }}>
-            {find.collected ? `${amount}${find.xxl ? ' · XXL' : ''}` : 'Tylko zdjęcie'}
-          </Txt>
-        </View>
-        <Txt f="n7" size={12} color={colors.muted} numberOfLines={1}>
-          {place ? `${date} · ${place}` : date}
-        </Txt>
-      </View>
-    </Pressable>
+      </Pressable>
+    </View>
   );
+});
+
+const styles = StyleSheet.create({
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: colors.card,
+    borderRadius: 20,
+    padding: 12,
+    boxShadow: shadows.card,
+  },
+  badge3d: {
+    position: 'absolute',
+    right: -4,
+    bottom: -4,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: colors.primaryText,
+    borderWidth: 2,
+    borderColor: colors.card,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

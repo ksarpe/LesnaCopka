@@ -33,7 +33,7 @@ Korzystanie z Aplikacji jest bezpłatne. [Do potwierdzenia – Aplikacja nie ma 
 
 Do pełnego działania potrzebny jest smartfon z systemem iOS lub Android, z aparatem i odbiornikiem GPS, a do synchronizacji, mapy okolicy i funkcji społecznościowych – dostęp do internetu. W lesie bez zasięgu gra działa offline, a dane wysyłają się po odzyskaniu połączenia.
 
-Gatunek grzyba rozpoznaje ze zdjęcia model sztucznej inteligencji (Claude firmy Anthropic): po naciśnięciu spustu zdjęcie trafia przez nasz serwer do modelu wyłącznie w celu rozpoznania. Wynik jest orientacyjny i może być błędny (§ 4). Gdy na zdjęciu nie widać grzyba albo ujęcie jest niewyraźne, Aplikacja nie zapisuje znaleziska. Liczba rozpoznań jest ograniczona (obecnie 60 na dobę), a bez internetu rozpoznanie nie działa.
+Gatunek grzyba rozpoznaje ze zdjęcia model sztucznej inteligencji (Claude firmy Anthropic): po skanie (spustem albo skanem 3D – obejściem grzyba z telefonem) zdjęcie, a przy skanie 3D do 4 ujęć tego samego grzyba, trafia przez nasz serwer do modelu wyłącznie w celu rozpoznania. Wynik jest orientacyjny i może być błędny (§ 4). Gdy na zdjęciu nie widać grzyba albo ujęcie jest niewyraźne, Aplikacja nie zapisuje znaleziska. Liczba rozpoznań jest ograniczona (obecnie 60 na dobę), a bez internetu rozpoznanie nie działa.
 
 ## § 3. Konto i profil
 

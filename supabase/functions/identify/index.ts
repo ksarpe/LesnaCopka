@@ -6,7 +6,8 @@
  * outputs). Zastępuje dawną symulację w aplikacji: zdjęcie ściany czy liścia daje „to nie grzyb”, a nie borowika.
  *
  * POST /functions/v1/identify z sesją gracza (JWT – także konto anonimowe; bez ważnego tokenu → 401)
- *   body:  { image: '<JPEG base64>', month?: 1–12, voivodeship?: 'podlaskie' }      (IdentifyRequestBody)
+ *   body:  { image: '<JPEG base64>', views?: [{ image, view: 'side'|'top'|'low' }] (≤ 3, skan 3D),
+ *            month?: 1–12, voivodeship?: 'podlaskie' }                                   (IdentifyRequestBody)
  *   200:   { verdict, reason, candidates[{speciesId, confidence}], visibleParts, count, capCm, heightCm, maturity }
  *   błąd:  { error: 'not_authenticated' | 'bad_request' | 'rate_limited' | 'not_configured' | 'model_unavailable'
  *                   | 'model_error' | 'internal', message?: '<po polsku>', retryAfter?: ISO }  (IdentifyErrorBody)
@@ -36,6 +37,7 @@ import {
   buildSystemPrompt,
   normalizeIdent,
   parseRequestBody,
+  requestImages,
 } from './contract.ts';
 import { classifyGemini } from './gemini.ts';
 
@@ -92,26 +94,29 @@ const REFUSED = {
 const anthropic = PROVIDER === 'anthropic' && apiKey ? new Anthropic({ apiKey, maxRetries: 1, timeout: 12_000 }) : null;
 const configured = PROVIDER === 'gemini' ? !!geminiKey : !!anthropic;
 
-/** Rozpoznanie u wybranego dostawcy – ten sam wynik ({ status, result | error, meta }) dla obu. */
-function classifyWith(image: string, text: string, signal: AbortSignal) {
+/**
+ * Rozpoznanie u wybranego dostawcy – ten sam wynik ({ status, result | error, meta }) dla obu. `images` – zdjęcie
+ * główne i ujęcia skanu 3D z podpisami (requestImages w ./contract.ts).
+ */
+function classifyWith(images: { image: string; label: string | null }[], text: string, signal: AbortSignal) {
   if (PROVIDER === 'gemini') {
     return classifyGemini({
       apiKey: geminiKey,
       model: MODEL,
       systemPrompt: SYSTEM_PROMPT,
       schema: IDENT_SCHEMA,
-      image,
+      images,
       text,
       signal,
       isKnown: (id) => KNOWN.has(id),
       refused: REFUSED,
     });
   }
-  return classify(image, text, signal);
+  return classify(images, text, signal);
 }
 
 /** Rozmowa z modelem → { result | status } (bez rzucania – dziennik limitu dostaje wynik). */
-async function classify(image: string, text: string, signal: AbortSignal) {
+async function classify(images: { image: string; label: string | null }[], text: string, signal: AbortSignal) {
   try {
     const response = await anthropic.beta.messages.create(
       {
@@ -127,8 +132,12 @@ async function classify(image: string, text: string, signal: AbortSignal) {
         messages: [
           {
             role: 'user',
+            // Każde ujęcie poprzedza podpis („Ujęcie 2 – z góry:”); jedno zdjęcie – bez podpisu.
             content: [
-              { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: image } },
+              ...images.flatMap(({ image, label }) => [
+                ...(label ? [{ type: 'text', text: label }] : []),
+                { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: image } },
+              ]),
               { type: 'text', text },
             ],
           },
@@ -242,7 +251,7 @@ Deno.serve(async (req) => {
   }
   const callId = begin.data;
 
-  const out = await classifyWith(parsed.body.image, buildRequestText(parsed.body), req.signal);
+  const out = await classifyWith(requestImages(parsed.body), buildRequestText(parsed.body), req.signal);
 
   // Dziennik limitu (best effort – błąd zapisu nie psuje odpowiedzi).
   const fin = await admin.rpc('identify_finish', {
