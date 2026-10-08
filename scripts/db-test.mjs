@@ -2990,6 +2990,76 @@ ok(
   { acSummary, n: acAdmin.length },
 );
 
+// ── Rozpoznawanie (Edge Function identify): 60 / 24 h, jedno naraz, tylko service_role, dziennik bez zdjęć ──
+{
+  const ID1 = await newUser('id.limit');
+  const begin = (u) => one('select identify_begin($1) id', [u]);
+  const finish = (id, u, status, model = null, tokens = [null, null, null, null]) =>
+    db.query('select identify_finish($1, $2, $3, $4, $5, $6, $7, $8)', [id, u, status, model, ...tokens]);
+  await db.exec('set role service_role');
+  const c1 = (await begin(ID1)).id;
+  const busy = await err('select identify_begin($1)', [ID1]);
+  await finish(c1, ID1, 'ok', 'claude-opus-5-5', [6000, 140, 5800, 0]);
+  const c2 = (await begin(ID1)).id;
+  await finish(c2, ID1, 'failed');
+  const badStatus = await err(`select identify_finish($1, $2, 'zgadnij')`, [c2, ID1]);
+  await db.exec('reset role');
+  // Okno 24 h: 58 udanych godzinę temu + c1 = 59; stare (25 h) i 'failed' się nie liczą.
+  await db.query(
+    `insert into identify_calls (user_id, started_at, finished_at, status)
+     select $1::uuid, now() - interval '1 hour', now() - interval '1 hour', 'ok' from generate_series(1, 58)
+     union all select $1::uuid, now() - interval '25 hours', now() - interval '25 hours', 'ok'`,
+    [ID1],
+  );
+  await db.exec('set role service_role');
+  const c60 = (await begin(ID1)).id;
+  await finish(c60, ID1, 'refused', 'claude-opus-5-5');
+  const over = await errFull('select identify_begin($1)', [ID1]);
+  const usage = (await db.query('select * from identify_usage where model = $1', ['claude-opus-5-5'])).rows;
+  await db.exec('reset role');
+  const idRow = await one('select * from identify_calls where id = $1', [c1]);
+  const idFlags = await flagsOf(ID1);
+  ok(
+    busy?.code === 'P0001' && busy.message.includes('rate_limited') && c2 > c1 && badStatus?.code === 'P0001' &&
+      idRow.status === 'ok' && idRow.input_tokens === 6000 && idRow.cache_read_tokens === 5800 && idRow.finished_at &&
+      over?.code === 'P0001' && over.message.includes('rate_limited') && over.detail?.includes('Dzienny limit rozpoznań (60)') &&
+      RETRY_RE.test(over.hint ?? '') && flagOf(idFlags, 'rate_limited', 'identify')?.severity === 3 &&
+      usage.some((u) => Number(u.ok) >= 1 && Number(u.refused) === 1 && Number(u.input_tokens) === 6000),
+    'identify: drugie wywołanie w trakcie → rate_limited; 61. w 24 h → rate_limited (detail po polsku, retry_after), failed i starsze niż 24 h się nie liczą; tokeny w dzienniku i widoku identify_usage',
+    { busy, over },
+  );
+
+  // Klient (i anon) nie widzi dziennika i nie woła funkcji – nie zresetuje sobie limitu.
+  await as(ID1);
+  const idAccess = [
+    await err('select * from identify_calls'),
+    await err('select * from identify_usage'),
+    await err('select identify_begin($1)', [ID1]),
+    await err(`select identify_finish(1, $1, 'ok')`, [ID1]),
+    await err('insert into identify_calls (user_id) values ($1)', [ID1]),
+  ];
+  await as(null);
+  await db.exec('set role anon');
+  idAccess.push(await err('select * from identify_calls'), await err('select identify_begin($1)', [ID1]));
+  await db.exec('reset role');
+  ok(idAccess.every((e) => e?.message.includes('permission denied')), 'identify: klient i anon bez dostępu do dziennika i funkcji limitu', idAccess);
+
+  // Dziennik: wiersze starsze niż 7 dni znikają przy kolejnym wywołaniu; wipe_account_data kasuje dziennik gracza.
+  const ID2 = await newUser('id.wipe');
+  await db.query(`insert into identify_calls (user_id, started_at, status) values ($1, now() - interval '8 days', 'ok')`, [ID2]);
+  await db.exec('set role service_role');
+  const c3 = (await begin(ID2)).id;
+  await finish(c3, ID2, 'ok');
+  await db.exec('reset role');
+  const keptAfterCleanup = Number((await one('select count(*) n from identify_calls where user_id = $1', [ID2])).n);
+  await db.query('select wipe_account_data($1)', [ID2]);
+  const afterWipe = Number((await one('select count(*) n from identify_calls where user_id = $1', [ID2])).n);
+  ok(keptAfterCleanup === 1 && afterWipe === 0, 'identify: dziennik żyje 7 dni; wipe_account_data (usunięcie konta) kasuje go', {
+    keptAfterCleanup,
+    afterWipe,
+  });
+}
+
 // =============================================================================
 // Etap 8 – szanse na gatunki (zbiory gminy z 14 dni) i mapa gatunku: tylko agregaty gmin, k-anonimowość (≥ 2
 // znalazców gatunku, ≥ 3 znalazców i 5 znalezisk w gminie), opóźnienie prywatności (visible_from)

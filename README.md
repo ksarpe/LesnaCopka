@@ -1,7 +1,7 @@
 # Grzybobranie – klikalny prototyp (React Native / Expo)
 
-Frontend-only prototyp zgamifikowanego grzybobrania. Dane gry są mockami, a postęp skanu,
-rozpoznawanie AI i publikacja są **symulowane**. **Prawdziwe**: lokalizacja (GPS urządzenia,
+Prototyp zgamifikowanego grzybobrania. Dane gry są mockami albo pochodzą z backendu Supabase. **Prawdziwe**:
+rozpoznawanie grzyba ze zdjęcia (model AI Claude przez Edge Function – patrz [Rozpoznawanie grzyba (AI)](#rozpoznawanie-grzyba-ai)), lokalizacja (GPS urządzenia,
 gmina wykrywana na telefonie z granic PRG, mapa okolicy z lasami – także offline, patrz [Lokalizacja i mapa okolicy](#lokalizacja-i-mapa-okolicy)
 i [Mapy offline](#mapy-offline)),
 dystans i trasa wyprawy z GPS, podgląd aparatu i zdjęcie znaleziska, avatar ze zdjęcia oraz lokalne
@@ -43,24 +43,24 @@ npm run lint
 ## Pełna pętla do przeklikania
 
 Pierwsze uruchomienie z serwerem (albo scenariusz „Nowy użytkownik” w panelu `/dev`) zaczyna się od **onboardingu**
-(powitanie, bezpieczeństwo, regulamin, profil, gmina domowa, uprawnienia – patrz [Konto, onboarding i Twoje dane](#konto-onboarding-i-twoje-dane));
+(jeden ekran: powitanie, zasada bezpieczeństwa i „Zaczynamy!” z oświadczeniem o regulaminie – patrz [Konto, onboarding i Twoje dane](#konto-onboarding-i-twoje-dane));
 w trybie mock startowy gracz demo ma go już za sobą.
 
-Start → **Rozpocznij grzybobranie** → **Skanuj grzyba** (zgoda na aparat, podgląd na żywo) → skan 360° dochodzi do 100% →
-spust ✦ (zdjęcie) → „Analizuję…” → **Analiza** → **Odbierz nagrodę** → **Nagroda** (XP, pasek poziomu, odznaka) →
+Start → **Rozpocznij grzybobranie** → **Skanuj grzyba** (zgoda na aparat, podgląd na żywo, grzyb w kółku) →
+spust ✦ (zdjęcie) → „Analizuję…” (serwer rozpoznaje zdjęcie) → **Analiza** → **Odbierz nagrodę** → **Nagroda** (XP, pasek poziomu, odznaka) →
 **Zbieram dalej** → (powtórz) → **Zakończ wyprawę** → potwierdzenie → **Podsumowanie** (trasa na mapie) → przełącznik trasy →
 **Opublikuj w feedzie** → wpis na górze **Feedu** z adnotacją „widoczne za 24 h” → komentarze, „Darz grzyb!”.
 
-Pierwszy skan zawsze zwraca borowika szlachetnego XXL 410 g – dokładnie scenariusz z makiety
-(+250 XP, odznaka „Król Puszczy”). Kolejne skany losują gatunki deterministycznie (stały seed) – ważone rzadkością i sezonem bieżącego miesiąca
-(patrz [Katalog gatunków](#katalog-gatunków)).
+Zdjęcie bez grzyba (ściana, liść, ekran) albo niewyraźne kończy się od razu kartą „Nie wykryłem grzyba” / „Niewyraźne
+zdjęcie” z powodem i „Spróbuj ponownie” – bez znaleziska. Scenariusz z makiety (borowik szlachetny XXL 410 g, +250 XP,
+odznaka „Król Puszczy”) daje dev-link `?scenario=designAnalysis` / `designReward` albo wymuszony wynik skanu w panelu `/dev`.
 
 ## Mapa ekranów
 
 | # | Ekran | Plik | Prezentacja |
 |---|---|---|---|
 | 01 | Start / aktywna wyprawa | `app/(tabs)/index.tsx` | zakładka „Wyprawa” |
-| 02 | Skan 360° | `app/scan.tsx` | modal fullscreen, fade |
+| 02 | Skan grzyba (zdjęcie → rozpoznanie) | `app/scan.tsx` | modal fullscreen, fade |
 | 03 | Analiza (+ niska pewność, gatunek trujący) | `app/analysis/[findId].tsx` | stack push |
 | 04 | Nagroda | `app/reward/[findId].tsx` | modal fullscreen, fade |
 | 05 | Podsumowanie wyprawy | `app/summary/[tripId].tsx` | stack push |
@@ -83,7 +83,7 @@ Pierwszy skan zawsze zwraca borowika szlachetnego XXL 410 g – dokładnie scena
 | – | Mapa okolicy (pełny ekran) | `app/mapa.tsx` | modal fullscreen, fade (tap w mapę na karcie „Wykryto region”) |
 | – | Mapy offline (pobrane obszary, miejsce, pamięć podręczna) | `app/ustawienia/mapy-offline.tsx` | stack push z Ustawień (Aplikacja → „Mapy offline”) i z arkusza na mapie |
 | – | Regulamin / Polityka prywatności (szkice) | `app/ustawienia/regulamin.tsx`, `app/ustawienia/prywatnosc.tsx` | stack push z Ustawień („Informacje prawne”) i z onboardingu |
-| – | Onboarding (powitanie, bezpieczeństwo, regulamin, profil, gmina domowa, uprawnienia; logowanie kodem) | `app/onboarding.tsx` | zamiast zakładek, dopóki nie skończony (`Stack.Protected` w `app/_layout.tsx`) |
+| – | Onboarding (jeden ekran: powitanie, bezpieczeństwo, „Zaczynamy!” = akceptacja regulaminu; logowanie kodem) | `app/onboarding.tsx` | zamiast zakładek, dopóki nie skończony (`Stack.Protected` w `app/_layout.tsx`) |
 | – | Konto i logowanie (e-mail z kodem, logowanie na inne konto, wylogowanie) | `app/ustawienia/konto.tsx` | stack push z Ustawień („Konto i logowanie”) |
 | – | Usuń konto (skutki, potwierdzenie nickiem) | `app/ustawienia/usun-konto.tsx` | stack push z Ustawień („Usuń konto”) |
 | – | Zablokowani („Odblokuj”) | `app/ustawienia/zablokowani.tsx` | stack push z Ustawień (Prywatność → „Zablokowani”) |
@@ -95,7 +95,8 @@ Dostępny tylko z narzędziami deweloperskimi – zawsze w `npx expo start`, w b
 (patrz [Wydanie](#wydanie)); bez nich nie ma wiersza w Ustawieniach ani przytrzymania avatara, a `/dev` przekierowuje na start.
 Pozwala przełączyć źródło pozycji (GPS urządzenia / symulacja: wybrana gmina, słaby GPS ±1,5 km,
 punkt za granicą) i aparatu (aparat urządzenia / symulacja), wyłączyć GPS / sieć, ustawić zgody (lokalizacja, aparat),
-wymusić wynik skanu (gatunek, rzadkość, XXL, trujący, niska pewność), przyspieszyć czas ×10,
+wymusić wynik skanu zamiast rozpoznania zdjęcia (gatunek + XXL / niska pewność, „nie grzyb”, „niewyraźne” – bez aparatu,
+sieci i kosztów), przyspieszyć czas ×10,
 dodać dystans i XP, „Spacer 0,5 / 2 / 5 km” (dystans + trasa do Podsumowania), odblokować odznakę, odkryć losowe
 gatunki (test osiągnięć), dodać przykładowe / testowe powiadomienia, wczytać scenariusze (m.in. stany z makiety)
 i zresetować wszystko.
@@ -133,6 +134,8 @@ src/services/supabase/    konto anonimowe, słowniki z bazy, synchronizacja gry 
                           (feed.ts), rankingi i statystyki gmin (stats.ts), zdjęcia w Storage (photos.ts, storage.ts,
                           storagePaths.ts, remotePhotos.ts)
 src/utils/xp.ts           logika XP/poziomów – czyste funkcje, testy w src/utils/__tests__
+src/utils/identify.ts     rozpoznanie zdjęcia → wynik gry (wymiary, XXL, bezpiecznik sobowtórów, wymuszony wynik dev)
+supabase/functions/identify/  Edge Function rozpoznawania (Claude) + kontrakt wspólny z aplikacją (contract.ts) i katalog
 src/utils/achievements.ts definicje i liczenie osiągnięć z atlasu – czyste funkcje, testy w src/utils/__tests__
 src/utils/history.ts      historia wypraw i dziennik znalezisk (miesiące, sumy, filtry, sortowanie) – czyste funkcje
 src/config.ts             flagi wydania (DEV_TOOLS – narzędzia deweloperskie)
@@ -140,7 +143,7 @@ src/utils/reportError.ts  zgłaszanie błędów (ekran błędu, globalne błędy
 src/data/legal.ts         regulamin i polityka prywatności (szkice) → ekrany Ustawień i docs/legal/*.md (npm run legal:md);
                           LEGAL_VERSION (wersja akceptowana w onboardingu), SAFETY_NOTICE / SAFETY_RULES (bezpieczeństwo)
 src/store/account.ts      konto: wylogowanie, logowanie kodem, usunięcie konta, eksport danych, czyszczenie telefonu
-src/store/onboarding.ts   koniec onboardingu (profil + regulamin + kolejka); src/utils/onboarding.ts – kroki i walidacja
+src/store/onboarding.ts   koniec onboardingu (regulamin + kolejka), gmina domowa z GPS; src/utils/onboarding.ts – oświadczenie
 src/store/block.ts        blokowanie grzybiarzy (potwierdzenie, toast, odświeżenie feedu)
 src/services/supabase/account.ts  e-mail z kodem OTP, switchAccount (sync.ts), usunięcie konta, export_my_data
 eas.json                  profile buildów EAS: development, preview, production
@@ -154,8 +157,7 @@ Ekrany korzystają wyłącznie z interfejsów z `src/services/types.ts` przez `u
 |---|---|
 | `LocationService` | `getCurrentRegion(previous)` → gmina + pozycja, `watchDistance(cb(deltaKm, point?), { resumeFrom })` |
 | `MapService` | `getAreaMap({ lat, lon, radiusM, gminaTeryt }, { offline })` → lasy, woda, drogi, granica gminy, odległość do lasu (kafle z telefonu, potem z sieci); `fetchTile(x, y)` – surowy kafel do map offline |
-| `ScanService` | `startScan(cb, { signal })`, `capturePartial(parts)` |
-| `IdentifyService` | `identify(scan)` → gatunek, pewność, wymiary, sobowtóry |
+| `IdentifyService` | `identify(scan, { signal, context })` → `IdentifyOutcome`: grzyb (gatunek, pewność, wymiary, sobowtóry, widoczne części) albo „nie grzyb” / „niewyraźne” z powodem – jedna implementacja dla obu trybów (`src/services/live/identify.ts` → Edge Function `identify`) |
 | `StatsService` | `getGminaStats(id)`, `getRanking(period, { voivodeship })`, `getSpeciesPercentile(speciesId, gminaId, size)` |
 | `FeedService` | `getFeed(scope)`, `loadNewer(scope)`, `publishTrip(trip, { hideRoute })`, `toggleReaction(postId)`, `getPost`, `getComments` / `addComment` / `deleteComment`, `hidePost` / `unhidePosts` / `getHiddenPosts`, `reportPost`, `getFriends` / `getFriendsOverview` / `searchUsers` / `getUser` / `getUserByHandle` / `addFriend` / `respondFriendRequest` / `removeFriend`, `blockUser` / `unblockUser` / `getBlockedUsers`, opcjonalnie `getActivity(since)` (prawdziwa aktywność → powiadomienia) |
 | `CatalogService` | słowniki: gatunki, gminy, odznaki, pula zadań (dzienne i tygodniowe), liczba gatunków |
@@ -190,11 +192,11 @@ jadowita i maślanka wiązkowa…). Źródła i rozbieżności między nimi: [do
   gatunku pokazują zielony baner „Gatunek chroniony – nie zbieraj, zrób tylko zdjęcie”, przycisk „Zapisz w atlasie”.
 - **Karta gatunku**: opis, siedliska, ochrona, lista sobowtórów (najgroźniejsze najpierw – `speciesLookalikes`
   w `src/utils/species.ts`), sezon i występowanie, rekordy.
-- **Mock rozpoznawania** losuje gatunek ważony rzadkością × sezonem bieżącego miesiąca
-  (`src/services/mock/identifyPick.ts`) – w październiku wypadają jesienne gatunki, w kwietniu smardze; pierwszy skan
-  to nadal borowik XXL 410 g z makiety.
+- **Rozpoznawanie** zna cały katalog: Edge Function `identify` dostaje go w prompcie i jako enum `speciesId`
+  (`supabase/functions/identify/catalog.ts` – generowany z `species.ts`: `npm run identify:catalog`, test pilnuje
+  zgodności). Patrz [Rozpoznawanie grzyba (AI)](#rozpoznawanie-grzyba-ai).
 - Testy: `src/data/__tests__/species.test.ts` (integralność katalogu), `src/utils/__tests__/species.test.ts` (XP
-  chronionych), `src/services/mock/__tests__/identifyPick.test.ts` (sezonowość), `npm run db:test` (serwer).
+  chronionych), `src/services/live/__tests__/identifyContract.test.ts` (katalog funkcji = aplikacji), `npm run db:test` (serwer).
 
 ## Osiągnięcia, poziomy i zadania (progresja)
 
@@ -273,8 +275,10 @@ Karta „Wykryto region” na ekranie Start:
    i znacznikami drzew, kropkowana kreska do najbliższego lasu, granica i nazwa gminy, legenda z podpisem OSM;
    przycisk „Pobierz na offline” w prawym górnym rogu; bez sieci i bez kafli na telefonie – karta „Mapa niedostępna
    offline” z ponowieniem. Web (dev): `/?scenario=start&path=/mapa`.
-   W trakcie gestu skalowany jest gotowy obraz, po geście ścieżki SVG liczą się od nowa (ostre wektory) –
-   szczegóły w `src/components/ZoomableAreaMap.tsx`. Rzutowanie wspólne z kartą: `src/geo/areaMapProjection.ts`,
+   W trakcie gestu nic nie jest liczone ani rysowane od nowa – przesuwany i skalowany jest gotowy obraz (wątek UI),
+   pod spodem leży podkład z całą okolicą przy 1× (bez pustych brzegów); ostre ścieżki SVG dla nowej skali dopiero
+   po geście, gdy widok stanie – szczegóły w `src/components/ZoomableAreaMap.tsx`, matematyka widoku:
+   `src/geo/areaMapView.ts`. Rzutowanie wspólne z kartą: `src/geo/areaMapProjection.ts`,
    znaczniki drzew: `src/geo/forestMarkers.ts`.
 
 Slugi gmin: bez zmian dla gmin z mocków (`suprasl`…), przy powtarzających się nazwach sufiks
@@ -429,14 +433,98 @@ gatunki z < 2 znalazcami). Nigdy punktów znalezisk ani tego, kto co znalazł.
 Regulamin i polityka prywatności (szkice do weryfikacji prawnej) opisują dokładnie to działanie – Ustawienia →
 „Informacje prawne”, treść w `src/data/legal.ts`, kopie Markdown w [docs/legal](docs/legal) (patrz [Wydanie](#wydanie)).
 
+## Rozpoznawanie grzyba (AI)
+
+**Przepływ** (`app/scan.tsx`): podgląd aparatu z pierścieniem-kadrem (wypełnia się, gdy aparat jest gotowy) → spust
+(zawsze aktywny) → zdjęcie 720 px, JPEG bez EXIF → „Analizuję…” (zdjęcie w pierścieniu, „Anuluj”, limit 25 s, przerwanie
+przy zamknięciu ekranu) → wynik:
+- **grzyb** → Analiza (03) z gatunkiem i pewnością z modelu; < 60% → „Nie jestem pewien” z możliwymi gatunkami (bez
+  nagrody). Gdy na zdjęciu zabrakło spodu kapelusza / podstawy trzonu, a gatunek ma sobowtóry – podpowiedź na Analizie.
+  Analiza i Nagroda zawsze pokazują notkę „Rozpoznanie AI może się mylić – nie jedz grzyba tylko na podstawie aplikacji”;
+- **nie grzyb** / **niewyraźne** → karta nad działającym już podglądem („Nie wykryłem grzyba” / „Niewyraźne zdjęcie”
+  + powód od modelu, przy niewyraźnym – wskazówki), „Spróbuj ponownie” wraca do celowania; bez znaleziska, zdjęcie usunięte;
+- **błąd** (sieć, limit czasu, limit rozpoznań, serwer) → ekran błędu: „Spróbuj ponownie” (to samo zdjęcie), „Zrób nowe zdjęcie”;
+- **brak aparatu** (komputer, symulator) → „Brak aparatu – rozpoznawanie wymaga zdjęcia”; z narzędziami dev także
+  „Wybierz zdjęcie z galerii (dev)” (w wydaniu nie ma – anty-cheat);
+- **brak serwera** (bez adresu i klucza Supabase w `.env.local`) → „Rozpoznawanie wymaga połączenia z serwerem” – nic nie
+  jest zmyślane.
+
+**Gdzie działa:** w obu trybach (`EXPO_PUBLIC_BACKEND=mock` i `supabase`), gdy w konfiguracji są
+`EXPO_PUBLIC_SUPABASE_URL` i klucz – w trybie mock aplikacja zakłada do rozpoznawania osobne konto anonimowe, a gra zostaje
+na mockach. Kod: `src/services/live/identify.ts` (wywołanie, sesja, błędy), `src/utils/identify.ts` (wynik gry: wymiary,
+XXL, bezpiecznik sobowtórów, podpowiedzi, wymuszony wynik dev), wspólny z funkcją kontrakt
+`supabase/functions/identify/contract.ts` (schemat, prompt, walidacja, normalizacja – testy jest).
+
+**Edge Function `identify`** (`supabase/functions/identify/index.ts`, Deno): tylko z sesją gracza (JWT – także konto
+anonimowe). Przyjmuje `{ image: JPEG w base64, month, voivodeship }` – bez gminy i współrzędnych. Woła Claude
+(`npm:@anthropic-ai/sdk`, domyślnie `claude-opus-5-5`, `effort: low`, structured outputs: `verdict` mushroom / not_mushroom /
+unclear, `reason` po polsku, do 3 kandydatów z enum id katalogu z pewnością, widoczne części, liczba owocników, rozmiar tylko
+przy odniesieniu skali na zdjęciu, dojrzałość) z serwerowym fallbackiem przy odmowie modelu. Prompt każe być ostrożnym (niższa
+pewność, groźny sobowtór na liście kandydatów); aplikacja dodatkowo obniża pewność jadalnego gatunku poniżej 60%, gdy wśród
+kandydatów jest trujący. Stały prompt systemowy (instrukcje + 120 gatunków) idzie do cache promptu. Bez skali na zdjęciu
+wymiary = typowe dla gatunku (bez XXL, nic nie jest losowane).
+
+**Koszty i limit.** 60 rozpoznań na gracza w kroczącym oknie 24 h i jedno naraz (RPC `identify_begin` / `identify_finish`,
+migracja `20261014100000_identify.sql`, mechanizm `check_rate_limit` z etapu 7) → ekran „Limit rozpoznań” z opisem z
+serwera. Zużycie tokenów dzień po dniu: widok `identify_usage` (Studio). Szacunek na skan (Opus 5.5: $4 / 1M tokenów wejścia,
+$20 / 1M wyjścia, odczyt z cache $0,20 / 1M): prompt ~6 tys. tokenów z cache ≈ $0,001, zdjęcie ~700 tokenów ≈ $0,003,
+odpowiedź 150–400 tokenów ≈ $0,003–0,008 → **ok. $0,01 (~4 gr) na skan**; pierwszy po ponad 5 min ciszy ≈ $0,035 (zapis
+cache). Limit 60 / dobę = najwyżej ok. $0,6 na gracza dziennie. Tańsza opcja: `IDENTIFY_MODEL=claude-haiku-5-5`
+($0,10 / $0,50 za 1M – poniżej $0,001 na skan, słabsza ocena).
+
+**Uruchomienie lokalnie** (Docker, `npx supabase start`): klucz API z console.anthropic.com do pliku sekretów (jest
+w `.gitignore`; wzór `supabase/functions/identify/.env.example`), nowa migracja i funkcja:
+
+```bash
+cp supabase/functions/identify/.env.example supabase/functions/.env
+```
+
+```bash
+npx supabase migration up --local
+```
+
+```bash
+npx supabase functions serve identify --env-file supabase/functions/.env
+```
+
+W chmurze (po utworzeniu projektu):
+
+```bash
+npx supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
+```
+
+```bash
+npx supabase functions deploy identify
+```
+
+Po zmianie katalogu (`src/data/mock/species.ts`): `npm run identify:catalog` (test pilnuje zgodności).
+
+**Testy na Gemini (tylko deweloper).** Bez klucza Anthropic można sprawdzić rozpoznawanie na własnym kluczu Google
+(np. darmowym z [AI Studio](https://aistudio.google.com/apikey)): w `supabase/functions/.env` wpisz `GEMINI_API_KEY=…`
+(bez `ANTHROPIC_API_KEY` Gemini włącza się sam; jawnie: `IDENTIFY_PROVIDER=gemini`, model `GEMINI_MODEL`, domyślnie
+`gemini-3.8-flash`) i uruchom funkcję jak wyżej. Ten sam prompt, schemat (`responseJsonSchema`, przy odrzuceniu – sam tryb
+JSON) i normalizacja (`supabase/functions/identify/gemini.ts`). **Nie do wydania:** warunki Gemini API pozwalają
+aplikacjom dla użytkowników z EOG / Szwajcarii / UK używać tylko płatnego dostępu, w darmowym Google używa przesłanych
+zdjęć do ulepszania usług (także ręczny przegląd), wymaga 18+ i ma jeden limit zapytań na cały projekt, a polityka
+prywatności wymienia tylko Anthropic.
+
+**Panel dev** → „Wynik skanu (dev)” → „Wymuś wynik skanu”: gatunek (+ okaz XXL, niska pewność), „Nie grzyb”, „Niewyraźne” –
+bez zdjęcia, sieci i kosztów (dev-linki: `species=<id>`, `xxl=1`, `low=1`, `poison=1`, `result=not_mushroom|unclear`).
+W wydaniu bez narzędzi dev wymuszenie jest zawsze wyłączone (`releaseSimState`).
+
+**Do zrobienia:** wynik rozpoznania podpisany przez serwer (dziś `find.submit` przyjmuje gatunek od telefonu – anty-cheat),
+rozpoznanie odłożone na później bez zasięgu (teraz: błąd sieci i „Spróbuj ponownie”), weryfikacja prawna przekazania
+zdjęć do Anthropic (polityka prywatności, pkt 4 i 10).
+
 ## Aparat, profil, powiadomienia, społeczność
 
 - **Aparat** (`app/scan.tsx`, `src/services/live/camera.ts`) – podgląd `expo-camera` na żywo za UI skanu (wnętrze
   pierścienia przezroczyste), prawdziwa zgoda systemowa, latarka (`enableTorch`), pauza po utracie fokusu / w tle.
-  Postęp skanu i rozpoznanie gatunku nadal symulowane (bez modelu). Spust robi zdjęcie (720 px, JPEG 0,6;
+  Spust robi zdjęcie, które rozpoznaje serwer (patrz [Rozpoznawanie grzyba (AI)](#rozpoznawanie-grzyba-ai)) – 720 px, JPEG 0,6;
   na iOS w `documents/finds/`, na webie mały data URI ≤ ~120 KB, łącznie ~1,2 MB). Zdjęcie widać na Analizie, Nagrodzie,
   w ostatnich znaleziskach, Podsumowaniu, karcie gatunku i jako okładkę własnego wpisu w Feedzie. Brak kamery
-  (web bez kamery, symulator) → paski i „podgląd kamery niedostępny”, skan działa dalej bez zdjęcia. Zdjęcie jest zawsze
+  (web bez kamery, symulator) → paski, „podgląd kamery niedostępny” i po spuście „Brak aparatu – rozpoznawanie wymaga
+  zdjęcia” (z narzędziami dev także „Wybierz zdjęcie z galerii (dev)”; w wydaniu galerii nie ma – anty-cheat). Zdjęcie jest zawsze
   przekodowanym JPEG-iem (expo-image-manipulator – bez EXIF, więc bez GPS); z backendem Supabase trafia też do Storage
   (patrz [Zdjęcia w Storage](#backend-supabase)).
 - **Profil** – Ustawienia (⚙ w Profilu): edycja profilu, gmina domowa, „Konto i logowanie”, „Pobierz moje dane”,
@@ -460,29 +548,33 @@ Regulamin i polityka prywatności (szkice do weryfikacji prawnej) opisują dokł
 
 ## Konto, onboarding i Twoje dane
 
-**Onboarding** (`app/onboarding.tsx`, kroki i walidacja – `src/utils/onboarding.ts`, zapis – `src/store/onboarding.ts`).
+**Onboarding** (`app/onboarding.tsx`, oświadczenie – `src/utils/onboarding.ts`, zapis – `src/store/onboarding.ts`).
 Dopóki `useUserStore.onboarded` jest `false`, `app/_layout.tsx` (`Stack.Protected`) pokazuje tylko ekran powitalny – bez
-zakładek i bez „wstecz” do nich (dostępne zostają regulamin, polityka prywatności i `/dev`). Sześć kroków z kropkami
-postępu, „Dalej” / „Wstecz” (także systemowe „wstecz” na Androidzie):
-1. **Powitanie** – co robi aplikacja (skanuj grzyby, XP i atlas, rywalizacja gmin bez ujawniania miejscówek); z serwerem
-   także „Już masz konto? Zaloguj się kodem z e-maila” (logowanie na konto zabezpieczone na innym telefonie);
-2. **Bezpieczeństwo** – ramka i zasady z regulaminu (`SAFETY_NOTICE`, `SAFETY_RULES` w `src/data/legal.ts`), informacja,
-   że rozpoznawanie działa na razie w trybie demonstracyjnym, wymagane „Rozumiem – aplikacja nie decyduje, czy grzyb jest
-   jadalny”;
-3. **Regulamin i prywatność** – skrót, linki do pełnych dokumentów, wymagane „Akceptuję regulamin i politykę prywatności”
-   i „Mam ukończone 16 lat”;
-4. **Profil** – imię lub pseudonim („widoczne dla innych”), nick (walidacja jak w edycji profilu + sprawdzenie, czy nie jest
-   zajęty), motyw avatara; pola wypełnione z bieżącego profilu;
-5. **Gmina domowa** – „Użyj mojej lokalizacji” (wykrycie gminy na telefonie) albo wyszukiwarka 2479 gmin
-   (`src/components/GminaPicker.tsx` – ta sama co w Ustawieniach); trzeba ją wybrać świadomie;
-6. **Uprawnienia** – lokalizacja, aparat, powiadomienia z wyjaśnieniem i „Włącz” (odmowa → „Ustawienia”) albo „Później”.
+zakładek i bez „wstecz” do nich (dostępne zostają regulamin, polityka prywatności i `/dev`). **Jeden ekran, jedno
+dotknięcie** do zakładek:
+- powitanie (co robi aplikacja), ramka bezpieczeństwa (`SAFETY_NOTICE` z `src/data/legal.ts`, informacja, że gatunek
+  rozpoznaje model AI i może się mylić, link do § 4 regulaminu) i lista funkcji;
+- nad przyciskiem oświadczenie `ONBOARDING_CONSENT`: „Naciskając „Zaczynamy”, akceptujesz Regulamin (w tym zasady
+  bezpieczeństwa) i potwierdzasz, że znasz Politykę prywatności oraz masz ukończone 16 lat (młodsi – tylko za zgodą rodzica
+  lub opiekuna)” – z linkami do pełnych dokumentów. Bez pól wyboru; zgód opcjonalnych w aplikacji nie ma;
+- **Zaczynamy!**; z serwerem także „Mam już konto – zaloguj się kodem z e-maila” (konto zabezpieczone na innym telefonie).
 
-Koniec: profil w store, regulamin (`terms: { version: LEGAL_VERSION, acceptedAt }`) i `onboarded = true`; z serwerem
-kolejka wysyła po kolei `profile.update` (+ `photo.avatar` przy zmianie motywu) → `terms.accept` (`accept_terms`) →
-`onboarding.complete` (`complete_onboarding`). Kiedy onboarding się pokazuje: tryb mock – gracz demo i zapisani gracze
+Czego onboarding celowo **nie** robi: nie pyta o zgody systemowe (lokalizacja – karta „Gdzie dziś zbierasz? → Włącz
+lokalizację” na Starcie albo start wyprawy; aparat – pierwszy skan; powiadomienia – po obserwowaniu gminy i w Ustawieniach),
+nie wymaga nicku ani avatara (zostają domyślne z serwera – zmiana w Ustawieniach → Edytuj profil) i nie pyta o gminę domową:
+nowy gracz ma `homeGminaPending`, a pierwsza wykryta gmina zostaje domową (`adoptHomeGmina`, toast „Gmina domowa: … –
+zmienisz ją w Ustawieniach”; z serwerem dopiero po pierwszym przyjęciu stanu konta). Bez GPS – „Wybierz gminę domową
+ręcznie” na karcie lokalizacji albo Ustawienia → Gmina domowa (tam do czasu wyboru „Wybierz”). Gmina domowa z serwera
+(np. wybrana na innym telefonie) kasuje flagę.
+
+Koniec: regulamin (`terms: { version: LEGAL_VERSION, acceptedAt }`) i `onboarded = true`; z serwerem kolejka wysyła
+`terms.accept` (`accept_terms`) → `onboarding.complete` (`complete_onboarding`), bez `profile.update`. Jeśli stan konta
+z serwera jeszcze nie przyszedł (np. pierwsze uruchomienie bez sieci), gracz demo z makiety w telefonie zostaje zastąpiony
+nowym graczem (jak po wylogowaniu). Kiedy onboarding się pokazuje: tryb mock – gracz demo i zapisani gracze
 mają go za sobą (migracja stanu v4), scenariusz „Nowy użytkownik” zaczyna od niego; tryb Supabase – pierwsze uruchomienie
 (bez zapisu w telefonie), a przy pierwszym powiązaniu z kontem decyduje serwer (`onboardedAt = null` → onboarding), więc
-wylogowanie, usunięcie konta i logowanie na konto bez onboardingu też do niego prowadzą.
+wylogowanie, usunięcie konta i logowanie na konto bez onboardingu też do niego prowadzą. Gracze, którzy przeszli dawny
+(sześciokrokowy) onboarding, nie widzą go ponownie.
 
 **Konto i logowanie** (Ustawienia → „Konto i logowanie”, `app/ustawienia/konto.tsx`; tryb mock – karta „Konto działa
 z backendem Supabase”). Stan: **konto anonimowe** („Twoje postępy są tylko na tym urządzeniu i na serwerze pod anonimowym
@@ -527,7 +619,7 @@ Bez tego (tryb mock) aplikacja działa jak dotąd – bez kolejki i bez sieci.
 
 **Gra local-first + synchronizacja.** Każda akcja liczy się od razu w telefonie (jak w mockach – UI natychmiast,
 działa offline w lesie), a jej zdarzenie trafia do trwałej kolejki (`src/store/useOutboxStore.ts`):
-`trip.start`, `find.submit` (wynik rozpoznania z mocka + ujęcia skanu – tymczasowo, do czasu modelu AI),
+`trip.start`, `find.submit` (wynik rozpoznania z Edge Function `identify` + widoczne części – podaje go telefon, serwer jeszcze go nie podpisuje),
 `find.claim`, `find.discard`, `trip.progress` (dystans najwyżej co minutę), `trip.finish` (bez śladu GPS – zostaje
 w pamięci), `trip.publish` (publikacja w feedzie, zawsze po `trip.finish`; okładka wysyłana tuż przed nią), `profile.update`
 (zawsze cały profil z motywem avatara, w kolejce tylko najnowszy), `challenge.accept`, `gmina.follow` oraz zdjęcia:
@@ -732,6 +824,8 @@ i `eas update --channel production` – `runtimeVersion` jest już ustawione.
   Connect i Google Play) – np. strona www albo GitHub Pages z plików z `docs/legal`.
 - **Supabase (chmura):** projekt w regionie UE (np. Frankfurt), umowa powierzenia (DPA), włączone logowanie anonimowe
   (Authentication → Sign In / Providers → „Allow anonymous sign-ins”), wdrożenie schematu i seed z `--cloud` – [docs/backend.md](docs/backend.md#wdrożenie).
+- **Anthropic:** konto i klucz API (`npx supabase secrets set ANTHROPIC_API_KEY=…`, `npx supabase functions deploy identify`),
+  limit wydatków w konsoli Anthropic, umowa powierzenia (DPA) i decyzja o transferze do USA – patrz [Rozpoznawanie grzyba (AI)](#rozpoznawanie-grzyba-ai).
 - **Apple:** Apple Developer Program, aplikacja w App Store Connect (bundle id `com.aknsoftware.grzybobranie`),
   „App Privacy” (m.in. przybliżona lokalizacja – gmina, zdjęcia, nick i imię, identyfikator konta, treści użytkownika,
   dane z gry; bez śledzenia), ocena wiekowa (treści użytkowników), adres polityki prywatności i kontakt wsparcia, testerzy
@@ -741,7 +835,8 @@ i `eas update --channel production` – `runtimeVersion` jest już ustawione.
   osobiste: min. 12 testerów przez 14 dni przed produkcją), klucz konta usługi do `eas submit` (pierwszy plik AAB
   zwykle wgrywa się ręcznie). Podpis aplikacji – Play App Signing, keystore trzyma EAS.
 - **Wymogi sklepów, których aplikacja jeszcze nie spełnia** (szczegóły w [NOTES.md](NOTES.md#wydanie-produkcja)):
-  usuwanie konta z poziomu aplikacji, blokowanie użytkowników (treści użytkowników – App Store 1.2), prawdziwe rozpoznawanie
-  gatunku zamiast symulacji albo jasna informacja o niej, napisy „prototyp” w Ustawieniach.
+  usuwanie konta z poziomu aplikacji, blokowanie użytkowników (treści użytkowników – App Store 1.2), napisy „prototyp”
+  w Ustawieniach. Rozpoznawanie gatunku jest już prawdziwe (model AI) – w „App Privacy” / „Bezpieczeństwie danych” trzeba
+  podać, że zdjęcia trafiają do zewnętrznego dostawcy AI.
 
 Szczegóły decyzji i rozbieżności z makietą: [NOTES.md](NOTES.md).

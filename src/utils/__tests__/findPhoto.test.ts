@@ -6,6 +6,7 @@ import {
   isRemotePhoto,
   jpegDataUriLength,
   latestSpeciesPhoto,
+  latestSpeciesPhotos,
   remotePhotoPath,
   remotePhotoUri,
   rerootPhotoUri,
@@ -108,5 +109,22 @@ describe('latestSpeciesPhoto', () => {
     };
     expect(latestSpeciesPhoto(finds, 'borowik-szlachetny')).toBe('file:///finds/b.jpg');
     expect(latestSpeciesPhoto(finds, 'maslak-zwyczajny')).toBeUndefined();
+  });
+});
+
+describe('latestSpeciesPhotos', () => {
+  it('mapa gatunek → najnowsze zdjęcie, zgodna z latestSpeciesPhoto', () => {
+    const finds = {
+      a: find('a', '2026-10-01T10:00:00Z', { photoUri: 'file:///finds/a.jpg' }),
+      b: find('b', '2026-10-03T10:00:00Z', { photoUri: 'file:///finds/b.jpg' }),
+      c: find('c', '2026-10-04T10:00:00Z', { photoUri: 'file:///finds/c.jpg', status: 'pending' }),
+      d: find('d', '2026-10-05T10:00:00Z'),
+      e: find('e', '2026-10-06T10:00:00Z', { photoUri: 'file:///finds/e.jpg', speciesId: 'czubajka-kania' }),
+      f: find('f', '2026-10-02T10:00:00Z', { photoUri: 'file:///finds/f.jpg', speciesId: 'czubajka-kania' }),
+    };
+    const map = latestSpeciesPhotos(finds);
+    expect(map).toEqual({ 'borowik-szlachetny': 'file:///finds/b.jpg', 'czubajka-kania': 'file:///finds/e.jpg' });
+    for (const id of Object.keys(map)) expect(map[id]).toBe(latestSpeciesPhoto(finds, id));
+    expect(latestSpeciesPhotos({})).toEqual({});
   });
 });

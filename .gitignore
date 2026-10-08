@@ -44,3 +44,7 @@ example
 
 # dane źródłowe GIS (PRG, GUS) – pobierane przez npm run geo:build
 .cache/
+
+# sekrety Edge Functions (ANTHROPIC_API_KEY) – wzór: supabase/functions/identify/.env.example
+supabase/functions/.env
+supabase/functions/**/.env

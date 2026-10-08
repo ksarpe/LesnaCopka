@@ -15,7 +15,7 @@ import type {
   Gmina,
   GminaChances,
   GminaStats,
-  Identification,
+  IdentifyOutcome,
   MushroomForecast,
   Post,
   PostComment,
@@ -24,7 +24,6 @@ import type {
   Ranking,
   RankingPeriod,
   Region,
-  ScanPart,
   ScanResult,
   SocialUser,
   Species,
@@ -49,7 +48,13 @@ export type ServiceErrorCode =
   /** GPS nie ustalił pozycji w wyznaczonym czasie. */
   | 'TIMEOUT'
   /** Serwer odrzucił żądanie (błąd biznesowy / wewnętrzny) – komunikat po polsku w `message`. */
-  | 'SERVER';
+  | 'SERVER'
+  /** Limit serwera (np. rozpoznań na dobę) – komunikat po polsku w `message`, ponowienie później. */
+  | 'RATE_LIMITED'
+  /** Funkcja niedostępna w tej konfiguracji (np. rozpoznawanie bez adresu serwera). */
+  | 'UNAVAILABLE'
+  /** Brak zdjęcia (brak aparatu, nieudane zdjęcie, plik zniknął) – rozpoznanie go wymaga. */
+  | 'NO_PHOTO';
 
 export class ServiceError extends Error {
   constructor(
@@ -139,20 +144,26 @@ export interface WeatherService {
   getForecast(req: ForecastRequest, opts?: { signal?: AbortSignal }): Promise<MushroomForecast>;
 }
 
-export interface ScanOptions {
-  signal?: AbortSignal;
+export interface IdentifyContext {
+  /** Miesiąc 1–12 (sezon). */
+  month?: number;
+  /** Województwo (VOIVODESHIPS w src/geo/voivodeships.ts) – nic dokładniejszego nie wysyłamy. */
+  voivodeship?: string;
 }
 
-export interface ScanService {
-  /** Skan 360°: raportuje postęp 0..1 i zaliczone części grzyba, kończy się wynikiem. */
-  startScan(cb: (progress: number, parts: ScanPart[]) => void, opts?: ScanOptions): Promise<ScanResult>;
-  /** Natychmiastowe zdjęcie z częściami zebranymi do tej pory (tryb dev). */
-  capturePartial(parts: ScanPart[]): ScanResult;
+export interface IdentifyOptions {
+  signal?: AbortSignal;
+  context?: IdentifyContext;
 }
 
 export interface IdentifyService {
-  /** Gatunek, pewność, wymiary, sobowtóry. */
-  identify(scan: ScanResult): Promise<Identification>;
+  /**
+   * Rozpoznanie zdjęcia (src/services/live/identify.ts → Edge Function `identify` → model Claude): grzyb (gatunek,
+   * pewność, wymiary, sobowtóry, widoczne części) albo odrzucenie – „to nie grzyb” / niewyraźne ujęcie z powodem.
+   * Błędy (ServiceError): NO_PHOTO (bez zdjęcia), UNAVAILABLE (brak serwera), NETWORK, TIMEOUT, RATE_LIMITED,
+   * SERVER, CANCELLED. Wymuszony wynik z panelu dev (tylko narzędzia dev) działa bez zdjęcia i bez sieci.
+   */
+  identify(scan: ScanResult, opts?: IdentifyOptions): Promise<IdentifyOutcome>;
 }
 
 export interface StatsService {
@@ -279,7 +290,6 @@ export interface Services {
   location: LocationService;
   map: MapService;
   weather: WeatherService;
-  scan: ScanService;
   identify: IdentifyService;
   stats: StatsService;
   feed: FeedService;

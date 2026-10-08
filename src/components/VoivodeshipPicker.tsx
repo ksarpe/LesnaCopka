@@ -2,8 +2,9 @@ import { Modal, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } f
 import Animated, { FadeIn, SlideInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { DEV_TOOLS } from '@/config';
 import { gminaIndex } from '@/geo';
-import { gminyOf, VOIVODESHIPS } from '@/geo/voivodeships';
+import { DESIGN_VOIVODESHIP, gminyOf, VOIVODESHIPS } from '@/geo/voivodeships';
 import { useAsync } from '@/hooks/useAsync';
 import { colors, shadows } from '@/theme/tokens';
 import { plural } from '@/utils/format';
@@ -75,7 +76,12 @@ export function VoivodeshipPicker({ visible, value, picked, detected, onPick, on
                   <Row
                     key={v.teryt}
                     title={v.name}
-                    sub={n == null ? ' ' : `${n} ${plural(n, 'gmina', 'gminy', 'gmin')}${v.name === 'podlaskie' ? ' · mapa cieplna z makiety' : ''}`}
+                    sub={
+                      n == null
+                        ? ' '
+                        : // Dopisek o danych z makiety tylko w buildach z narzędziami dev (gracz nie wie, czym jest „makieta”).
+                          `${n} ${plural(n, 'gmina', 'gminy', 'gmin')}${DEV_TOOLS && v.name === DESIGN_VOIVODESHIP ? ' · mapa cieplna z makiety' : ''}`
+                    }
                     selected={picked != null ? v.name === picked : !detected && v.name === value}
                     here={v.name === detected}
                     onPress={() => choose(v.name)}

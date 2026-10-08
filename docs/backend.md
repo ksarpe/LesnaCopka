@@ -24,7 +24,8 @@ Supabase
   ├─ Postgres        tabele + RLS + logika gry w funkcjach SQL (XP, odznaki, osiągnięcia, zadania, rankingi)
   │   └─ PostGIS     granice gmin (PRG) → gmina z GPS, uogólnianie tras
   ├─ Storage         scan-photos (prywatny), post-media i avatars (publiczne) – upload z aplikacji do {user_id}/…
-  ├─ Edge Function   identify: zdjęcia skanu → model AI → identifications + finds (pending)
+  ├─ Edge Function   identify: zdjęcie skanu → Claude (Anthropic API) → wynik rozpoznania dla aplikacji (limit 60 / 24 h);
+  │                  znalezisko zapisuje dalej submit_find z kolejki (podpis wyniku – do zrobienia)
   │                  delete-account: usunięcie konta przez Admin API (etap 6, niewdrożona)
   └─ pg_cron         refresh_gmina_rankings() co godzinę (rankingi odświeżają się też przy odczycie), prognozy raz dziennie
 ```
@@ -274,14 +275,15 @@ w `PlayerCounters` (aplikacja), wartość w enumie `achievement_metric` i klucz 
 | `export_my_data()` · `prepare_account_deletion()` · `delete_my_account()` | Ustawienia → „Pobierz moje dane”, „Usuń konto” (RODO) |
 | supabase-js `auth.updateUser({ email })` / `signInWithOtp` + `verifyOtp` | Ustawienia → „Zabezpiecz konto e-mailem”, „Zaloguj się na innym telefonie” |
 | `admin_flags(p_limit, p_min_severity)` · widok `anti_cheat_summary` | tylko `service_role` / Studio – moderacja flag anty-cheatu (szczegóły: [Etap 7](#etap-7--anty-cheat-wykrywanie-dziennik-blokada-tylko-nadużyć)) |
+| `identify_begin(p_user)` · `identify_finish(…)` · widok `identify_usage` | tylko `service_role` – limit i koszty Edge Function `identify` (szczegóły: [Rozpoznawanie](#rozpoznawanie--edge-function-identify)) |
 
 Mapowanie na interfejsy aplikacji (`src/services/types.ts`):
 
 | Serwis | Implementacja Supabase |
 |---|---|
 | `LocationService` | `expo-location` + `gmina_at`, dystans → `report_trip_progress` |
-| `ScanService` | `expo-camera` → `expo-image-manipulator` (bez EXIF) → upload do `scan-photos/{user}/{find}.jpg` → `set_find_photo` |
-| `IdentifyService` | Edge Function `identify` (zapisuje `identifications` i `finds` jako `pending`); do tego czasu mock w aplikacji + `submit_find` |
+| Zdjęcie skanu | `expo-camera` → `expo-image-manipulator` (bez EXIF) → upload do `scan-photos/{user}/{find}.jpg` → `set_find_photo` |
+| `IdentifyService` | Edge Function `identify` (zdjęcie → Claude → gatunek / „nie grzyb” / „niewyraźne”), wynik do `submit_find` z kolejki – także w trybie mock (sama funkcja) |
 | `StatsService` | `get_gmina_stats`, `get_ranking`, `get_species_percentile` (+ `accept_challenge`, `follow_gmina`; stan w `get_game_state`), `get_gmina_species_evidence` → model szans w telefonie, `get_species_map` |
 | `FeedService` | `get_feed`, `get_post`, `publish_trip` (+ okładka w `post-media`, `set_post_cover`), `toggle_reaction`, `get_comments` / `add_comment` / `delete_comment`, `hide_post` / `unhide_posts` / `get_hidden_posts`, `report_post` |
 | Znajomi / profil innych | `search_users`, `get_friends`, `get_user`, `get_user_by_handle`, `send_friend_request`, `respond_friend_request`, `remove_friend` |
@@ -316,8 +318,8 @@ nie ponawiać (zdarzenie z kolejki odrzucić i przyjąć stan z serwera). Błąd
 Etap 7: `submit_find` poprawia `rarity` / `xxl` (prawda serwera), a `report_trip_progress` / `finish_trip` mogą uznać mniejszy dystans
 niż zgłoszony – szczegóły w [Etapie 7](#etap-7--anty-cheat-wykrywanie-dziennik-blokada-tylko-nadużyć).
 
-**`submit_find` (tymczasowe).** Do czasu Edge Function `identify` aplikacja ma mock rozpoznawania i przysyła jego wynik;
-serwer zapisuje `scans` (`identified`), `identifications` (`provider = 'client-sim'`, `model = 'mock-v1'`) i `finds`
+**`submit_find` (tymczasowe).** Aplikacja przysyła wynik rozpoznania z Edge Function `identify` (dawniej – z mocka; serwer
+go jeszcze nie podpisuje); serwer zapisuje `scans` (`identified`), `identifications` (`provider = 'client-sim'`, `model = 'mock-v1'`) i `finds`
 (`pending`, `collected = false` dla gatunków trujących, śmiertelnych i chronionych – [Katalog gatunków](#katalog-gatunków-treść-ochrona)). `p_dimensions`: `{cap_cm, height_cm, weight_g,
 age_days, pieces}`, `p_candidates`: `[{species_id, confidence}]`. Wyprawa nieznana serwerowi / cudza → `trip_id = null`
 (`claim_find` podepnie aktywną). Walidacja (`P0001`, kod w treści, opis w `detail`): gatunek i gmina istnieją, pewność 0–1,
@@ -850,8 +852,8 @@ gdy mija czas (np. 15 km po godzinie → 8,67 km, ten sam dystans po 3 h → 15 
 
 - `rate_limited` – toast z `details` (patrz wyżej).
 - `submit_find` zwraca i zapisuje poprawione `rarity` / `xxl`, a `claim_find` liczy z nich nagrodę: borowik „XXL” 330 g → bez linii
-  „Okaz XXL ×1,5”; podgrzybek zgłoszony jako legendarny → „Bazowe XP (rzadki)” 120 XP. Zwykłe skany mocka są zgodne (rzadkość =
-  gatunku, XXL wg `isXxl`) – różnice dają tylko nadpisania z panelu `/dev` (`rarity=…`, `xxl=1` dla kępek). Aplikacja przyjmuje stan
+  „Okaz XXL ×1,5”; podgrzybek zgłoszony jako legendarny → „Bazowe XP (rzadki)” 120 XP. Wyniki rozpoznania są zgodne (rzadkość =
+  gatunku, XXL wg `isXxl`, kępki bez XXL) – różnice dałby tylko zmodyfikowany klient. Aplikacja przyjmuje stan
   z `get_game_state()` jak dotąd.
 - `distanceM` wyprawy może być mniejszy niż lokalny (przycięty / nieuznany). Sugestia dla aplikacji: nie doliczać odcinków jazdy
   (> ~15 km/h) do dystansu wyprawy – gracz, który włącza wyprawę jeszcze w aucie, dostaje dziś flagę `trip_speed` (2).
@@ -885,10 +887,10 @@ Skrypty lokalne (psql, testy): `select set_config('app.anti_cheat_bypass', 'on',
 
 - **GPS spoofing na telefonie** – fałszywa trasa w wiarygodnym tempie przejdzie: serwer widzi tylko dystans i czasy z telefonu, a ślad
   `trip_tracks` przychodzi na końcu i nie jest weryfikowany (możliwe później: długość śladu vs dystans, gmina z PRG vs `p_gmina_id`).
-- **Zdjęcie zdjęcia / ekranu, zdjęcie z internetu, ten sam plik pod inną nazwą** – wymaga modelu AI (i / lub hasha percepcyjnego w Edge
-  Function); `photo_reuse` łapie tylko tę samą ścieżkę.
-- **Gatunek, wymiary i rzadkość podaje telefon** (`submit_find` jest tymczasowe) – flagi i poprawki ograniczają skalę, ale właściwe
-  rozwiązanie to rozpoznanie po stronie serwera: Edge Function `identify` zapisuje `finds`, klient nie podaje gatunku ani wymiarów.
+- **Zdjęcie zdjęcia / ekranu, zdjęcie z internetu, ten sam plik pod inną nazwą** – model w `identify` odrzuca zdjęcia ekranu / wydruku
+  („nie grzyb”), ale zdjęcia z internetu nie rozpozna; hash percepcyjny w Edge Function – później; `photo_reuse` łapie tylko tę samą ścieżkę.
+- **Gatunek, wymiary i rzadkość podaje telefon** (`submit_find` jest tymczasowe) – rozpoznaje już serwer (`identify`), ale wynik wraca
+  do telefonu i dopiero on go zgłasza. Do zrobienia: `identify` zapisuje `finds` sama albo zwraca podpis wyniku sprawdzany w `submit_find`.
 - **Cofnięty `started_at` / `found_at`** (kolejka offline – do 14 dni wstecz) – tylko flaga informacyjna; czas do prędkości ≤ 24 h.
 - **„Zaproś → anuluj → zaproś”, „skomentuj → usuń”** – limity liczą istniejące wiersze (usunięte znikają z licznika); licznik zdarzeń –
   gdy dojdą powiadomienia push.
@@ -935,6 +937,29 @@ Aplikacja trzyma zbiory gminy i mapy gatunku 10 min w pamięci (`createSupabaseS
 nie pyta serwera. Zmiana progów: stałe `c_*` na początku obu funkcji (i `MIN_*` w `src/data/mock/chances.ts` /
 `chancesMap.ts`).
 
+## Rozpoznawanie – Edge Function `identify`
+
+Migracja [`20261014100000_identify.sql`](../supabase/migrations/20261014100000_identify.sql), funkcja
+[`supabase/functions/identify/`](../supabase/functions/identify/) (Deno; konfiguracja i koszty – README „Rozpoznawanie grzyba (AI)”).
+
+- **Żądanie** (`POST /functions/v1/identify`, sesja gracza – JWT, także konto anonimowe; bez tokenu → 401): `{ image: JPEG w base64,
+  month?: 1–12, voivodeship?: '<z listy 16>' }`. Odpowiedź 200: `{ verdict: 'mushroom' | 'not_mushroom' | 'unclear', reason, candidates:
+  [{ speciesId, confidence }] (≤ 3, enum id z katalogu), visibleParts, count, capCm, heightCm, maturity }`. Błędy: `{ error, message?,
+  retryAfter? }` – `bad_request` (400), `rate_limited` (429), `not_configured` / `model_unavailable` (503), `model_error` (502), `internal` (500).
+- **Model:** `IDENTIFY_MODEL` (domyślnie `claude-opus-5-5`), `effort: low`, structured outputs (`output_config.format` – schemat
+  z `contract.ts`), serwerowy fallback przy odmowie (`fallbacks: "default"`), prompt systemowy stały (cache) z katalogiem 120 gatunków.
+  Odmowa modelu → 200 z `verdict: 'unclear'`. Odpowiedź modelu i odpowiedź funkcji (w aplikacji) przechodzą przez `normalizeIdent`.
+- **Limit (`identify_begin(p_user)` → id wywołania, przed modelem):** jedno rozpoznanie naraz (niezamknięty wiersz młodszy niż
+  `identify_busy_s` = 60 s) i `identify_per_day` = 60 w kroczącym oknie 24 h (bez `failed`); odrzucenie jak w etapie 7: `P0001 rate_limited`,
+  opis po polsku w `detail`, `hint` = `retry_after=<ISO>` (najstarsze liczone wywołanie + 24 h), flaga `rate_limited` (ref `identify`) przy
+  wyczerpaniu. Wywołania jednego gracza są szeregowane (`pg_advisory_xact_lock`).
+- **`identify_finish(p_id, p_user, p_status, p_model, tokeny…)`** – `ok` / `refused` / `failed` + tokeny wejścia, wyjścia, odczytu
+  i zapisu cache. Dziennik `identify_calls` nie ma zdjęć ani wyników, wiersze > 7 dni znikają przy kolejnych wywołaniach, a
+  `wipe_account_data` kasuje dziennik gracza. Widok `identify_usage` – dzień × model: wywołania, statusy, gracze, tokeny.
+- **Dostęp:** tabela, widok i obie funkcje tylko dla `service_role` (Edge Function z kluczem serwisowym); klient nie zresetuje
+  limitu. Testy: `npm run db:test` (limit, „jedno naraz”, brak dostępu klienta, 7 dni, usunięcie konta), aplikacja – jest
+  (`identifyContract.test.ts`, `identify.test.ts`).
+
 ## Lokalnie (Docker) – telefon w tej samej sieci Wi-Fi
 
 ```bash
@@ -954,7 +979,9 @@ Seed lokalny włącza narzędzia deweloperskie (`app_config.dev_tools = true`) �
 E-maile (kody OTP) lokalnie nie wychodzą – podgląd w Mailpit: `http://<IP komputera>:54324` (szczegóły: [Etap 6](#konto-e-mail--kod-otp-bez-linków-i-haseł)).
 Po zmianie `supabase/config.toml` (Auth, szablony e-maili) – `npx supabase stop`, potem `npx supabase start` (dane zostają).
 
-Etap 1 (zrobiony): anonimowe konto + słowniki (gatunki z sobowtórami, odznaki, zadania) z bazy.
+Etap 1 (zrobiony): anonimowe konto + słowniki (gatunki z sobowtórami, odznaki, zadania) z bazy. Start nie czeka na sieć:
+słowniki z pamięci telefonu (ostatni katalog z serwera; pierwsze uruchomienie – mocki = seed), świeże z bazy w tle
+(`src/services/supabase/catalogCache.ts`).
 Etap 2 (serwer gotowy): stan gry na serwerze – kolejka zdarzeń → idempotentne RPC (`start_trip`, `submit_find`,
 `claim_find`, `discard_find`, `report_trip_progress`, `finish_trip`) → `get_game_state()`.
 Etap 3 (serwer gotowy): feed, komentarze, reakcje, ukrywanie i zgłoszenia, znajomi dwustronni, wyszukiwarka, aktywność,
@@ -971,7 +998,8 @@ regulamin i onboarding (`accept_terms`, `complete_onboarding`), blokowanie w obi
 Etap 7 (serwer gotowy): anty-cheat – limity `rate_limited` (znaleziska, wyprawy, komentarze, zaproszenia, zgłoszenia), prędkość wyprawy
 (przycięcie / nieuznanie dystansu), prawda serwera dla rzadkości i XXL, flagi wiarygodności, dziennik `anti_cheat_flags` z widokiem
 `anti_cheat_summary` i `admin_flags` (service_role).
-Dalej: Edge Function `identify` zamiast `submit_find`, push dla aktywności, prognoza grzybowa na serwerze (`gmina_forecasts` – na razie liczy ją telefon z Open-Meteo, patrz README), logowanie Apple / Google.
+Rozpoznawanie (serwer gotowy, niewdrożony): Edge Function `identify` (Claude) z limitem `identify_begin` / `identify_finish`.
+Dalej: podpis wyniku `identify` zamiast zaufania do `submit_find`, push dla aktywności, prognoza grzybowa na serwerze (`gmina_forecasts` – na razie liczy ją telefon z Open-Meteo, patrz README), logowanie Apple / Google.
 
 ## Wdrożenie
 
@@ -1029,6 +1057,9 @@ ale dzięki niemu pierwszy odczyt po przerwie nie czeka na przeliczenie, a poprz
 - **Usuwanie kont:** `npx supabase functions deploy delete-account` (verify JWT włączone; `SUPABASE_URL` i `SUPABASE_SERVICE_ROLE_KEY`
   dostarcza platforma). Po wdrożeniu sprawdź na koncie testowym, czy `delete_my_account()` zwraca `authUserDeleted: true` (rola `postgres`
   ma `DELETE` na `auth.users`) – jeśli nie, aplikacja i tak dokończy przez funkcję.
+- **Rozpoznawanie (`identify`):** `npx supabase secrets set ANTHROPIC_API_KEY=sk-ant-…` (opcjonalnie `IDENTIFY_MODEL`), potem
+  `npx supabase functions deploy identify` (verify JWT włączone). W konsoli Anthropic ustaw miesięczny limit wydatków; zużycie po
+  stronie bazy – widok `identify_usage`. Klucz nigdy nie trafia do aplikacji ani do repozytorium.
 - **Sprzątanie (cron / Edge Function z service role, później):** profile z `deleted_at` (usunięcie niedokończone – `auth.admin.deleteUser`),
   osierocone konta anonimowe (np. > 90 dni bez aktywności i bez e-maila – po przełączeniu telefonu na konto z e-mailem), pliki Storage
   bez odwołania w bazie.

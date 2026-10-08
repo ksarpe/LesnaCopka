@@ -8,7 +8,7 @@ import type { AchievementUnlock, AtlasEntry, GminaChallenge, QuestProgress, User
 import { mergeSeedAwarded, seedAwarded } from '@/utils/achievements';
 import { normalizeCounters, type PlayerCounters } from '@/utils/counters';
 import { selectQuests } from '@/utils/quests';
-import { persistStorage, STORAGE_KEYS } from './storage';
+import { lazyPersistStorage, STORAGE_KEYS } from './storage';
 
 export type Counters = PlayerCounters;
 
@@ -75,8 +75,14 @@ export interface UserState {
   onboarded: boolean;
   /** Zaakceptowana wersja regulaminu i polityki prywatności (LEGAL_VERSION) i kiedy – lokalnie i z serwera. */
   terms?: { version: string; acceptedAt: string };
+  /**
+   * Nowy gracz nie wybrał jeszcze gminy domowej (onboarding o nią nie pyta): `user.homeGminaId` to tylko wartość
+   * zastępcza – przyjmie ją pierwsze wykrycie GPS na Starcie (adoptHomeGmina w src/store/onboarding.ts) albo ręczny
+   * wybór w Ustawieniach. Brak pola (gracze sprzed tej wersji) = gmina wybrana.
+   */
+  homeGminaPending?: boolean;
 
-  patch: (p: Partial<Omit<UserState, 'patch' | 'reset'>>) => void;
+  patch:(p: Partial<Omit<UserState, 'patch' | 'reset'>>) => void;
   reset: (state?: Partial<UserState>) => void;
 }
 
@@ -128,6 +134,7 @@ export function initialUserState(): Omit<UserState, 'patch' | 'reset'> {
     today: { date: todayKey(now), keys: [], km: 0 },
     lastActiveDate: todayKey(now),
     onboarded: true,
+    homeGminaPending: false,
   };
 }
 
@@ -151,7 +158,8 @@ export const useUserStore = create<UserState>()(
     }),
     {
       name: STORAGE_KEYS.user,
-      storage: persistStorage,
+      // Kilometry dnia / tygodnia z GPS zapisują się leniwie (persistLazily w addDistance) – reszta zmian od razu.
+      storage: lazyPersistStorage,
       version: 5,
       // v2: osiągnięcia. Zapisany gracz dostaje stopnie zdobyte do tej pory bez wypłaty XP.
       // v3: edycja profilu – `user.avatar` i `user.bio` są opcjonalne, więc bez przekształceń.
@@ -187,9 +195,12 @@ export const useUserStore = create<UserState>()(
         }
         return s;
       },
-      // Pierwsze uruchomienie (brak zapisu): `onboarded` zależnie od trybu – setFreshInstallOnboarded.
+      // Pierwsze uruchomienie (brak zapisu): `onboarded` zależnie od trybu – setFreshInstallOnboarded; nowy gracz
+      // (onboarding) nie ma jeszcze gminy domowej – Supraśl gracza demo jest tylko wartością zastępczą.
       merge: (persisted, current) =>
-        persisted ? { ...current, ...(persisted as Partial<UserState>) } : { ...current, onboarded: freshInstallOnboarded },
+        persisted
+          ? { ...current, ...(persisted as Partial<UserState>) }
+          : { ...current, onboarded: freshInstallOnboarded, homeGminaPending: !freshInstallOnboarded },
     },
   ),
 );

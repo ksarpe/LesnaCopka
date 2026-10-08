@@ -31,17 +31,29 @@ export function ensureGminaInCatalog(o: GminaOption) {
   if (g && !useCatalogStore.getState().gminaById[o.id]) useCatalogStore.getState().upsertGmina(g);
 }
 
+const SEARCH_DEBOUNCE_MS = 150;
+
+/** Wartość opóźniona o `ms` od ostatniej zmiany (wyszukiwarka nie liczy wyników przy każdym znaku). */
+function useDebouncedValue<T>(value: T, ms: number): T {
+  const [out, setOut] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setOut(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return out;
+}
+
 interface GminaPickerProps {
   /** Zaznaczona gmina (null = jeszcze żadna). */
   selectedId: string | null;
   /** Wybór (gmina już jest w katalogu). */
   onSelect: (o: GminaOption) => void;
-  /** Nagłówek grupy z zaznaczoną gminą: „Obecnie” (Ustawienia) / „Wybrana” (onboarding). */
+  /** Nagłówek grupy z zaznaczoną gminą (domyślnie „Obecnie”). */
   selectedTitle?: string;
 }
 
 /**
- * Wybór gminy (Ustawienia → Gmina domowa, onboarding): wyszukiwarka wszystkich 2479 gmin (indeks PRG), a bez frazy –
+ * Wybór gminy (Ustawienia → Gmina domowa): wyszukiwarka wszystkich 2479 gmin (indeks PRG), a bez frazy –
  * zaznaczona gmina, gmina z ostatniego wykrycia GPS i gminy z danymi gry.
  */
 export function GminaPicker({ selectedId, onSelect, selectedTitle = 'Obecnie' }: GminaPickerProps) {
@@ -63,14 +75,17 @@ export function GminaPicker({ selectedId, onSelect, selectedTitle = 'Obecnie' }:
     };
   }, []);
 
-  const searching = query.trim().length > 0;
+  // Wyszukiwanie ~150 ms po ostatnim znaku (nie przy każdym); wyczyszczenie pola – od razu.
+  const debounced = useDebouncedValue(query, SEARCH_DEBOUNCE_MS);
+  const q = query.trim() ? debounced : '';
+  const searching = q.trim().length > 0;
   const results = useMemo(() => {
     if (!searching) return [];
-    const inGame = searchByName(gminy, query);
+    const inGame = searchByName(gminy, q);
     const ids = new Set(inGame.map((g) => g.id));
-    const all = index ? searchByName(index, query).filter((m) => !ids.has(m.id)) : [];
+    const all = index ? searchByName(index, q).filter((m) => !ids.has(m.id)) : [];
     return [...inGame.map(optionFromGmina), ...all.map(fromMeta)].slice(0, 40);
-  }, [searching, gminy, index, query]);
+  }, [searching, gminy, index, q]);
 
   const catalogList = useMemo(
     () => [...gminy].sort((a, b) => a.name.localeCompare(b.name, 'pl')).filter((g) => g.id !== selectedId).map(optionFromGmina),

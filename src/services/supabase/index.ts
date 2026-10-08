@@ -12,18 +12,26 @@ import { setOutboxEnabled, useOutboxStore } from '@/store/useOutboxStore';
 import { setFreshInstallOnboarded } from '@/store/useUserStore';
 import type { Badge, Edibility, Habitat, Protection, Quest, QuestPeriod, Rarity, Species } from '@/types';
 import { questKindFromSql } from '@/utils/quests';
+import { cachedCatalog, type CachedCatalog } from './catalogCache';
 import { supabase } from './client';
 import { createSupabaseFeed } from './feed';
 import { establishSession, withTimeout } from './session';
-import { backendStatus } from './status';
 import { createSupabaseStats } from './stats';
 import { requestSync, startSync } from './sync';
 
 export { ensureSession } from './session';
 
-/** Sesja + synchronizacja (kolejka → serwer, potem stan gry z serwera). Nie rzuca. */
+let catalogService: CachedCatalog | null = null;
+
+/**
+ * Sesja + synchronizacja (kolejka → serwer, potem stan gry z serwera) i ponowne pobranie słowników, jeśli to przy
+ * starcie się nie udało (bez sieci). Nie rzuca.
+ */
 export async function connect() {
-  if (await establishSession()) void requestSync('connect');
+  if (await establishSession()) {
+    void requestSync('connect');
+    void catalogService?.refresh();
+  }
 }
 
 type SpeciesRow = {
@@ -149,30 +157,16 @@ async function fetchQuests(): Promise<Quest[]> {
 }
 
 /**
- * Słowniki z bazy (gatunki z sobowtórami, odznaki, zadania dnia). Gminy i liczba gatunków w atlasie
- * zostają z mocków – aplikacja potrzebuje pól, których w bazie jeszcze nie ma (prognoza, liczba grzybiarzy).
+ * Słowniki z bazy (gatunki z sobowtórami, odznaki, zadania dnia). Start nie czeka na sieć: najpierw katalog zapisany
+ * w telefonie (albo mocki przy pierwszym uruchomieniu), świeży z serwera w tle – ./catalogCache.ts. Gminy i liczba
+ * gatunków w atlasie zostają z mocków – aplikacja potrzebuje pól, których w bazie jeszcze nie ma (prognoza, liczba grzybiarzy).
  */
 function supabaseCatalog(fallback: CatalogService): CatalogService {
-  let loaded: Promise<{ species: Species[]; badges: Badge[]; quests: Quest[] } | null> | null = null;
-  const load = () => {
-    loaded ??= Promise.all([fetchSpecies(), fetchBadges(), fetchQuests()])
-      .then(([species, badges, quests]) => {
-        backendStatus().set({ catalogSource: 'supabase' });
-        return { species, badges, quests };
-      })
-      .catch((e) => {
-        backendStatus().set({ catalogSource: 'mock (fallback)', error: e instanceof Error ? e.message : String(e) });
-        return null;
-      });
-    return loaded;
-  };
-  return {
-    getSpecies: async () => (await load())?.species ?? fallback.getSpecies(),
-    getBadges: async () => (await load())?.badges ?? fallback.getBadges(),
-    getDailyQuests: async () => (await load())?.quests ?? fallback.getDailyQuests(),
-    getGminy: () => fallback.getGminy(),
-    getTotalSpecies: () => fallback.getTotalSpecies(),
-  };
+  catalogService = cachedCatalog(async () => {
+    const [species, badges, quests] = await Promise.all([fetchSpecies(), fetchBadges(), fetchQuests()]);
+    return { species, badges, quests };
+  }, fallback);
+  return catalogService;
 }
 
 export function createSupabaseServices(base: Services): Services {

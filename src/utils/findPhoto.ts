@@ -85,3 +85,16 @@ export function latestSpeciesPhoto(finds: Record<string, Find>, speciesId: strin
   }
   return best?.photoUri;
 }
+
+/** Najnowsze zdjęcie każdego gatunku naraz (siatka atlasu) – te same zasady co `latestSpeciesPhoto`, jedno przejście. */
+export function latestSpeciesPhotos(finds: Record<string, Find>): Record<string, string> {
+  const best: Record<string, Find> = {};
+  for (const f of Object.values(finds)) {
+    if (f.status !== 'claimed' || !f.photoUri) continue;
+    const cur = best[f.speciesId];
+    if (!cur || f.foundAt > cur.foundAt) best[f.speciesId] = f;
+  }
+  const out: Record<string, string> = {};
+  for (const id in best) out[id] = best[id].photoUri!;
+  return out;
+}

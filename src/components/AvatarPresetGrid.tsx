@@ -5,7 +5,7 @@ import { colors, shadows } from '@/theme/tokens';
 import { Icon } from './Icon';
 import { Txt } from './Txt';
 
-/** Siatka „motywów grzybowych” (4 w rzędzie): edycja profilu i onboarding. */
+/** Siatka „motywów grzybowych” (4 w rzędzie): edycja profilu. */
 export function AvatarPresetGrid({
   selectedId,
   onSelect,

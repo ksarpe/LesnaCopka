@@ -1,5 +1,5 @@
 import { LinearGradient } from 'expo-linear-gradient';
-import type { ReactNode } from 'react';
+import { memo, type ReactNode } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { useUiStore } from '@/store/useUiStore';
@@ -154,8 +154,8 @@ function TierPips({ def, tier }: { def: AchievementDef; tier: number }) {
   );
 }
 
-/** Wiersz osiągnięcia: medal, nazwa + stopnie, cel następnego stopnia, pasek postępu, nagroda XP. */
-export function AchievementRow({ state, onPress }: { state: AchievementState; onPress?: () => void }) {
+/** Wiersz osiągnięcia: medal, nazwa + stopnie, cel następnego stopnia, pasek postępu, nagroda XP (memo – długie listy). */
+export const AchievementRow = memo(function AchievementRow({ state, onPress }: { state: AchievementState; onPress?: () => void }) {
   const { def, tier, next, done } = state;
   const secret = hidden(state);
   const label = tierName(def, tier);
@@ -213,7 +213,7 @@ export function AchievementRow({ state, onPress }: { state: AchievementState; on
       </View>
     </Pressable>
   );
-}
+});
 
 /** Szczegóły: wszystkie stopnie z celami i nagrodami. */
 export function showAchievementDetails(state: AchievementState) {

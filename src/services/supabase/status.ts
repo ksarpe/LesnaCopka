@@ -5,8 +5,11 @@ export interface BackendStatus {
   state: 'off' | 'connecting' | 'online' | 'offline';
   userId: string | null;
   error: string | null;
-  /** Skąd przyszły słowniki przy ostatnim ładowaniu. */
-  catalogSource: 'mock' | 'supabase' | 'mock (fallback)';
+  /**
+   * Skąd są słowniki: `cache` – ostatni katalog z serwera zapisany w telefonie (odświeżanie w tle trwa),
+   * `… (fallback)` – serwer nie odpowiedział, zostaje katalog z telefonu / z mocków.
+   */
+  catalogSource: 'mock' | 'supabase' | 'cache' | 'mock (fallback)' | 'cache (fallback)';
   checkedAt: string | null;
   set: (p: Partial<Omit<BackendStatus, 'set'>>) => void;
 }

@@ -9,7 +9,7 @@ import { BADGE_RULES } from '@/utils/badges';
 import type { PlayerCounters } from '@/utils/counters';
 import { DESIGN_DAILY_QUEST_IDS, questDelta, questPeriod, selectQuests, weekStartKey, type QuestEvent } from '@/utils/quests';
 import { catalog } from './useCatalogStore';
-import { todayKey, useUserStore, type DailyQuestsState, type WeeklyQuestsState } from './useUserStore';
+import { todayKey, useUserStore, type DailyQuestsState, type UserState, type WeeklyQuestsState } from './useUserStore';
 
 /** Pula szablonów: z katalogu (mocki / `quest_templates`), przed jego wczytaniem – z mocków. */
 export function questPool(): Quest[] {
@@ -67,34 +67,51 @@ export function pinDesignQuests(now = new Date()) {
   });
 }
 
+/** Fragment stanu gracza, który zmienia postęp zadań (szkic składany przed jednym zapisem). */
+type QuestDraft = Pick<UserState, 'quests' | 'weeklyQuests' | 'counters'>;
+
+/**
+ * Postęp zadania w szkicu stanu (bez zapisu). Ukończenie: kolejka wypłaty XP i licznik wykonanych zadań.
+ * Zwraca null, gdy nic się nie zmienia (zadanie już ukończone albo ten sam postęp).
+ */
+function questProgressDraft(
+  d: QuestDraft,
+  q: Pick<Quest, 'id' | 'target' | 'period'>,
+  progress: number,
+): { draft: QuestDraft; completed: boolean } | null {
+  const weekly = questPeriod(q) === 'weekly';
+  const map = weekly ? d.weeklyQuests.progress : d.quests.progress;
+  const prev = map[q.id];
+  if (prev?.completed) return null;
+  const completed = progress >= q.target;
+  const next: QuestProgress = { questId: q.id, progress: Math.min(Math.round(progress * 10) / 10, q.target), completed };
+  if (prev && prev.progress === next.progress && !completed) return null;
+  const counters = { ...d.counters };
+  if (completed) {
+    if (q.id.startsWith('ch:')) counters.challengesDone += 1;
+    else if (weekly) counters.weeklyQuestsDone += 1;
+    else counters.dailyQuestsDone += 1;
+  }
+  const quests = weekly ? d.quests : { ...d.quests, progress: { ...map, [q.id]: next } };
+  return {
+    completed,
+    draft: {
+      quests: completed ? { ...quests, pendingRewards: [...quests.pendingRewards, q.id] } : quests,
+      weeklyQuests: weekly ? { ...d.weeklyQuests, progress: { ...map, [q.id]: next } } : d.weeklyQuests,
+      counters,
+    },
+  };
+}
+
 /**
  * Postęp zadania (dziennego / tygodniowego / wyzwania `ch:…`). Ukończenie: kolejka wypłaty XP i licznik
  * wykonanych zadań (osiągnięcia „Sumienny”, „Tygodniowy rytm”, „Duma gminy”). Zwraca true, gdy właśnie ukończono.
  */
 export function setQuestProgress(q: Pick<Quest, 'id' | 'target' | 'period'>, progress: number): boolean {
   const u = useUserStore.getState();
-  const weekly = questPeriod(q) === 'weekly';
-  const map = weekly ? u.weeklyQuests.progress : u.quests.progress;
-  if (map[q.id]?.completed) return false;
-  const completed = progress >= q.target;
-  const next: QuestProgress = { questId: q.id, progress: Math.min(Math.round(progress * 10) / 10, q.target), completed };
-  const counters = { ...u.counters };
-  if (completed) {
-    if (q.id.startsWith('ch:')) counters.challengesDone += 1;
-    else if (weekly) counters.weeklyQuestsDone += 1;
-    else counters.dailyQuestsDone += 1;
-  }
-  u.patch({
-    ...(weekly
-      ? { weeklyQuests: { ...u.weeklyQuests, progress: { ...map, [q.id]: next } } }
-      : { quests: { ...u.quests, progress: { ...map, [q.id]: next } } }),
-    ...(completed ? { counters } : {}),
-  });
-  if (completed) {
-    const now = useUserStore.getState();
-    now.patch({ quests: { ...now.quests, pendingRewards: [...now.quests.pendingRewards, q.id] } });
-  }
-  return completed;
+  const r = questProgressDraft(u, q, progress);
+  if (r) u.patch(r.draft);
+  return !!r?.completed;
 }
 
 const progressOf = (q: Quest) => {
@@ -114,17 +131,30 @@ export function bumpQuests(e: QuestEvent): string[] {
 }
 
 /**
- * Dystans: zadanie dnia liczy kilometry dnia (`today.km`), tygodniowe – kilometry tygodnia (`weeklyQuests.km`).
- * Zwraca true, gdy któreś właśnie ukończono.
+ * Dystans (odczyt GPS co kilka metrów): kilometry dnia (`today.km`), tygodnia (`weeklyQuests.km`) i łączne
+ * (`counters.totalKm`) oraz zadania dystansu – dzienne liczą kilometry dnia, tygodniowe – tygodnia. Wszystko jednym
+ * zapisem stanu gracza. Zwraca true, gdy któreś zadanie właśnie ukończono.
  */
-export function bumpDistanceQuests(deltaKm: number): boolean {
+export function addDistanceProgress(deltaKm: number): boolean {
   const { daily, weekly } = currentQuests();
   const u = useUserStore.getState();
+  const dayKm = u.today.km + deltaKm;
   const weekKm = u.weeklyQuests.km + deltaKm;
-  u.patch({ weeklyQuests: { ...u.weeklyQuests, km: weekKm } });
+  let d: QuestDraft = {
+    quests: u.quests,
+    weeklyQuests: { ...u.weeklyQuests, km: weekKm },
+    counters: { ...u.counters, totalKm: u.counters.totalKm + deltaKm },
+  };
   let done = false;
-  daily.filter((q) => q.kind === 'distance').forEach((q) => (done = setQuestProgress(q, Math.floor(useUserStore.getState().today.km * 10) / 10) || done));
-  weekly.filter((q) => q.kind === 'distance').forEach((q) => (done = setQuestProgress(q, Math.floor(weekKm * 10) / 10) || done));
+  const bump = (q: Quest, km: number) => {
+    const r = questProgressDraft(d, q, Math.floor(km * 10) / 10);
+    if (!r) return;
+    d = r.draft;
+    done = r.completed || done;
+  };
+  daily.filter((q) => q.kind === 'distance').forEach((q) => bump(q, dayKm));
+  weekly.filter((q) => q.kind === 'distance').forEach((q) => bump(q, weekKm));
+  u.patch({ ...d, today: { ...u.today, km: dayKm } });
   return done;
 }
 

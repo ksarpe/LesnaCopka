@@ -24,7 +24,23 @@ const { GMINY } = require('../../data/mock/gminy') as typeof import('../../data/
 const { BADGES, QUEST_POOL } = require('../../data/mock/game') as typeof import('../../data/mock/game');
 const { EMPTY_COUNTERS } = require('../../utils/counters') as typeof import('../../utils/counters');
 const { selectQuests, weekStartKey } = require('../../utils/quests') as typeof import('../../utils/quests');
+const { flushPersist, STORAGE_KEYS } = require('../storage') as typeof import('../storage');
+const AsyncStorage = require('@react-native-async-storage/async-storage') as {
+  setItem: jest.Mock<(key: string, value: string) => Promise<void>>;
+};
 /* eslint-enable @typescript-eslint/no-require-imports */
+
+const asyncSetItem = AsyncStorage.setItem;
+/** Klucze store'ów zapisane na dysk od ostatniego `mockClear` (bez powtórzeń, w kolejności). */
+const savedKeys = () => [...new Set(asyncSetItem.mock.calls.map(([key]) => key))];
+/** Ostatni zapisany stan store'u. */
+const saved = (key: string) => {
+  const last = asyncSetItem.mock.calls.filter(([k]) => k === key).at(-1);
+  return (JSON.parse(last![1]) as { state: Record<string, any> }).state;
+};
+const flushPromises = async () => {
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+};
 
 const ident = (speciesId: string, rarity: Identification['rarity'] = 'pospolity'): Identification => ({
   speciesId,
@@ -69,7 +85,11 @@ beforeEach(() => {
   useUserStore.getState().reset({ ...game.freshPlayerState({ id: 'u-test', homeGminaId: 'suprasl' }) });
 });
 
-afterEach(() => toast.mockRestore());
+afterEach(() => {
+  toast.mockRestore();
+  // Odłożone zapisy dystansu (persistLazily) – bez timera 30 s po teście.
+  flushPersist();
+});
 
 describe('zadania rotacyjne', () => {
   it('gracz dostaje 3 dzienne i 3 tygodniowe z losowania; scenariusz makiety przypina zadania z makiety', () => {
@@ -119,6 +139,43 @@ describe('zadania rotacyjne', () => {
     expect(useUserStore.getState().weeklyQuests).toMatchObject({ week: weekStartKey(todayKey()), progress: {}, km: 0 });
   });
 
+  it('dystans z GPS: stan od razu w pamięci (jeden zapis gracza na odczyt), na dysk leniwie; koniec wyprawy utrwala wynik', async () => {
+    usePool(['d-km-2', 'd-scan-3', 'd-epic-1', 'w-km-25', 'w-scan-40', 'w-trips-3']);
+    const trip = game.startTrip('suprasl');
+    await flushPromises();
+    asyncSetItem.mockClear();
+    let userSets = 0;
+    const off = useUserStore.subscribe(() => (userSets += 1));
+    game.addDistance(0.4);
+    game.addDistance(0.5);
+    off();
+    // Pamięć: wyprawa, kilometry dnia / tygodnia / łączne i zadania – od razu (UI, osiągnięcia, kolejka).
+    expect(useTripStore.getState().trips[trip.id].distanceKm).toBeCloseTo(0.9);
+    const u = useUserStore.getState();
+    expect(u.today.km).toBeCloseTo(0.9);
+    expect(u.weeklyQuests.km).toBeCloseTo(0.9);
+    expect(u.quests.progress['d-km-2']).toMatchObject({ progress: 0.9, completed: false });
+    expect(userSets).toBe(2);
+    // Dysk: nic przy każdym odczycie GPS.
+    await flushPromises();
+    expect(savedKeys()).toEqual([]);
+    // Ukończone zadanie (2 km) – wypłata XP to zwykły zapis gracza i wyprawy (XP wyprawy), razem z kilometrami.
+    game.addDistance(1.2);
+    await flushPromises();
+    expect(savedKeys()).toEqual([STORAGE_KEYS.user, STORAGE_KEYS.trips]);
+    expect(saved(STORAGE_KEYS.user).today.km).toBeCloseTo(2.1);
+    expect(saved(STORAGE_KEYS.trips).trips[trip.id].distanceKm).toBeCloseTo(2.1);
+    // Dalszy marsz znów czeka; koniec wyprawy – zwykły zapis z końcowym dystansem.
+    asyncSetItem.mockClear();
+    game.addDistance(0.3);
+    await flushPromises();
+    expect(savedKeys()).toEqual([]);
+    game.finishTrip();
+    await flushPromises();
+    expect(saved(STORAGE_KEYS.trips).trips[trip.id]).toMatchObject({ status: 'finished' });
+    expect(saved(STORAGE_KEYS.trips).trips[trip.id].distanceKm).toBeCloseTo(2.4);
+  });
+
   it('publikacja i reakcje (społeczność) – zadania i liczniki', () => {
     usePool(['d-publish', 'd-react-3', 'd-scan-3', 'w-publish-2', 'w-react-15', 'w-scan-40']);
     const trip = game.startTrip('suprasl');
@@ -161,5 +218,21 @@ describe('liczniki, odznaki i osiągnięcia z akcji gry', () => {
     game.addDistance(0.6);
     expect(useUserStore.getState().badges).toContain('km-100');
     expect(useUserStore.getState().counters.maxStreak).toBe(7);
+  });
+
+  it('przerwana seria: ostatni dzień w lesie przed wczoraj → 0 (pigułka i licznik), następna wyprawa zaczyna od 1', () => {
+    const daysAgo = (n: number) => todayKey(new Date(Date.now() - n * 86400000));
+    const u = useUserStore.getState();
+    u.patch({ lastActiveDate: daysAgo(1), user: { ...u.user, streakDays: 4 }, counters: { ...u.counters, streakDays: 4, maxStreak: 4 } });
+    game.ensureDailyReset();
+    expect(useUserStore.getState().user.streakDays).toBe(4); // wczoraj w lesie – seria trwa
+    useUserStore.getState().patch({ lastActiveDate: daysAgo(3) });
+    game.ensureDailyReset();
+    const s = useUserStore.getState();
+    expect(s.user.streakDays).toBe(0);
+    expect(s.counters).toMatchObject({ streakDays: 0, maxStreak: 4 });
+    game.startTrip('suprasl');
+    expect(useUserStore.getState().user.streakDays).toBe(1);
+    expect(useUserStore.getState().lastActiveDate).toBe(todayKey());
   });
 });

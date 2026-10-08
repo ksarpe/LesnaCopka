@@ -4,7 +4,7 @@
 
 > **Szkic – wymaga weryfikacji prawnika przed publikacją**
 
-Wersja robocza z 7 października 2026.
+Wersja robocza z 8 października 2026.
 
 Regulamin określa zasady korzystania z aplikacji mobilnej Grzybobranie – gry i dziennika grzybobrania. Przy pierwszym uruchomieniu Aplikacja prosi o akceptację regulaminu i Polityki prywatności – bez niej nie można z niej korzystać. O tym, jak chronimy Twoje dane, piszemy w Polityce prywatności.
 
@@ -33,7 +33,7 @@ Korzystanie z Aplikacji jest bezpłatne. [Do potwierdzenia – Aplikacja nie ma 
 
 Do pełnego działania potrzebny jest smartfon z systemem iOS lub Android, z aparatem i odbiornikiem GPS, a do synchronizacji, mapy okolicy i funkcji społecznościowych – dostęp do internetu. W lesie bez zasięgu gra działa offline, a dane wysyłają się po odzyskaniu połączenia.
 
-Rozpoznawanie gatunków działa na razie w trybie demonstracyjnym: wynik rozpoznania jest elementem gry i nie powstaje z analizy zdjęcia przez model rozpoznawania gatunków. [Do uzupełnienia, gdy powstanie model: opis działania rozpoznawania.]
+Gatunek grzyba rozpoznaje ze zdjęcia model sztucznej inteligencji (Claude firmy Anthropic): po naciśnięciu spustu zdjęcie trafia przez nasz serwer do modelu wyłącznie w celu rozpoznania. Wynik jest orientacyjny i może być błędny (§ 4). Gdy na zdjęciu nie widać grzyba albo ujęcie jest niewyraźne, Aplikacja nie zapisuje znaleziska. Liczba rozpoznań jest ograniczona (obecnie 60 na dobę), a bez internetu rozpoznanie nie działa.
 
 ## § 3. Konto i profil
 

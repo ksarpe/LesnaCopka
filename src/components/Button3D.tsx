@@ -1,6 +1,6 @@
 import * as Haptics from 'expo-haptics';
 import type { ReactNode } from 'react';
-import { Platform, Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 
 import { colors } from '@/theme/tokens';
@@ -30,6 +30,8 @@ interface Press3DProps {
   haptic?: boolean;
   children: ReactNode;
   accessibilityLabel?: string;
+  /** Trwa akcja (np. szukanie pozycji) – dla czytnika ekranu. */
+  busy?: boolean;
 }
 
 /**
@@ -50,6 +52,7 @@ export function Press3D({
   haptic = true,
   children,
   accessibilityLabel,
+  busy,
 }: Press3DProps) {
   const pressed = useSharedValue(0);
   const faceAnim = useAnimatedStyle(() => ({ transform: [{ translateY: pressed.value * pressDepth }] }));
@@ -57,6 +60,7 @@ export function Press3D({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
+      accessibilityState={{ disabled: !!disabled, busy: !!busy }}
       disabled={disabled}
       onPress={onPress}
       onLongPress={onLongPress}
@@ -102,6 +106,8 @@ interface Button3DProps {
   icon?: IconName;
   onPress?: () => void;
   disabled?: boolean;
+  /** Akcja w toku: kółko zamiast ikony, przycisk nieaktywny, ale w zwykłych kolorach (nie wygląda na wyłączony). */
+  loading?: boolean;
   /** lg = 20 px / padding 18 / cień 5; md = 18 px / padding 14 / cień 4 (karta wyzwania). */
   size?: 'lg' | 'md';
   /** Na ciemnym tle cień jest ciemniejszy (#4A7522). */
@@ -114,8 +120,9 @@ interface Button3DProps {
 /** Przycisk „Usuń…”: czerwień z palety (danger) i ciemniejszy cień. */
 const DANGER = { bg: colors.danger, shadow: '#A43C27', ink: colors.white, disabledBg: '#EBB7AB', disabledShadow: '#D19A8C' };
 
-export function Button3D({ title, icon, onPress, disabled, size = 'lg', onDark, tone = 'primary', style }: Button3DProps) {
+export function Button3D({ title, icon, onPress, disabled: off, loading, size = 'lg', onDark, tone = 'primary', style }: Button3DProps) {
   const lg = size === 'lg';
+  const disabled = off && !loading;
   const radius = lg ? 22 : 18;
   const danger = tone === 'danger';
   const bg = danger ? (disabled ? DANGER.disabledBg : DANGER.bg) : disabled ? '#C9D9B4' : colors.primary;
@@ -132,7 +139,8 @@ export function Button3D({ title, icon, onPress, disabled, size = 'lg', onDark, 
   return (
     <Press3D
       onPress={onPress}
-      disabled={disabled}
+      disabled={disabled || loading}
+      busy={loading}
       depth={lg ? 5 : 4}
       pressDepth={lg ? 4 : 3}
       shadowColor={shadow}
@@ -148,7 +156,11 @@ export function Button3D({ title, icon, onPress, disabled, size = 'lg', onDark, 
         gap: 8,
       }}
     >
-      {icon ? <Icon name={icon} filled size={24} color={ink} /> : null}
+      {loading ? (
+        <ActivityIndicator size="small" color={ink} style={{ width: 24, height: 24 }} />
+      ) : icon ? (
+        <Icon name={icon} filled size={24} color={ink} />
+      ) : null}
       <Txt f="b7" size={lg ? 20 : 18} color={ink} align="center">
         {title}
       </Txt>

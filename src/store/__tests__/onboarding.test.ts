@@ -1,33 +1,21 @@
 /**
- * Koniec onboardingu: stan w telefonie, zdarzenia kolejki (FIFO: profil → regulamin → koniec onboardingu),
- * ich RPC i przyjęcie onboardingu / regulaminu ze stanu serwera.
+ * Koniec onboardingu (jedno „Zaczynamy!”): stan w telefonie, zdarzenia kolejki (FIFO: regulamin → koniec onboardingu),
+ * ich RPC, przyjęcie onboardingu / regulaminu ze stanu serwera i gmina domowa z pierwszego wykrycia GPS.
  */
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import { LEGAL_VERSION, REGULAMIN } from '@/data/legal';
-import { EMPTY_DRAFT, type OnboardingDraft } from '@/utils/onboarding';
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 jest.mock('@react-native-async-storage/async-storage', () => require('@react-native-async-storage/async-storage/jest/async-storage-mock'));
 jest.mock('@/geo', () => ({ missingGminy: () => Promise.resolve([]) }));
 
-const { completeOnboarding, devShowOnboarding, devSkipOnboarding } = require('../onboarding') as typeof import('../onboarding');
+const { adoptHomeGmina, completeOnboarding, devShowOnboarding, devSkipOnboarding } = require('../onboarding') as typeof import('../onboarding');
 const { enqueueItem, makeItem, setOutboxEnabled, useOutboxStore } = require('../useOutboxStore') as typeof import('../useOutboxStore');
 const { initialUserState, useUserStore } = require('../useUserStore') as typeof import('../useUserStore');
 const { rpcFor, tolerated } = require('../../services/supabase/syncRpc') as typeof import('../../services/supabase/syncRpc');
-const { onboardingFromServer, parseGameState } = require('../../services/supabase/gameState') as typeof import('../../services/supabase/gameState');
+const { buildUserState, onboardingFromServer, parseGameState } = require('../../services/supabase/gameState') as typeof import('../../services/supabase/gameState');
 /* eslint-enable @typescript-eslint/no-require-imports */
-
-const DRAFT: OnboardingDraft = {
-  ...EMPTY_DRAFT,
-  safetyAck: true,
-  termsAccepted: true,
-  ageConfirmed: true,
-  name: 'Ola Wiśniewska',
-  handle: 'ola.las',
-  avatar: { kind: 'preset', id: 'wrzos' },
-  homeGminaId: 'hajnowka',
-};
 
 const types = () => useOutboxStore.getState().items.map((x) => x.type);
 
@@ -47,47 +35,46 @@ describe('wersja regulaminu', () => {
 });
 
 describe('completeOnboarding', () => {
-  it('tryb Supabase: profil, motyw avatara, regulamin i koniec onboardingu w kolejce – w tej kolejności', () => {
+  it('tryb Supabase: regulamin (wersja + czas) i koniec onboardingu w kolejce – w tej kolejności', () => {
     setOutboxEnabled(true);
-    const user = completeOnboarding(DRAFT, new Date('2026-10-07T08:00:00.000Z'));
+    completeOnboarding(new Date('2026-10-07T08:00:00.000Z'));
 
     const s = useUserStore.getState();
     expect(s.onboarded).toBe(true);
     expect(s.terms).toEqual({ version: LEGAL_VERSION, acceptedAt: '2026-10-07T08:00:00.000Z' });
-    expect(user).toMatchObject({ name: 'Ola Wiśniewska', firstName: 'Ola', handle: '@ola.las', homeGminaId: 'hajnowka' });
-    expect(s.user.avatar).toEqual({ kind: 'preset', id: 'wrzos' });
 
-    expect(types()).toEqual(['profile.update', 'photo.avatar', 'terms.accept', 'onboarding.complete']);
-    const [profile, , terms, done] = useOutboxStore.getState().items;
-    expect(profile.payload).toMatchObject({ displayName: 'Ola Wiśniewska', firstName: 'Ola', handle: 'ola.las', homeGminaId: 'hajnowka', avatarPreset: 'wrzos' });
+    expect(types()).toEqual(['terms.accept', 'onboarding.complete']);
+    const [terms, done] = useOutboxStore.getState().items;
     expect(terms.payload).toEqual({ version: LEGAL_VERSION });
     expect(done.payload).toEqual({ at: '2026-10-07T08:00:00.000Z' });
   });
 
-  it('bez zmiany avatara – bez zdarzenia zdjęcia; czekający profil zostaje przed regulaminem', () => {
+  it('konto już z serwera: profil bez zmian i bez `profile.update` (nick, imię, gmina – domyślne / z serwera)', () => {
     setOutboxEnabled(true);
+    useOutboxStore.getState().patch({ syncedUserId: 'user-1' });
+    const before = useUserStore.getState().user;
     useOutboxStore.getState().enqueue({ type: 'trip.start', payload: { tripId: 't1', gminaId: 'suprasl', startedAt: '2026-10-07T06:00:00.000Z' } });
-    useOutboxStore.getState().enqueue({
-      type: 'profile.update',
-      payload: { displayName: 'Stare', firstName: 'Stare', handle: 'stare', homeGminaId: 'suprasl' },
-    });
-    completeOnboarding({ ...DRAFT, avatar: undefined });
-    expect(types()).toEqual(['trip.start', 'profile.update', 'terms.accept', 'onboarding.complete']);
-    // W kolejce najnowsza wersja profilu (na miejscu starej).
-    expect(useOutboxStore.getState().items[1].payload).toMatchObject({ handle: 'ola.las' });
+    completeOnboarding();
+    expect(useUserStore.getState().user).toEqual(before);
+    expect(types()).toEqual(['trip.start', 'terms.accept', 'onboarding.complete']);
+  });
+
+  it('przed pierwszym stanem z serwera (np. offline): zamiast gracza demo – nowy gracz, gmina z GPS; nic z profilu na serwer', () => {
+    setOutboxEnabled(true);
+    useUserStore.getState().reset({ onboarded: false }); // gracz demo z makiety (Lv 14)
+    completeOnboarding(new Date('2026-10-07T08:00:00.000Z'));
+    const s = useUserStore.getState();
+    expect(s.user).toMatchObject({ name: 'Grzybiarz', handle: '@grzybiarz', level: 1, xp: 0 });
+    expect(Object.keys(s.atlas)).toHaveLength(0);
+    expect(s).toMatchObject({ onboarded: true, homeGminaPending: true, terms: { version: LEGAL_VERSION, acceptedAt: '2026-10-07T08:00:00.000Z' } });
+    expect(types()).toEqual(['terms.accept', 'onboarding.complete']);
   });
 
   it('tryb mock: tylko stan w telefonie (kolejka wyłączona)', () => {
-    completeOnboarding(DRAFT);
+    completeOnboarding();
     expect(useUserStore.getState().onboarded).toBe(true);
+    expect(useUserStore.getState().terms?.version).toBe(LEGAL_VERSION);
     expect(useOutboxStore.getState().items).toEqual([]);
-  });
-
-  it('niekompletny onboarding nic nie zapisuje', () => {
-    setOutboxEnabled(true);
-    expect(() => completeOnboarding({ ...DRAFT, ageConfirmed: false })).toThrow();
-    expect(useUserStore.getState().onboarded).toBe(false);
-    expect(types()).toEqual([]);
   });
 
   it('dev: pokaż / pomiń onboarding bez zdarzeń', () => {
@@ -99,8 +86,50 @@ describe('completeOnboarding', () => {
     expect(types()).toEqual([]);
   });
 
-  it('gracz demo i reset danych: onboarding zakończony (scenariusze z makiety bez zmian)', () => {
+  it('gracz demo i reset danych: onboarding zakończony, gmina domowa wybrana (scenariusze z makiety bez zmian)', () => {
     expect(initialUserState().onboarded).toBe(true);
+    expect(initialUserState().homeGminaPending).toBe(false);
+  });
+});
+
+describe('gmina domowa z pierwszego wykrycia GPS', () => {
+  const pending = () => useUserStore.getState().reset({ onboarded: true, homeGminaPending: true });
+
+  it('tryb mock: przyjęta od razu, potem już nie podmieniana', () => {
+    pending();
+    expect(adoptHomeGmina('hajnowka')).toBe(true);
+    expect(useUserStore.getState().user.homeGminaId).toBe('hajnowka');
+    expect(useUserStore.getState().homeGminaPending).toBe(false);
+    expect(adoptHomeGmina('suprasl')).toBe(false);
+    expect(useUserStore.getState().user.homeGminaId).toBe('hajnowka');
+  });
+
+  it('gracz z wybraną gminą (bez flagi – też zapisani sprzed tej wersji) – bez zmian', () => {
+    useUserStore.getState().reset();
+    const home = useUserStore.getState().user.homeGminaId;
+    expect(adoptHomeGmina('hajnowka')).toBe(false);
+    expect(useUserStore.getState().user.homeGminaId).toBe(home);
+  });
+
+  it('tryb Supabase: czeka na pierwsze przyjęcie stanu konta, potem `profile.update` z gminą', () => {
+    setOutboxEnabled(true);
+    pending();
+    expect(adoptHomeGmina('hajnowka')).toBe(false);
+    expect(types()).toEqual([]);
+
+    useOutboxStore.getState().patch({ syncedUserId: 'user-1' });
+    expect(adoptHomeGmina('hajnowka')).toBe(true);
+    expect(types()).toEqual(['profile.update']);
+    expect(useOutboxStore.getState().items[0].payload).toMatchObject({ homeGminaId: 'hajnowka' });
+  });
+
+  it('gmina domowa z serwera (np. wybrana na innym telefonie) kasuje flagę; bez niej na serwerze – flaga zostaje', () => {
+    const local = { ...initialUserState(), homeGminaPending: true };
+    const ctx = { now: Date.parse('2026-10-07T08:00:00.000Z'), gminaById: {}, finds: [], trips: [] };
+    const withHome = parseGameState({ userId: 'u', profile: { handle: 'ola', homeGminaId: 'hajnowka' } });
+    expect(buildUserState(withHome, local, 'merge', ctx)).toMatchObject({ homeGminaPending: false, user: { homeGminaId: 'hajnowka' } });
+    const noHome = parseGameState({ userId: 'u', profile: { handle: 'ola', homeGminaId: null } });
+    expect('homeGminaPending' in buildUserState(noHome, local, 'replace', ctx)).toBe(false);
   });
 });
 

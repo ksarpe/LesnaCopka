@@ -13,13 +13,15 @@ import { colors } from '@/theme/tokens';
 /** Wybór gminy domowej (Ustawienia → Konto): gminy z danymi gry + wyszukiwarka wszystkich 2479 gmin (GminaPicker). */
 export default function HomeGminaScreen() {
   const homeId = useUserStore((s) => s.user.homeGminaId);
+  // Nowy gracz bez wybranej gminy (onboarding o nią nie pyta) – wartość zastępcza nie jest „obecną” gminą.
+  const pending = useUserStore((s) => !!s.homeGminaPending);
 
   const back = () => (router.canGoBack() ? router.back() : router.navigate('/ustawienia' as Href));
 
   const choose = (o: GminaOption) => {
-    if (o.id !== homeId) {
+    if (o.id !== homeId || pending) {
       const u = useUserStore.getState();
-      u.patch({ user: { ...u.user, homeGminaId: o.id } });
+      u.patch({ user: { ...u.user, homeGminaId: o.id }, homeGminaPending: false });
       void syncProfile({ homeGminaId: o.id });
       ui.toast(`Gmina domowa: ${o.title}`, 'home_pin');
     }
@@ -42,7 +44,7 @@ export default function HomeGminaScreen() {
           się w gminie, w której faktycznie jesteś.
         </Txt>
 
-        <GminaPicker selectedId={homeId} onSelect={choose} />
+        <GminaPicker selectedId={pending ? null : homeId} onSelect={choose} />
       </View>
     </Screen>
   );

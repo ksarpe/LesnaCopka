@@ -68,7 +68,7 @@ export default function SpeciesScreen() {
 
   return (
     <Screen hero>
-      <SpeciesHero rarity={species.rarity} onBack={back} label={entry ? 'zdjęcie z Twojego atlasu' : 'zdjęcie gatunku'} photoUri={photoUri} />
+      <SpeciesHero rarity={species.rarity} onBack={back} label={photoUri ? `Twoje zdjęcie: ${species.name}` : species.name} photoUri={photoUri} />
       <Sheet>
         <SpeciesTitle species={species} />
         <SpeciesTags species={species} />

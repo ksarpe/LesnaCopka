@@ -416,6 +416,13 @@ deno_version = 2
 enabled = true
 verify_jwt = true
 
+# Rozpoznanie grzyba ze zdjęcia (Claude – Anthropic API). Wymaga sesji gracza (JWT, także konta anonimowego);
+# sekret ANTHROPIC_API_KEY: lokalnie supabase/functions/.env (wzór: functions/identify/.env.example), w chmurze
+# `npx supabase secrets set`. Limit kosztów: RPC identify_begin / identify_finish (migracja 20261014100000_identify.sql).
+[functions.identify]
+enabled = true
+verify_jwt = true
+
 [analytics]
 # Wyłączone lokalnie: na Windows wymaga wystawienia demona Dockera na tcp://localhost:2375.
 enabled = false

@@ -6,6 +6,7 @@ import { Button3D } from '@/components/Button3D';
 import { Icon } from '@/components/Icon';
 import { Screen } from '@/components/Screen';
 import {
+  AiSafetyNote,
   GminaSeasonCard,
   isPoisonous,
   PoisonBanner,
@@ -26,9 +27,8 @@ import { useTripStore } from '@/store/useTripStore';
 import { colors, shadows } from '@/theme/tokens';
 import type { Find } from '@/types';
 import { fmtWeight } from '@/utils/format';
+import { LOW_CONFIDENCE, partsHint } from '@/utils/identify';
 import { speciesLookalikes } from '@/utils/species';
-
-const LOW_CONFIDENCE = 0.6;
 
 export default function AnalysisScreen() {
   const { findId } = useLocalSearchParams<{ findId: string }>();
@@ -76,6 +76,8 @@ function AnalysisBody({ find, onClaimStart }: { find: Find; onClaimStart: () => 
   // Trujący albo chroniony – tylko zdjęcie (decyzja z createPendingFind: collected = false).
   const photoOnly = poison || !find.collected;
   const d = find.dimensions;
+  // Na zdjęciu zabrakło części ważnej dla odróżnienia sobowtóra (np. spodu kapelusza) – podpowiedź na następny raz.
+  const hint = partsHint(species, find.visibleParts);
 
   const claim = () => {
     onClaimStart();
@@ -94,9 +96,18 @@ function AnalysisBody({ find, onClaimStart }: { find: Find; onClaimStart: () => 
       <Sheet>
         <SpeciesTitle species={species} />
         <SpeciesTags species={species} xxl={find.xxl && !photoOnly} />
+        <AiSafetyNote />
         {poison ? <PoisonBanner deadly={species.edibility === 'smiertelny'} /> : null}
         {species.protection ? <ProtectedBanner protection={species.protection} /> : null}
         <SafetyBanner lookalikes={speciesLookalikes(species)} />
+        {hint ? (
+          <View style={{ flexDirection: 'row', gap: 8, alignItems: 'flex-start', paddingHorizontal: 4 }}>
+            <Icon name="tips_and_updates" size={16} color={colors.muted} />
+            <Txt f="n6" size={12} color={colors.muted} style={{ flex: 1 }}>
+              {hint}
+            </Txt>
+          </View>
+        ) : null}
         <StatGrid
           items={[
             { label: 'Kapelusz Ø', value: `${d.capCm} cm` },
@@ -137,10 +148,11 @@ function LowConfidence({ find }: { find: Find }) {
             Nie jestem pewien
           </Txt>
           <Txt f="n6" size={15} color={colors.muted}>
-            Zeskanuj ponownie – obejdź grzyba dookoła i odsłoń podstawę trzonu. Przy pewności poniżej 60% nie przyznajemy
-            nagrody, żeby nie pomylić gatunków.
+            Zrób nowe zdjęcie – z bliska, z boku, tak by było widać kapelusz, jego spód i trzon; odsłoń podstawę trzonu.
+            Przy pewności poniżej 60% nie przyznajemy nagrody, żeby nie pomylić gatunków.
           </Txt>
         </View>
+        <AiSafetyNote />
         <View
           style={{ backgroundColor: colors.card, borderRadius: 22, padding: 16, gap: 12, boxShadow: shadows.card }}
         >

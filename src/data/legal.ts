@@ -49,8 +49,8 @@ const p = (text: string): LegalBlock => ({ kind: 'p', text });
 const list = (...items: string[]): LegalBlock => ({ kind: 'list', items });
 
 /**
- * Najważniejsza zasada bezpieczeństwa (ramka na początku regulaminu i krok „Bezpieczeństwo” w onboardingu
- * – app/onboarding.tsx). Jedno źródło tekstu.
+ * Najważniejsza zasada bezpieczeństwa (ramka na początku regulaminu i na ekranie powitalnym – app/onboarding.tsx).
+ * Jedno źródło tekstu.
  */
 export const SAFETY_NOTICE = {
   title: 'Najważniejsze: Aplikacja nie mówi, czy grzyb jest jadalny',
@@ -60,7 +60,7 @@ export const SAFETY_NOTICE = {
     'sanitarno-epidemiologicznej.',
 } as const;
 
-/** Zasady bezpieczeństwa z § 4 regulaminu (też w onboardingu). */
+/** Zasady bezpieczeństwa z § 4 regulaminu (ekran powitalny linkuje do nich). */
 export const SAFETY_RULES: readonly string[] = [
   'Nie jedz grzyba tylko dlatego, że Aplikacja tak go rozpoznała. Zbieraj wyłącznie gatunki, które znasz na pewno.',
   'Każdy grzyb, co do którego masz wątpliwości, przed przyrządzeniem pokaż grzyboznawcy (klasyfikatorowi ' +
@@ -71,12 +71,15 @@ export const SAFETY_RULES: readonly string[] = [
     'resztki grzybów i potrawy – pomogą ustalić gatunek.',
 ];
 
+/** Zawsze widoczna notka przy wyniku rozpoznania (Analiza, Nagroda – AiSafetyNote w src/components/SpeciesSheet.tsx). */
+export const AI_RESULT_NOTICE = 'Rozpoznanie AI może się mylić – nie jedz grzyba tylko na podstawie aplikacji.';
+
 export const REGULAMIN: LegalDoc = {
   id: 'regulamin',
   title: 'Regulamin',
   fullTitle: 'Regulamin aplikacji Grzybobranie',
   file: 'regulamin.md',
-  updated: '2026-10-07',
+  updated: '2026-10-08',
   intro: [
     p(
       'Regulamin określa zasady korzystania z aplikacji mobilnej Grzybobranie – gry i dziennika grzybobrania. ' +
@@ -123,9 +126,10 @@ export const REGULAMIN: LegalDoc = {
             'gra działa offline, a dane wysyłają się po odzyskaniu połączenia.',
         ),
         p(
-          'Rozpoznawanie gatunków działa na razie w trybie demonstracyjnym: wynik rozpoznania jest elementem gry ' +
-            'i nie powstaje z analizy zdjęcia przez model rozpoznawania gatunków. [Do uzupełnienia, gdy powstanie ' +
-            'model: opis działania rozpoznawania.]',
+          'Gatunek grzyba rozpoznaje ze zdjęcia model sztucznej inteligencji (Claude firmy Anthropic): po naciśnięciu ' +
+            'spustu zdjęcie trafia przez nasz serwer do modelu wyłącznie w celu rozpoznania. Wynik jest orientacyjny ' +
+            'i może być błędny (§ 4). Gdy na zdjęciu nie widać grzyba albo ujęcie jest niewyraźne, Aplikacja nie zapisuje ' +
+            'znaleziska. Liczba rozpoznań jest ograniczona (obecnie 60 na dobę), a bez internetu rozpoznanie nie działa.',
         ),
       ],
     },
@@ -313,7 +317,7 @@ export const POLITYKA_PRYWATNOSCI: LegalDoc = {
   title: 'Polityka prywatności',
   fullTitle: 'Polityka prywatności aplikacji Grzybobranie',
   file: 'polityka-prywatnosci.md',
-  updated: '2026-10-07',
+  updated: '2026-10-08',
   intro: [
     p(
       'Wyjaśniamy, jakie dane przetwarza aplikacja Grzybobranie (dalej: „Aplikacja”), po co, jak długo i jakie masz ' +
@@ -410,9 +414,15 @@ export const POLITYKA_PRYWATNOSCI: LegalDoc = {
         list(
           'Zdjęcia zmniejszamy i zapisujemy od nowa, co usuwa metadane EXIF – w tym współrzędne GPS, datę wykonania ' +
             'i model telefonu.',
+          '**Rozpoznanie gatunku** – zdjęcie zrobione spustem skanu (już bez EXIF) wraz z bieżącym miesiącem ' +
+            'i województwem wysyłamy przez nasz serwer do Anthropic (model AI Claude) wyłącznie po to, by rozpoznać ' +
+            'grzyba. Nie wysyłamy gminy, współrzędnych, nicku ani innych danych Konta, a Aplikacja nie używa tego ' +
+            'zdjęcia do żadnego innego celu. Na serwerze zapisujemy tylko dziennik wywołań (czas, status, zużycie – bez ' +
+            'zdjęcia i wyniku) do limitu rozpoznań i kontroli kosztów. [Do weryfikacji prawnej: rola Anthropic jako ' +
+            'podmiotu przetwarzającego, umowa powierzenia, okres przechowywania zapytań u dostawcy, transfer do USA.]',
           '**Zdjęcia znalezisk** przechowujemy na telefonie, a po synchronizacji także w prywatnym magazynie plików ' +
-            'powiązanym z Twoim Kontem – dostęp do nich masz tylko Ty. [Docelowo także serwerowa funkcja ' +
-            'rozpoznawania gatunku – do uzupełnienia, gdy powstanie.]',
+            'powiązanym z Twoim Kontem – dostęp do nich masz tylko Ty. Zdjęcie odrzucone przy rozpoznaniu („to nie ' +
+            'grzyb”, niewyraźne ujęcie) od razu usuwamy z telefonu.',
           '**Okładka wpisu** (zdjęcie znaleziska dołączone do opublikowanej wyprawy) i **zdjęcie profilowe** są ' +
             'publiczne: widzą je inni Użytkownicy, a technicznie może je otworzyć każdy, kto zna ich losowy adres.',
         ),
@@ -513,6 +523,9 @@ export const POLITYKA_PRYWATNOSCI: LegalDoc = {
             'standardowe klauzule umowne.]',
           '**OpenFreeMap** – serwer kafli mapy (adres IP i numery kafli, punkt 3).',
           '**Open-Meteo** – serwis pogody do prognozy grzybowej (adres IP i współrzędne zaokrąglone do 0,1°, punkt 3).',
+          '**Anthropic** – model AI Claude rozpoznający gatunek ze zdjęcia (zdjęcie, miesiąc i województwo, punkt 4) ' +
+            'jako podmiot przetwarzający. [Do weryfikacji: umowa powierzenia (DPA), okres przechowywania zapytań ' +
+            'u dostawcy, transfer do USA – EU-US Data Privacy Framework albo standardowe klauzule umowne.]',
           '**Dostawca poczty e-mail** – wysyła kody logowania na adres Konta zabezpieczonego e-mailem. [Do uzupełnienia: ' +
             'dostawca serwera poczty (SMTP) i podstawa przekazania.]',
           '**Inni Użytkownicy** – w zakresie opisanym w punktach 5 i 6.',
@@ -528,6 +541,7 @@ export const POLITYKA_PRYWATNOSCI: LegalDoc = {
         list(
           'pozycja GPS i ślad wyprawy – tylko w pamięci telefonu, do zamknięcia Aplikacji;',
           'pogoda dla przybliżonej okolicy (obszar 0,1°) – w pamięci telefonu do 3 godzin;',
+          'dziennik rozpoznań zdjęć na serwerze (czas, status, zużycie – bez zdjęcia i wyniku) – 7 dni;',
           'kafle mapy na telefonie – pamięć podręczna do ok. 30 MB (najdawniej używane usuwamy same), mapy offline – do ' +
             'usunięcia w Ustawieniach → Mapy offline albo odinstalowania Aplikacji;',
           'Konto, profil, dane gry i Treści – do usunięcia Konta; Konto nieaktywne przez [okres] możemy usunąć ' +

@@ -52,6 +52,9 @@ export async function detectRegion(services: Services, opts: { askPermission: bo
 /**
  * Region z LocationService; ponawia wykrycie, gdy zmienią się symulacje GPS / gminy / uprawnień
  * oraz po powrocie aplikacji na pierwszy plan (bez ciągłego śledzenia – oszczędność baterii).
+ * Samo wejście na ekran nie pokazuje systemowego pytania o lokalizację: bez zgody wykrycie kończy się błędem
+ * `PERMISSION`, a Start pokazuje kartę „Włącz lokalizację” – pytamy dopiero po dotknięciu (`retry`) albo przy starcie
+ * wyprawy (just-in-time; onboarding o zgody nie pyta).
  */
 export function useRegion() {
   const services = useServices();
@@ -63,7 +66,7 @@ export function useRegion() {
   const point = useSimStore((s) => s.simPoint);
 
   useEffect(() => {
-    detectRegion(services, { askPermission: true });
+    detectRegion(services, { askPermission: false });
   }, [services, gps, forced, perm, source, point]);
 
   useEffect(() => {

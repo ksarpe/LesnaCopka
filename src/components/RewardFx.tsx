@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { memo, useEffect, useMemo } from 'react';
 import { View } from 'react-native';
 import Animated, {
   cancelAnimation,
@@ -13,8 +13,9 @@ import Svg, { Circle, Defs, Path, RadialGradient, Stop } from 'react-native-svg'
 /**
  * Promienie: repeating-conic-gradient(rgba(255,255,255,.07) 0 9°, transparent 9° 18°)
  * z maską radial-gradient(#000 20%, transparent 68%) – 640 px, 40 s/obrót.
+ * Efekty są `memo` – duże SVG nie przebudowują się, gdy ekran Nagroda przerysowuje się z innego powodu.
  */
-export function Rays({ size = 640 }: { size?: number }) {
+export const Rays = memo(function Rays({ size = 640 }: { size?: number }) {
   const rot = useSharedValue(0);
   useEffect(() => {
     rot.value = withRepeat(withTiming(360, { duration: 40000, easing: Easing.linear }), -1, false);
@@ -48,13 +49,13 @@ export function Rays({ size = 640 }: { size?: number }) {
       </Svg>
     </Animated.View>
   );
-}
+});
 
 /**
  * Pulsująca poświata: koło (rozmiar zdjęcia + 2×18 px) w kolorze rzadkości z blur(26px),
  * pulse 2.2 s (opacity .55 → 1, scale 1 → 1.08). Rozmycie odwzorowane gradientem radialnym.
  */
-export function Glow({ color, photoSize }: { color: string; photoSize: number }) {
+export const Glow = memo(function Glow({ color, photoSize }: { color: string; photoSize: number }) {
   const t = useSharedValue(0);
   useEffect(() => {
     t.value = withRepeat(withTiming(1, { duration: 1100, easing: Easing.inOut(Easing.ease) }), -1, true);
@@ -92,10 +93,10 @@ export function Glow({ color, photoSize }: { color: string; photoSize: number })
       </Svg>
     </Animated.View>
   );
-}
+});
 
 /** Rozbłysk przy LEVEL UP: rozszerzający się pierścień. */
-export function Burst({ trigger, color }: { trigger: number; color: string }) {
+export const Burst = memo(function Burst({ trigger, color }: { trigger: number; color: string }) {
   const t = useSharedValue(1);
   useEffect(() => {
     if (!trigger) return;
@@ -111,4 +112,4 @@ export function Burst({ trigger, color }: { trigger: number; color: string }) {
       <Animated.View style={[{ width: 170, height: 170, borderRadius: 85, borderWidth: 6, borderColor: color }, style]} />
     </View>
   );
-}
+});

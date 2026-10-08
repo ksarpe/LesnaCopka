@@ -35,7 +35,7 @@ import type {
   UserAvatar,
   XpBreakdown,
 } from '@/types';
-import { countersFromServer, normalizeCounters, type PlayerCounters } from '@/utils/counters';
+import { countersFromServer, effectiveStreak, normalizeCounters, type PlayerCounters } from '@/utils/counters';
 import { remotePhotoPath } from '@/utils/findPhoto';
 import { firstNameOf } from '@/utils/profile';
 import { selectQuests, weekStartKey } from '@/utils/quests';
@@ -501,11 +501,8 @@ export function mergeTripsAndFinds(local: TripsSnapshot, state: ServerGameState,
   return { trips, finds, activeTripId: active?.id ?? null };
 }
 
-/** Seria dni do pokazania: przerwana, gdy ostatnia aktywność była przed wczoraj (jak bumpStreakForToday). */
-export function effectiveStreak(streakDays: number, lastActiveDate: string | null, today: string, yesterday: string): number {
-  if (!lastActiveDate) return 0;
-  return lastActiveDate === today || lastActiveDate === yesterday ? streakDays : 0;
-}
+/** Seria dni do pokazania (reguła wspólna z telefonem – src/utils/counters.ts). */
+export { effectiveStreak };
 
 export interface DerivedCounters {
   borowikiKnyszynska: number;
@@ -712,6 +709,8 @@ export function buildUserState(state: ServerGameState, local: UserData, mode: Me
   const onboarding = onboardingFromServer(p, { onboarded: local.onboarded, terms: local.terms }, mode);
   out.onboarded = onboarding.onboarded;
   if ('terms' in onboarding) out.terms = onboarding.terms;
+  // Gmina domowa z serwera (wybrana na innym telefonie / wcześniej) – nie podmieniamy jej wykryciem GPS (adoptHomeGmina).
+  if (p.homeGminaId && local.homeGminaPending) out.homeGminaPending = false;
   if (!merge) {
     // Wkład w punkty gminy (mock rankingu): XP wypraw z bieżącego tygodnia.
     const from = weekStart(ctx.now);

@@ -14,6 +14,7 @@ import { NotificationsPanel } from '@/dev/NotificationsPanel';
 import { devSimulateWalk } from '@/dev/simWalk';
 import { useRegionStore } from '@/hooks/useRegion';
 import { useServices } from '@/services';
+import { identifyAvailable } from '@/services/live/identify';
 import type { PermissionKind, PermissionStatus } from '@/services/types';
 import {
   addDistance,
@@ -33,10 +34,17 @@ import { useSimStore } from '@/store/useSimStore';
 import { useActiveTrip } from '@/store/useTripStore';
 import { ui } from '@/store/useUiStore';
 import { useUserStore } from '@/store/useUserStore';
-import { colors, rarity as rarityTokens, RARITY_ORDER } from '@/theme/tokens';
-import type { Rarity } from '@/types';
+import { colors, rarity as rarityTokens } from '@/theme/tokens';
+import type { ScanForce } from '@/utils/identify';
 
 const CORE = ['suprasl', 'michalowo', 'hajnowka', 'narewka', 'grodek'];
+
+const SCAN_FORCE: { v: ScanForce; l: string }[] = [
+  { v: 'off', l: 'Wyłączone (prawdziwe rozpoznanie)' },
+  { v: 'species', l: 'Gatunek' },
+  { v: 'not_mushroom', l: 'Nie grzyb' },
+  { v: 'unclear', l: 'Niewyraźne' },
+];
 
 /** W wydaniu (bez EXPO_PUBLIC_DEV_TOOLS=1) panelu nie ma – także pod linkiem `grzybobranie://dev`. */
 export default function DevRoute() {
@@ -176,8 +184,8 @@ function DevPanel() {
           </Chips>
           {sim.cameraSource === 'device' ? (
             <Txt f="n6" size={12} color={colors.muted}>
-              Prawdziwy podgląd w skanie 360° i zdjęcie znaleziska spustem (expo-camera). Postęp skanu i gatunek nadal
-              symulowane. Zgodę nadaje system; bez kamery (np. komputer) skan działa na placeholderze.
+              Prawdziwy podgląd w skanie i zdjęcie spustem (expo-camera) – to zdjęcie rozpoznaje serwer. Zgodę nadaje
+              system; bez kamery (np. komputer) skan pokazuje „Brak aparatu” z wyborem zdjęcia z galerii (tylko dev).
             </Txt>
           ) : (
             <PermissionRow kind="camera" label="Zgoda: aparat" />
@@ -193,47 +201,41 @@ function DevPanel() {
           </Row>
         </Section>
 
-        <Section title="Wynik skanu" icon="center_focus_strong">
-          <Label>Gatunek</Label>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, paddingRight: 8 }}>
-            <Chip label="Losowo" active={sim.scan.speciesId == null} onPress={() => sim.setScan({ speciesId: null })} />
-            {species.map((s) => (
-              <Chip
-                key={s.id}
-                label={s.name.replace(/ \(.*\)$/, '')}
-                active={sim.scan.speciesId === s.id}
-                onPress={() => sim.setScan({ speciesId: s.id })}
-              />
-            ))}
-          </ScrollView>
-          <Label>Rzadkość</Label>
+        <Section title="Wynik skanu (dev)" icon="center_focus_strong">
+          <Txt f="n6" size={12} color={colors.muted}>
+            {identifyAvailable()
+              ? 'Domyślnie zdjęcie rozpoznaje serwer (Edge Function identify → Claude). '
+              : 'Brak adresu serwera w konfiguracji – bez wymuszenia skan kończy się komunikatem „Rozpoznawanie wymaga połączenia z serwerem”. '}
+            Wymuszony wynik zastępuje rozpoznanie: nie wysyła zdjęcia, działa bez aparatu i sieci, nic nie kosztuje.
+          </Txt>
+          <Label>Wymuś wynik skanu</Label>
           <Chips>
-            <Chip label="Z gatunku" active={sim.scan.rarity == null} onPress={() => sim.setScan({ rarity: null })} />
-            {RARITY_ORDER.map((r: Rarity) => (
-              <Chip
-                key={r}
-                label={rarityTokens[r].label}
-                dot={rarityTokens[r].color}
-                active={sim.scan.rarity === r}
-                onPress={() => sim.setScan({ rarity: r })}
-              />
+            {SCAN_FORCE.map((o) => (
+              <Chip key={o.v} label={o.l} active={sim.scan.force === o.v} onPress={() => sim.setScan({ force: o.v })} />
             ))}
           </Chips>
-          <Label>Okaz XXL</Label>
-          <Chips>
-            <Chip label="Auto" active={sim.scan.xxl == null} onPress={() => sim.setScan({ xxl: null })} />
-            <Chip label="Tak" active={sim.scan.xxl === true} onPress={() => sim.setScan({ xxl: true })} />
-            <Chip label="Nie" active={sim.scan.xxl === false} onPress={() => sim.setScan({ xxl: false })} />
-          </Chips>
-          <Row label="Gatunek trujący" hint="Losuje gatunek trujący (gdy nie wybrano gatunku)">
-            <Toggle value={sim.scan.poisonous} onChange={(v) => sim.setScan({ poisonous: v })} />
-          </Row>
-          <Row label="Niska pewność (<60%)" hint="Ekran „Nie jestem pewien, zeskanuj ponownie”">
-            <Toggle value={sim.scan.lowConfidence} onChange={(v) => sim.setScan({ lowConfidence: v })} />
-          </Row>
-          <Row label="Tryb dev: spust zawsze aktywny" hint="Pozwala zrobić zdjęcie przed 100%">
-            <Toggle value={sim.devMode} onChange={(v) => sim.set({ devMode: v })} />
-          </Row>
+          {sim.scan.force === 'species' ? (
+            <>
+              <Label>Gatunek</Label>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6, paddingRight: 8 }}>
+                {species.map((s, i) => (
+                  <Chip
+                    key={s.id}
+                    label={s.name.replace(/ \(.*\)$/, '')}
+                    dot={rarityTokens[s.rarity].color}
+                    active={sim.scan.speciesId === s.id || (sim.scan.speciesId == null && i === 0)}
+                    onPress={() => sim.setScan({ speciesId: s.id })}
+                  />
+                ))}
+              </ScrollView>
+              <Row label="Okaz XXL" hint="Wymiary jak z odniesieniem skali na zdjęciu (×1,35 typowych); kępki – bez XXL">
+                <Toggle value={sim.scan.xxl} onChange={(v) => sim.setScan({ xxl: v })} />
+              </Row>
+              <Row label="Niska pewność (<60%)" hint="Ekran „Nie jestem pewien” z możliwymi gatunkami">
+                <Toggle value={sim.scan.lowConfidence} onChange={(v) => sim.setScan({ lowConfidence: v })} />
+              </Row>
+            </>
+          ) : null}
         </Section>
 
         <Section title="Wyprawa" icon="hiking">

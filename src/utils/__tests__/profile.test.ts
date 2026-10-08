@@ -76,4 +76,22 @@ describe('profil – wyszukiwanie gminy', () => {
     expect(searchByName(gminy, '  ')).toEqual([]);
     expect(searchByName(gminy, 'o', 2)).toHaveLength(2);
   });
+
+  it('limit: najpierw trafienia od początku nazwy, potem fragmenty', () => {
+    // „m”: 2 od początku (Michałowo, Mońki), dalej fragmenty (Łomża, Wysokie Mazowieckie).
+    expect(searchByName(gminy, 'm', 1).map((g) => g.name)).toEqual(['Michałowo']);
+    expect(searchByName(gminy, 'm', 3).map((g) => g.name)).toEqual(['Michałowo', 'Mońki', 'Łomża']);
+  });
+
+  it('indeks liczony raz na listę: nowa tablica = nowe wyniki, wejściowa lista bez zmian', () => {
+    const list = [{ name: 'Zabłudów' }, { name: 'Choroszcz' }, { name: 'Czarna Białostocka' }];
+    const before = list.map((g) => g.name);
+    expect(searchByName(list, 'ch').map((g) => g.name)).toEqual(['Choroszcz']);
+    expect(searchByName(list, 'ch').map((g) => g.name)).toEqual(['Choroszcz']);
+    expect(list.map((g) => g.name)).toEqual(before);
+    const next = [...list, { name: 'Chotyłów' }];
+    expect(searchByName(next, 'ch').map((g) => g.name)).toEqual(['Choroszcz', 'Chotyłów']);
+    // Zwraca elementy listy (te same obiekty), nie kopie.
+    expect(searchByName(next, 'zab')[0]).toBe(list[0]);
+  });
 });

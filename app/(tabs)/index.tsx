@@ -1,4 +1,5 @@
-import { router } from 'expo-router';
+import { router, type Href } from 'expo-router';
+import { memo, useState } from 'react';
 import { Linking, Platform, Pressable, View } from 'react-native';
 
 import { AreaMapView } from '@/components/AreaMap';
@@ -27,13 +28,14 @@ import { useCatalogStore } from '@/store/useCatalogStore';
 import { useSimStore } from '@/store/useSimStore';
 import { tripElapsedMs, useActiveTrip, useTripStore } from '@/store/useTripStore';
 import { ui } from '@/store/useUiStore';
-import { useUserStore } from '@/store/useUserStore';
+import { todayKey, useUserStore } from '@/store/useUserStore';
 import { colors, mapColors, rarity as rarityTokens, shadows } from '@/theme/tokens';
 import type { ServiceErrorCode } from '@/services/types';
-import type { Find, Quest } from '@/types';
+import type { Find, Gmina, Quest, Trip } from '@/types';
 import { fmtDistanceM, fmtInt, fmtKm, fmtTimer, fmtWeight, gminaSubtitle, gminaTitle, plural } from '@/utils/format';
 import { levelProgress, levelThreshold, levelTitle } from '@/utils/xp';
 
+// Gmina domowa z pierwszego wykrycia GPS (nowy gracz): src/components/HomeGminaFromGps.tsx w głównym layoucie.
 export default function StartScreen() {
   const trip = useActiveTrip();
   return (
@@ -47,8 +49,20 @@ export default function StartScreen() {
   );
 }
 
+/** Podpowiedź po dotknięciu pigułki serii: odmiana „dzień / dni” i to, czy dziś już była wyprawa. */
+function streakHint(days: number, lastActiveDate?: string): string {
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const today = lastActiveDate === todayKey();
+  const alive = today || lastActiveDate === todayKey(yesterday);
+  if (!days || !alive) return 'Wyrusz dziś na grzyby i zacznij serię';
+  const label = `Seria: ${days} ${plural(days, 'dzień', 'dni', 'dni')}`;
+  return today ? `${label} – wróć jutro, by ją przedłużyć` : `${label} – wyrusz dziś, by jej nie przerwać`;
+}
+
 function Header() {
   const user = useUserStore((s) => s.user);
+  const lastActiveDate = useUserStore((s) => s.lastActiveDate);
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
       <Pressable
@@ -96,7 +110,7 @@ function Header() {
         padH={10}
         gap={4}
         style={{ alignSelf: 'center' }}
-        onPress={() => ui.toast(`Seria ${user.streakDays} dni – wróć jutro, by ją przedłużyć`, 'local_fire_department')}
+        onPress={() => ui.toast(streakHint(user.streakDays, lastActiveDate), 'local_fire_department')}
       />
     </View>
   );
@@ -122,18 +136,41 @@ function XpCard() {
 
 /* ───────────────────────── Stan „idle” ───────────────────────── */
 
+/** Gmina domowa gracza (gdy już ją ma i znamy jej nazwę) – zapasowy start wyprawy bez gminy z GPS. */
+function useHomeGmina() {
+  const homeId = useUserStore((s) => (s.homeGminaPending ? null : s.user.homeGminaId || null));
+  return useCatalogStore((s) => (homeId ? s.gminaById[homeId] : undefined)) ?? null;
+}
+
 function Idle() {
   const services = useServices();
   const { status, region, error, retry } = useRegion();
   const locPerm = useSimStore((s) => s.permissions.location);
+  const home = useHomeGmina();
+  const [locating, setLocating] = useState(false);
+  // System jeszcze nie pytał o lokalizację (onboarding o nią nie prosi): zamiast błędu – zaproszenie z jednym
+  // przyciskiem; „Rozpocznij grzybobranie” też działa (zapyta o zgodę i od razu wystartuje).
+  const notAsked = status === 'error' && error?.code === 'PERMISSION' && locPerm === 'undetermined';
+  const denied = locPerm === 'denied';
+  // Szukanie pozycji (wejście na ekran albo „Rozpocznij”) trwa do kilkunastu sekund – przycisk mówi, co się dzieje.
+  const searching = locating || (!region && (status === 'loading' || status === 'idle'));
+  // Gmina nie wykryta (GPS wyłączony, brak sygnału, poza Polską…), ale nie przez odmowę zgody – zamiast martwego
+  // przycisku start w gminie domowej (skan i tak przypisuje znaleziska do niej, gdy nie ma pozycji).
+  const fallback = !region && !searching && status === 'error' && !notAsked && !denied ? home : null;
 
   const onStart = async () => {
+    if (fallback) {
+      startTrip(fallback.id);
+      return;
+    }
     if (!region) {
-      if (locPerm === 'denied') {
+      if (denied) {
         openLocationSettings();
         return;
       }
+      setLocating(true);
       const r = await retry();
+      setLocating(false);
       if (!r) return;
       startTrip(r.gmina.id);
       return;
@@ -149,17 +186,20 @@ function Idle() {
     <View style={{ gap: 16 }}>
       {region ? (
         <RegionCard />
+      ) : notAsked ? (
+        <LocationPrompt onEnable={retry} />
       ) : status === 'error' ? (
-        <LocationError code={error?.code} onRetry={retry} denied={locPerm === 'denied'} />
+        <LocationError code={error?.code} onRetry={retry} denied={denied} home={home} />
       ) : (
         <SkeletonCard media={150} lines={3} radius={26} />
       )}
       <QuestsCard />
       <Button3D
-        title="Rozpocznij grzybobranie"
-        icon="forest"
+        title={searching ? 'Szukam pozycji…' : fallback ? 'Rozpocznij w gminie domowej' : 'Rozpocznij grzybobranie'}
+        icon={fallback ? 'home_pin' : 'forest'}
         onPress={onStart}
-        disabled={status === 'error'}
+        loading={searching}
+        disabled={status === 'error' && !notAsked && !fallback}
       />
       <View style={{ flexDirection: 'row', gap: 8, alignItems: 'flex-start', paddingHorizontal: 6, paddingBottom: 8 }}>
         <Icon name="shield" size={16} color={colors.muted} />
@@ -262,6 +302,56 @@ function openLocationSettings() {
   Linking.openSettings().catch(() => ui.toast('Ustawienia › Prywatność › Lokalizacja', 'settings'));
 }
 
+/** Nowy gracz bez gminy domowej i bez lokalizacji – może ją wybrać ręcznie (pod kartami lokalizacji). */
+function ManualHomeGminaLink() {
+  const homePending = useUserStore((s) => !!s.homeGminaPending);
+  if (!homePending) return null;
+  return (
+    <Pressable
+      onPress={() => router.push('/ustawienia/gmina' as Href)}
+      accessibilityRole="button"
+      hitSlop={6}
+      style={({ pressed }) => ({ paddingVertical: 2, opacity: pressed ? 0.6 : 1 })}
+    >
+      <Txt f="b7" size={15} color={colors.outlineText}>
+        Wybierz gminę domową ręcznie
+      </Txt>
+    </Pressable>
+  );
+}
+
+/**
+ * Lokalizacja jeszcze bez decyzji (nowy gracz – onboarding nie pyta o zgody): wyjaśnienie i jeden przycisk, który
+ * dopiero pokazuje systemowe pytanie.
+ */
+function LocationPrompt({ onEnable }: { onEnable: () => void }) {
+  return (
+    <Card radius={26} padding={18} gap={12} style={{ alignItems: 'center' }}>
+      <View
+        style={{
+          width: 64,
+          height: 64,
+          borderRadius: 32,
+          backgroundColor: colors.primaryTint,
+          alignItems: 'center',
+          justifyContent: 'center',
+          marginTop: 6,
+        }}
+      >
+        <Icon name="my_location" filled size={32} color={colors.primaryText} />
+      </View>
+      <Txt f="b7" size={22} align="center" lh={1.15}>
+        Gdzie dziś zbierasz?
+      </Txt>
+      <Txt f="n6" size={14} color={colors.muted} align="center">
+        Włącz lokalizację – wykryjemy gminę, pokażemy mapę okolicy i prognozę. Dokładna pozycja zostaje na telefonie.
+      </Txt>
+      <Button3D title="Włącz lokalizację" icon="my_location" size="md" onPress={onEnable} style={{ alignSelf: 'stretch' }} />
+      <ManualHomeGminaLink />
+    </Card>
+  );
+}
+
 const LOCATION_ERROR_COPY: Partial<
   Record<ServiceErrorCode, { title: string; body: string; icon: 'location_off' | 'public' }>
 > = {
@@ -272,7 +362,10 @@ const LOCATION_ERROR_COPY: Partial<
   },
   OUT_OF_AREA: {
     title: 'Jesteś poza Polską',
-    body: 'Gminy rozpoznajemy tylko w Polsce. Do testów możesz wybrać gminę w panelu symulacji.',
+    // Panel symulacji jest tylko w buildach z narzędziami dev – graczom zostaje gmina domowa (przycisk poniżej).
+    body: DEV_TOOLS
+      ? 'Gminy rozpoznajemy tylko w Polsce. Do testów możesz wybrać gminę w panelu symulacji.'
+      : 'Gminy rozpoznajemy tylko w Polsce.',
     icon: 'public',
   },
   TIMEOUT: {
@@ -288,9 +381,27 @@ const PERMISSION_COPY = {
   icon: 'location_off' as const,
 };
 
-function LocationError({ code, onRetry, denied }: { code?: ServiceErrorCode; onRetry: () => void; denied: boolean }) {
+function LocationError({
+  code,
+  onRetry,
+  denied,
+  home,
+}: {
+  code?: ServiceErrorCode;
+  onRetry: () => void;
+  denied: boolean;
+  /** Gmina domowa – bez odmowy zgody wyprawę można zacząć w niej (przycisk pod kartą). */
+  home: Gmina | null;
+}) {
   const copy = (code && LOCATION_ERROR_COPY[code]) || PERMISSION_COPY;
   const askSettings = denied && (!code || code === 'PERMISSION');
+  // Bez gminy domowej: „Wybierz gminę domową ręcznie” (ManualHomeGminaLink) – po wyborze przycisk startu ożywa.
+  const body =
+    home && !denied
+      ? `${copy.body} Możesz też zacząć wyprawę w gminie domowej (${home.name}).`
+      : !denied && code === 'OUT_OF_AREA'
+        ? `${copy.body} Wybierz gminę domową, a wyprawę zaczniesz w niej.`
+        : copy.body;
   return (
     <Card radius={26} padding={18} gap={12} style={{ alignItems: 'center' }}>
       <View
@@ -310,7 +421,7 @@ function LocationError({ code, onRetry, denied }: { code?: ServiceErrorCode; onR
         {copy.title}
       </Txt>
       <Txt f="n6" size={14} color={colors.muted} align="center">
-        {copy.body}
+        {body}
       </Txt>
       <Pressable
         onPress={() => (askSettings ? openLocationSettings() : onRetry())}
@@ -327,6 +438,7 @@ function LocationError({ code, onRetry, denied }: { code?: ServiceErrorCode; onR
           {askSettings ? 'Otwórz ustawienia' : 'Spróbuj ponownie'}
         </Txt>
       </Pressable>
+      <ManualHomeGminaLink />
     </Card>
   );
 }
@@ -419,8 +531,6 @@ function ActiveTrip() {
   const finds = useTripStore((s) => s.finds);
   const speed = useSimStore((s) => s.timeSpeed);
   const gmina = useCatalogStore((s) => s.gminaById[trip.gminaId]);
-  const now = useNow(speed > 1 ? 200 : 1000);
-  const elapsed = tripElapsedMs(trip, speed, now);
   const claimed = trip.findIds.map((id) => finds[id]).filter((f): f is Find => !!f && f.status === 'claimed');
   const collected = claimed.filter((f) => f.collected).length;
   const recent = [...claimed].reverse().slice(0, 3);
@@ -460,9 +570,7 @@ function ActiveTrip() {
             </Txt>
           ) : null}
         </View>
-        <Txt f="b7" size={56} lh={1} color={colors.onDark} style={{ fontVariant: ['tabular-nums'] }}>
-          {fmtTimer(elapsed)}
-        </Txt>
+        <TripTimer trip={trip} speed={speed} />
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <TripStat value={fmtKm(trip.distanceKm)} label="dystans" />
           <TripStat value={String(collected)} label={plural(collected, 'grzyb', 'grzyby', 'grzybów')} />
@@ -541,6 +649,19 @@ function ActiveTrip() {
     </View>
   );
 }
+
+/**
+ * Licznik czasu wyprawy z własnym zegarem (co 1 s, przy przyspieszonym czasie symulacji 5×/s) – co sekundę
+ * przerysowuje się tylko ten tekst, nie cały ekran Start.
+ */
+const TripTimer = memo(function TripTimer({ trip, speed }: { trip: Trip; speed: number }) {
+  const now = useNow(speed > 1 ? 200 : 1000);
+  return (
+    <Txt f="b7" size={56} lh={1} color={colors.onDark} style={{ fontVariant: ['tabular-nums'] }}>
+      {fmtTimer(tripElapsedMs(trip, speed, now))}
+    </Txt>
+  );
+});
 
 function TripStat({ value, label, accent }: { value: string; label: string; accent?: boolean }) {
   return (

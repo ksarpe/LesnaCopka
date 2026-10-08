@@ -4,7 +4,7 @@
 
 > **Szkic – wymaga weryfikacji prawnika przed publikacją**
 
-Wersja robocza z 7 października 2026.
+Wersja robocza z 8 października 2026.
 
 Wyjaśniamy, jakie dane przetwarza aplikacja Grzybobranie (dalej: „Aplikacja”), po co, jak długo i jakie masz prawa. Aplikację projektujemy tak, żeby wiedzieć o Tobie jak najmniej.
 
@@ -46,7 +46,8 @@ Prognozę grzybową Aplikacja liczy na telefonie z danych pogodowych Open-Meteo.
 Za Twoją zgodą (uprawnienie „Aparat”) Aplikacja używa aparatu do skanu grzyba i zdjęcia znaleziska, a jeśli chcesz – do zdjęcia profilowego. Zdjęcie profilowe możesz też wybrać z galerii: systemowy wybór zdjęć udostępnia Aplikacji tylko wskazane zdjęcie. Aplikacja nie nagrywa filmów ani dźwięku.
 
 - Zdjęcia zmniejszamy i zapisujemy od nowa, co usuwa metadane EXIF – w tym współrzędne GPS, datę wykonania i model telefonu.
-- **Zdjęcia znalezisk** przechowujemy na telefonie, a po synchronizacji także w prywatnym magazynie plików powiązanym z Twoim Kontem – dostęp do nich masz tylko Ty. [Docelowo także serwerowa funkcja rozpoznawania gatunku – do uzupełnienia, gdy powstanie.]
+- **Rozpoznanie gatunku** – zdjęcie zrobione spustem skanu (już bez EXIF) wraz z bieżącym miesiącem i województwem wysyłamy przez nasz serwer do Anthropic (model AI Claude) wyłącznie po to, by rozpoznać grzyba. Nie wysyłamy gminy, współrzędnych, nicku ani innych danych Konta, a Aplikacja nie używa tego zdjęcia do żadnego innego celu. Na serwerze zapisujemy tylko dziennik wywołań (czas, status, zużycie – bez zdjęcia i wyniku) do limitu rozpoznań i kontroli kosztów. [Do weryfikacji prawnej: rola Anthropic jako podmiotu przetwarzającego, umowa powierzenia, okres przechowywania zapytań u dostawcy, transfer do USA.]
+- **Zdjęcia znalezisk** przechowujemy na telefonie, a po synchronizacji także w prywatnym magazynie plików powiązanym z Twoim Kontem – dostęp do nich masz tylko Ty. Zdjęcie odrzucone przy rozpoznaniu („to nie grzyb”, niewyraźne ujęcie) od razu usuwamy z telefonu.
 - **Okładka wpisu** (zdjęcie znaleziska dołączone do opublikowanej wyprawy) i **zdjęcie profilowe** są publiczne: widzą je inni Użytkownicy, a technicznie może je otworzyć każdy, kto zna ich losowy adres.
 
 ## 5. Konto i profil
@@ -95,6 +96,7 @@ Nie podejmujemy wobec Ciebie decyzji opartych wyłącznie na zautomatyzowanym pr
 - **Supabase** – hosting bazy danych, kont i plików jako podmiot przetwarzający, na podstawie umowy powierzenia (DPA). Dane przechowujemy na serwerach w Unii Europejskiej: [region do wybrania, np. Frankfurt]. [Do weryfikacji: ewentualny dostęp z USA i podstawa transferu – EU-US Data Privacy Framework albo standardowe klauzule umowne.]
 - **OpenFreeMap** – serwer kafli mapy (adres IP i numery kafli, punkt 3).
 - **Open-Meteo** – serwis pogody do prognozy grzybowej (adres IP i współrzędne zaokrąglone do 0,1°, punkt 3).
+- **Anthropic** – model AI Claude rozpoznający gatunek ze zdjęcia (zdjęcie, miesiąc i województwo, punkt 4) jako podmiot przetwarzający. [Do weryfikacji: umowa powierzenia (DPA), okres przechowywania zapytań u dostawcy, transfer do USA – EU-US Data Privacy Framework albo standardowe klauzule umowne.]
 - **Dostawca poczty e-mail** – wysyła kody logowania na adres Konta zabezpieczonego e-mailem. [Do uzupełnienia: dostawca serwera poczty (SMTP) i podstawa przekazania.]
 - **Inni Użytkownicy** – w zakresie opisanym w punktach 5 i 6.
 - **Apple i Google** – sklepy z aplikacjami i systemy telefonów przetwarzają dane według własnych zasad (np. przy pobraniu Aplikacji); nie przekazujemy im danych z gry.
@@ -104,6 +106,7 @@ Nie podejmujemy wobec Ciebie decyzji opartych wyłącznie na zautomatyzowanym pr
 
 - pozycja GPS i ślad wyprawy – tylko w pamięci telefonu, do zamknięcia Aplikacji;
 - pogoda dla przybliżonej okolicy (obszar 0,1°) – w pamięci telefonu do 3 godzin;
+- dziennik rozpoznań zdjęć na serwerze (czas, status, zużycie – bez zdjęcia i wyniku) – 7 dni;
 - kafle mapy na telefonie – pamięć podręczna do ok. 30 MB (najdawniej używane usuwamy same), mapy offline – do usunięcia w Ustawieniach → Mapy offline albo odinstalowania Aplikacji;
 - Konto, profil, dane gry i Treści – do usunięcia Konta; Konto nieaktywne przez [okres] możemy usunąć [do decyzji];
 - zgłoszenia i decyzje moderacyjne – [okres] od rozpatrzenia;

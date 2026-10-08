@@ -47,6 +47,8 @@ export function wipeLocalData(services: Services, opts: { onboarded: boolean }) 
   useUserStore.getState().reset({
     ...freshPlayerState({ name: 'Grzybiarz', firstName: 'Grzybiarz', handle: '@grzybiarz' }),
     onboarded: opts.onboarded,
+    // Nowe konto (onboarding) – gmina domowa z pierwszego wykrycia GPS albo z serwera (konto, które już ją ma).
+    homeGminaPending: !opts.onboarded,
   });
   services.dev?.reset({ emptyFeed: true });
   useNotificationStore.getState().reset();

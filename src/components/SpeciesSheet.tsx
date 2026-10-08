@@ -1,10 +1,11 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import type { ReactNode } from 'react';
-import { View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
+import { AI_RESULT_NOTICE } from '@/data/legal';
 import { useFindPhotoSource } from '@/hooks/useFindPhotoSource';
 import { useTopInset } from '@/hooks/useInsets';
-import { colors, shadows } from '@/theme/tokens';
+import { colors, rarity as rarityTokens, shadows } from '@/theme/tokens';
 import type { Edibility, Lookalike, Protection, Rarity, Species, SpeciesPercentile } from '@/types';
 import { HABITAT_LABEL, habitatsOf } from '@/utils/chances';
 import { plural } from '@/utils/format';
@@ -33,22 +34,28 @@ export function SpeciesHero({
   rarity,
   onBack,
   confidence,
-  label = 'zdjęcie ze skanu (model 3D)',
+  label = 'Zdjęcie grzyba',
   lowConfidence,
   photoUri,
 }: {
   rarity: Rarity;
   onBack: () => void;
   confidence?: number;
+  /** Opis obrazu dla czytnika ekranu (bez zdjęcia na ekranie jest tylko kafel ze znakiem grzyba). */
   label?: string;
   lowConfidence?: boolean;
-  /** Zdjęcie z aparatu (`Find.photoUri`) – bez niego paskowany placeholder z makiety. */
+  /** Zdjęcie z aparatu (`Find.photoUri`) – bez niego kafel w kolorze rzadkości ze znakiem grzyba. */
   photoUri?: string;
 }) {
   const top = useTopInset();
   const source = useFindPhotoSource(photoUri);
   return (
-    <Placeholder variant="sand" stripe={12} label={label} source={source} style={{ height: 320 }}>
+    <Placeholder
+      source={source}
+      tile={{ tint: rarityTokens[rarity].color, glyph: 'mushroom', glyphSize: 104 }}
+      style={{ height: 320 }}
+    >
+      <View accessible accessibilityRole="image" accessibilityLabel={label} style={StyleSheet.absoluteFill} />
       <IconButton
         icon="arrow_back"
         variant="photo"
@@ -266,6 +273,24 @@ export function PoisonBanner({ deadly }: { deadly: boolean }) {
       }
       textColor={colors.dangerText}
     />
+  );
+}
+
+/**
+ * Notka bezpieczeństwa przy każdym wyniku rozpoznania (Analiza, Nagroda) – zawsze widoczna, także przy gatunkach
+ * jadalnych bez sobowtórów. Tekst: AI_RESULT_NOTICE (src/data/legal.ts).
+ */
+export function AiSafetyNote({ dark, align = 'left' }: { dark?: boolean; align?: 'left' | 'center' }) {
+  return (
+    <View
+      accessibilityRole="text"
+      style={{ flexDirection: 'row', gap: 8, alignItems: 'center', justifyContent: align === 'center' ? 'center' : 'flex-start' }}
+    >
+      <Icon name="health_and_safety" filled size={18} color={dark ? colors.tipIcon : colors.warnIcon} />
+      <Txt f="n7" size={12} color={dark ? colors.onDarkSoft : colors.muted} style={align === 'center' ? { flexShrink: 1 } : { flex: 1 }}>
+        {AI_RESULT_NOTICE}
+      </Txt>
+    </View>
   );
 }
 

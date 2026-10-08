@@ -36,7 +36,6 @@ import {
   type Zoom,
 } from '@/geo/mapView';
 import { detailPath, voivodeshipShapes, type GminaShape, type ShapesMap } from '@/geo/voivodeships';
-import { useAsync } from '@/hooks/useAsync';
 import { colors, heat as heatColors, shadows } from '@/theme/tokens';
 import { fmtMushroomers } from '@/utils/format';
 import { Card } from './Card';
@@ -77,21 +76,82 @@ interface VoivodeshipHeatmapProps {
   loading: boolean;
 }
 
+/** Ile zbudowanych map (województwo × szerokość) trzymamy w pamięci. */
+const SHAPES_CACHE_MAX = 6;
+
+/**
+ * Zbudowane kontury (setki ścieżek SVG – mazowieckie to kilkadziesiąt ms w V8, kilkaset w Hermesie) wg województwa
+ * i szerokości: ponowne wejście na ekran Gminy / kartę gatunku rysuje mapę od razu, bez liczenia na wątku JS.
+ * Mały LRU (kolejność Map = kolejność użycia); odrzucona obietnica wypada z pamięci, żeby dało się spróbować znowu.
+ */
+const shapesCache = new Map<string, { promise: Promise<ShapesMap>; map?: ShapesMap }>();
+
+const shapesKey = (voivodeship: string, width: number) => `${voivodeship}:${width}`;
+
+function loadShapes(voivodeship: string, width: number): Promise<ShapesMap> {
+  const key = shapesKey(voivodeship, width);
+  const hit = shapesCache.get(key);
+  if (hit) {
+    shapesCache.delete(key);
+    shapesCache.set(key, hit);
+    return hit.promise;
+  }
+  const entry: { promise: Promise<ShapesMap>; map?: ShapesMap } = {
+    promise: gminaIndex()
+      .then((index) => voivodeshipShapes(index, voivodeship, width, Math.min(MAX_H, width)))
+      .then((map) => {
+        entry.map = map;
+        return map;
+      }),
+  };
+  entry.promise.catch(() => {
+    if (shapesCache.get(key) === entry) shapesCache.delete(key);
+  });
+  shapesCache.set(key, entry);
+  while (shapesCache.size > SHAPES_CACHE_MAX) shapesCache.delete(shapesCache.keys().next().value!);
+  return entry.promise;
+}
+
+/** Kontury województwa dla szerokości `width` – z pamięci od razu (bez klatki ładowania), inaczej po zbudowaniu. */
+function useVoivodeshipShapes(voivodeship: string, width: number): { map: ShapesMap | null; error: boolean } {
+  const key = width > 0 ? shapesKey(voivodeship, width) : null;
+  const ready = key ? (shapesCache.get(key)?.map ?? null) : null;
+  const [loaded, setLoaded] = useState<{ key: string; map: ShapesMap | null; error: boolean } | null>(null);
+  useEffect(() => {
+    if (!key) return;
+    let alive = true;
+    loadShapes(voivodeship, width).then(
+      (map) => alive && setLoaded({ key, map, error: false }),
+      () => alive && setLoaded({ key, map: null, error: true }),
+    );
+    return () => {
+      alive = false;
+    };
+  }, [key, voivodeship, width]);
+  const mine = loaded?.key === key ? loaded : null;
+  return { map: ready ?? mine?.map ?? null, error: !ready && !!mine?.error };
+}
+
 /**
  * Mapa cieplna województwa: prawdziwe kontury gmin z PRG (offline) w kolorach heatmapy.
  * Tapnięcie gminy → płynne przybliżenie na nią + podpowiedź; w przybliżeniu tapnięcie innej gminy
  * przesuwa widok, a zaznaczonej / podpowiedzi → szczegóły gminy. Szczypanie, przeciąganie
  * (tylko po przybliżeniu – inaczej przewija się ekran), podwójne tapnięcie, kółko myszy (web)
- * i „Pełny widok”. Po przybliżeniu nazwy gmin.
+ * i „Pełny widok”. Po przybliżeniu nazwy gmin. Memo – rodzic (ranking, karta gatunku) przerysowuje się częściej.
  */
-export function VoivodeshipHeatmap({ voivodeship, heat, mushroomers, tips, mineId, defaultId, loading }: VoivodeshipHeatmapProps) {
+export const VoivodeshipHeatmap = memo(function VoivodeshipHeatmap({
+  voivodeship,
+  heat,
+  mushroomers,
+  tips,
+  mineId,
+  defaultId,
+  loading,
+}: VoivodeshipHeatmapProps) {
   const [inner, setInner] = useState(0);
   const [picked, setPicked] = useState<string | null>(null);
-  const shapes = useAsync(
-    async () => (inner > 0 ? voivodeshipShapes(await gminaIndex(), voivodeship, inner, Math.min(MAX_H, inner)) : null),
-    [voivodeship, inner],
-  );
-  const map = shapes.data;
+  const shapes = useVoivodeshipShapes(voivodeship, inner);
+  const map = shapes.map;
   // Pierwsza z kandydatek, która leży na mapie (gmina gracza może być w innym województwie).
   const selectedId = useMemo(
     () => (map ? ([picked, mineId, defaultId].find((id) => id && map.gminy.some((g) => g.id === id)) ?? null) : null),
@@ -148,7 +208,7 @@ export function VoivodeshipHeatmap({ voivodeship, heat, mushroomers, tips, mineI
       </View>
     </Card>
   );
-}
+});
 
 /** Obraz mapy zatwierdzony w SVG: widok i dokładniejsze obrysy widocznych gmin. */
 interface Frame {

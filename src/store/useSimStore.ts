@@ -3,17 +3,10 @@ import { persist } from 'zustand/middleware';
 
 import { DEV_TOOLS } from '@/config';
 import type { PermissionKind, PermissionStatus } from '@/services/types';
-import type { Rarity } from '@/types';
+import { NO_SCAN_OVERRIDE, type ScanOverride } from '@/utils/identify';
 import { persistStorage, STORAGE_KEYS } from './storage';
 
-/** Wymuszony wynik skanu z panelu /dev (null = losowanie z seeda). */
-export interface ScanOverride {
-  speciesId: string | null;
-  rarity: Rarity | null;
-  xxl: boolean | null;
-  poisonous: boolean;
-  lowConfidence: boolean;
-}
+export type { ScanOverride } from '@/utils/identify';
 
 /** Punkt symulacji: wnętrze gminy, słaby GPS (±1,5 km) albo za granicą (Wilno). */
 export type SimPoint = 'gmina' | 'coarse' | 'abroad';
@@ -29,14 +22,9 @@ export interface SimState {
   gpsEnabled: boolean;
   networkEnabled: boolean;
   timeSpeed: 1 | 10;
-  /** Tryb dev: spust skanu aktywny zawsze. */
-  devMode: boolean;
+  /** Wymuszony wynik skanu (gatunek / nie grzyb / niewyraźne) zamiast rozpoznania zdjęcia – src/utils/identify.ts. */
   scan: ScanOverride;
   permissions: Record<PermissionKind, PermissionStatus>;
-  /** Licznik skanów – kolejne wyniki mocka są deterministyczne. */
-  scanSeq: number;
-  /** Dev-link: zatrzymaj postęp skanu na danej wartości (0..1) – do zrzutów. */
-  scanFreezeAt: number | null;
 
   set: (patch: Partial<Omit<SimState, 'set' | 'setScan' | 'setPermission' | 'reset'>>) => void;
   setScan: (patch: Partial<ScanOverride>) => void;
@@ -52,11 +40,8 @@ const INITIAL = {
   gpsEnabled: true,
   networkEnabled: true,
   timeSpeed: 1 as const,
-  devMode: false,
-  scan: { speciesId: null, rarity: null, xxl: null, poisonous: false, lowConfidence: false },
+  scan: { ...NO_SCAN_OVERRIDE },
   permissions: { location: 'undetermined', camera: 'undetermined' } as Record<PermissionKind, PermissionStatus>,
-  scanSeq: 0,
-  scanFreezeAt: null as number | null,
 };
 
 /** Dane symulacji (bez akcji) – to, co zapisuje persist. */
@@ -66,7 +51,7 @@ export type SimData = Omit<SimState, 'set' | 'setScan' | 'setPermission' | 'rese
  * Build bez narzędzi dev (`DEV_TOOLS = false`): zawsze GPS i aparat urządzenia, sieć i GPS włączone, czas
  * rzeczywisty, bez wymuszonego wyniku skanu. Zapis mógł zostać z buildu deweloperskiego (ten sam bundle id),
  * a panelu `/dev`, którym dałoby się to cofnąć, w wydaniu nie ma. Zgody zostają – w trybie urządzenia
- * i tak odczytujemy je z systemu przy starcie (mockInit). Licznik skanów zostaje (powtarzalne wyniki mocka).
+ * i tak odczytujemy je z systemu przy starcie (mockInit).
  */
 export function releaseSimState<T extends SimData>(s: T): T {
   return {
@@ -78,10 +63,23 @@ export function releaseSimState<T extends SimData>(s: T): T {
     gpsEnabled: true,
     networkEnabled: true,
     timeSpeed: 1,
-    devMode: false,
-    scan: { ...INITIAL.scan },
-    scanFreezeAt: null,
+    scan: { ...NO_SCAN_OVERRIDE },
   };
+}
+
+/**
+ * Zapis sprzed wersji 2 (symulowany skan 360°): wymuszenia gatunku / rzadkości / trującego, tryb „spust zawsze
+ * aktywny”, licznik skanów i zatrzymanie postępu – znikają; wynik skanu wraca do prawdziwego rozpoznania.
+ */
+export function migrateSimState(persisted: unknown, version: number): Partial<SimData> {
+  const s = { ...((persisted ?? {}) as Record<string, unknown>) };
+  if (version < 2) {
+    delete s.devMode;
+    delete s.scanSeq;
+    delete s.scanFreezeAt;
+    s.scan = { ...NO_SCAN_OVERRIDE };
+  }
+  return s as Partial<SimData>;
 }
 
 export const useSimStore = create<SimState>()(
@@ -96,7 +94,8 @@ export const useSimStore = create<SimState>()(
     {
       name: STORAGE_KEYS.sim,
       storage: persistStorage,
-      version: 1,
+      version: 2,
+      migrate: (persisted, version) => migrateSimState(persisted, version) as SimState,
       // Domyślne scalanie (płytkie) + w wydaniu wymuszenie urządzenia – zanim ktokolwiek odczyta stan.
       merge: (persisted, current) => {
         const merged = { ...current, ...(persisted as Partial<SimState> | undefined) };

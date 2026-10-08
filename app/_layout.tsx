@@ -15,6 +15,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { ErrorScreen } from '@/components/ErrorScreen';
+import { HomeGminaFromGps } from '@/components/HomeGminaFromGps';
 import { NotificationsHost } from '@/components/NotificationsHost';
 import { TripTracker } from '@/components/TripTracker';
 import { applyDevLink } from '@/dev/devLinks';
@@ -116,15 +117,24 @@ function AppStack() {
 
   return (
     <>
+      {/*
+        Wszystko, co ma działać niezależnie od widocznego ekranu (śledzenie wyprawy, powiadomienia, gmina domowa z GPS),
+        żyje tutaj – ekrany pod innymi są zamrażane (freezeOnBlur) i nie przerysowują się, dopóki nie wrócą na wierzch.
+      */}
       <TripTracker />
       <NotificationsHost />
+      {onboarded ? <HomeGminaFromGps /> : null}
       {/*
         Stack.Protected: przy `onboarded = false` dostępny jest tylko onboarding (pierwszy na liście – na niego trafia
         nawigacja) oraz dokumenty prawne i panel /dev. Zmiana flagi sama przełącza ekrany (bez „wstecz” do zakładek).
         Nowy ekran aplikacji dopisz do grupy `guard={onboarded}` – inaczej byłby dostępny także w trakcie onboardingu.
+        freezeOnBlur: ekrany przykryte innymi nie reagują na zmiany store'ów (GPS, wyprawa) – na nowej architekturze
+        react-native-screens zamraża dopiero ekran o dwa poziomy pod bieżącym (bezpośrednio niższy zostaje żywy na
+        czas animacji powrotu). Ekrany skanu (skan → analiza → nagroda) bez zamrażania – ich przepływ trzyma stan
+        między sobą.
       */}
       <Stack
-        screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg } }}
+        screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.bg }, freezeOnBlur: true }}
         unstable_screenErrorBoundary={ErrorBoundary}
       >
         <Stack.Protected guard={!onboarded}>
@@ -134,12 +144,18 @@ function AppStack() {
           <Stack.Screen name="(tabs)" />
           <Stack.Screen
             name="scan"
-            options={{ presentation: 'fullScreenModal', animation: 'fade', contentStyle: { backgroundColor: colors.camera } }}
+            options={{ presentation: 'fullScreenModal', animation: 'fade', contentStyle: { backgroundColor: colors.camera }, freezeOnBlur: false }}
           />
-          <Stack.Screen name="analysis/[findId]" />
+          <Stack.Screen name="analysis/[findId]" options={{ freezeOnBlur: false }} />
           <Stack.Screen
             name="reward/[findId]"
-            options={{ presentation: 'fullScreenModal', animation: 'fade', gestureEnabled: false, contentStyle: { backgroundColor: colors.night } }}
+            options={{
+              presentation: 'fullScreenModal',
+              animation: 'fade',
+              gestureEnabled: false,
+              contentStyle: { backgroundColor: colors.night },
+              freezeOnBlur: false,
+            }}
           />
           <Stack.Screen
             name="mapa"

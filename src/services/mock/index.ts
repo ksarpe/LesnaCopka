@@ -1,9 +1,11 @@
 /**
- * Implementacje mock wszystkich serwisów. Opóźnienia 300–1500 ms, losowość ze stałym seedem.
- * Stan symulacji (GPS, sieć, wymuszony skan) czytają z useSimStore – sterowanego z panelu /dev.
+ * Implementacje mock serwisów. Opóźnienia 300–1500 ms (tylko z narzędziami dev – ./net.ts), losowość ze stałym seedem.
+ * Stan symulacji (GPS, sieć, wymuszony wynik skanu) czytają z useSimStore – sterowanego z panelu /dev.
+ * Rozpoznawanie zdjęć jest prawdziwe w obu trybach (../live/identify.ts).
  */
 import { Linking, Platform } from 'react-native';
 
+import { DEV_TOOLS } from '@/config';
 import { mockEvidence, mockSpeciesMap } from '@/data/mock/chances';
 import { BADGES, QUEST_POOL } from '@/data/mock/game';
 import { buildGminaStats, GMINY, RANKINGS } from '@/data/mock/gminy';
@@ -14,21 +16,10 @@ import { gminaIndex } from '@/geo';
 import { useCatalogStore } from '@/store/useCatalogStore';
 import { useSimStore } from '@/store/useSimStore';
 import { useUiStore } from '@/store/useUiStore';
-import type {
-  Dimensions,
-  Identification,
-  Post,
-  RankingPeriod,
-  ScanPart,
-  ScanResult,
-  Species,
-  Trip,
-} from '@/types';
+import type { Post, RankingPeriod, Trip } from '@/types';
 import { hashString, makeId, mulberry32, sleep } from '@/utils/random';
 import { localYmd } from '@/utils/forecast';
 import { CHANCES_TTL_MS, createTtlCache } from '@/utils/ttlCache';
-import { isXxl } from '@/utils/xp';
-import { isPoisonousEdibility, speciesLookalikes } from '@/utils/species';
 import { fmtInt } from '@/utils/format';
 import { buildOwnTripPost, claimedFindsOf } from '@/utils/tripPost';
 import { useUserStore } from '@/store/useUserStore';
@@ -37,24 +28,22 @@ import {
   ServiceError,
   type CatalogService,
   type FeedService,
-  type IdentifyService,
   type LocationService,
   type MapService,
   type PermissionKind,
   type PermissionService,
   type PermissionStatus,
-  type ScanService,
   type Services,
   type StatsService,
   type WeatherService,
 } from '../types';
 import { liveCamera } from '../live/camera';
+import { liveIdentify } from '../live/identify';
 import { liveMap } from '../live/map';
 import { liveWeather } from '../live/weather';
 import { livePermissions, readDevicePosition, regionAt } from '../live/location';
 import { buildChances, chanceSpecies, gminaForestPct } from '../chances';
 import { useMockDb } from './db';
-import { pickSpecies } from './identifyPick';
 import { net } from './net';
 import { simulatedForecast } from './weather';
 import {
@@ -93,7 +82,7 @@ const PROMPT_COPY: Record<PermissionKind, { title: string; message: string; allo
   },
   camera: {
     title: '„Grzybobranie” chce uzyskać dostęp do aparatu',
-    message: 'Aparat jest potrzebny do skanu 360° i rozpoznania gatunku.',
+    message: 'Aparat jest potrzebny do zdjęcia grzyba i rozpoznania gatunku.',
     allow: 'Pozwól',
   },
 };
@@ -267,111 +256,10 @@ export const mockWeather: WeatherService = {
   },
 };
 
-/* ───────────────────────── Skan 360° ───────────────────────── */
-
-const PART_ORDER: ScanPart[] = ['cap', 'underside', 'stem', 'base'];
-/** Progi zaliczenia części (przy 68% zaliczone są 3 z 4 – jak w makiecie). */
-const PART_AT = [0.15, 0.4, 0.65, 0.95];
-
-export const mockScan: ScanService = {
-  startScan(cb, opts) {
-    return new Promise<ScanResult>((resolve, reject) => {
-      const duration = 4000;
-      const started = Date.now();
-      const tick = setInterval(() => {
-        if (opts?.signal?.aborted) {
-          clearInterval(tick);
-          reject(new ServiceError('CANCELLED', 'Skan przerwany'));
-          return;
-        }
-        const freeze = sim().scanFreezeAt;
-        const p = Math.min(freeze ?? 1, (Date.now() - started) / duration);
-        const parts = PART_ORDER.filter((_, i) => p >= PART_AT[i]);
-        cb(p, parts);
-        if (p >= 1) {
-          clearInterval(tick);
-          resolve({ id: makeId('scan'), parts: PART_ORDER, capturedAt: new Date().toISOString() });
-        }
-      }, 50);
-    });
-  },
-  capturePartial(parts) {
-    return { id: makeId('scan'), parts, capturedAt: new Date().toISOString() };
-  },
-};
-
 /* ───────────────────────── Rozpoznawanie ───────────────────────── */
 
-// Losowanie gatunku: rzadkość × sezon bieżącego miesiąca – ./identifyPick.ts.
-export const mockIdentify: IdentifyService = {
-  async identify(scan) {
-    await sleep(1500);
-    const s = sim();
-    if (!s.networkEnabled) throw new ServiceError('NETWORK', 'Brak sieci – rozpoznanie wymaga połączenia');
-    const seq = s.scanSeq;
-    s.set({ scanSeq: seq + 1 });
-    const rnd = mulberry32(1000 + seq * 7919);
-    const o = s.scan;
-
-    let species: Species;
-    // Sezon: miesiąc skanu (0 = styczeń) – w październiku jesienne gatunki, w kwietniu smardze.
-    const month = new Date().getMonth();
-    if (o.speciesId) {
-      species = SPECIES.find((x) => x.id === o.speciesId) ?? SPECIES[0];
-    } else if (o.poisonous) {
-      const poison = SPECIES.filter((x) => isPoisonousEdibility(x.edibility));
-      species = pickSpecies(rnd, poison, month, { rarity: false });
-    } else if (seq === 0) {
-      // Pierwszy skan = scenariusz z makiety: borowik szlachetny XXL, 410 g.
-      species = SPECIES[0];
-    } else {
-      const pool = SPECIES.filter((x) => x.edibility !== 'smiertelny' || rnd() < 0.15);
-      species = pickSpecies(rnd, pool, month);
-    }
-
-    const t = species.typical;
-    let dims: Dimensions;
-    let xxl: boolean;
-    if (seq === 0 && !o.speciesId && !o.poisonous) {
-      dims = { capCm: 14, heightCm: 17, weightG: 410, ageDays: 5 };
-      xxl = true;
-    } else {
-      const forceXxl = o.xxl === true;
-      const scale = forceXxl ? 1.3 + rnd() * 0.3 : o.xxl === false ? 0.75 + rnd() * 0.4 : 0.75 + rnd() * 0.65;
-      dims = {
-        capCm: Math.max(2, Math.round(t.capCm * scale)),
-        heightCm: Math.max(3, Math.round(t.heightCm * scale)),
-        weightG: Math.max(5, Math.round((t.weightG * scale * scale) / 5) * 5),
-        ageDays: 2 + Math.floor(rnd() * 6),
-        pieces: species.clustered ? 6 + Math.floor(rnd() * 10) : undefined,
-      };
-      if (species.clustered && dims.pieces) dims.weightG = dims.pieces * t.weightG;
-      xxl = o.xxl ?? (!species.clustered && isXxl(dims.weightG, t.weightG));
-    }
-
-    const low = o.lowConfidence;
-    const confidence = low ? 0.42 + rnd() * 0.15 : seq === 0 ? 0.96 : 0.86 + rnd() * 0.13;
-    const others = SPECIES.filter((x) => x.id !== species.id);
-    const candidates = low
-      ? [
-          { speciesId: species.id, confidence },
-          { speciesId: others[Math.floor(rnd() * others.length)].id, confidence: confidence * 0.7 },
-          { speciesId: others[Math.floor(rnd() * others.length)].id, confidence: confidence * 0.45 },
-        ]
-      : [{ speciesId: species.id, confidence }];
-
-    const result: Identification = {
-      speciesId: species.id,
-      confidence,
-      rarity: o.rarity ?? species.rarity,
-      xxl,
-      dimensions: dims,
-      lookalikes: speciesLookalikes(species),
-      candidates,
-    };
-    return result;
-  },
-};
+// Prawdziwe rozpoznanie zdjęcia (Edge Function `identify`) albo wymuszony wynik z panelu dev – ../live/identify.ts.
+// Bez adresu serwera w konfiguracji: „Rozpoznawanie wymaga połączenia z serwerem” (nic nie jest losowane).
 
 /* ───────────────────────── Statystyki ───────────────────────── */
 
@@ -523,7 +411,8 @@ export const mockFeed: FeedService = {
 
 export const mockCatalog: CatalogService = {
   async getSpecies() {
-    await sleep(120);
+    // Opóźnienie jak z serwera tylko z narzędziami dev – w wydaniu nie wydłuża ekranu startowego.
+    if (DEV_TOOLS) await sleep(120);
     return SPECIES;
   },
   async getGminy() {
@@ -561,8 +450,7 @@ export const mockServices: Services = {
   location: mockLocation,
   map: mockMap,
   weather: mockWeather,
-  scan: mockScan,
-  identify: mockIdentify,
+  identify: liveIdentify,
   stats: mockStats,
   feed: mockFeed,
   catalog: mockCatalog,

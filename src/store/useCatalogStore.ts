@@ -15,6 +15,11 @@ interface CatalogState {
   dailyQuests: Quest[];
   totalSpecies: number;
   load: (svc: CatalogService) => Promise<void>;
+  /**
+   * Nowszy katalog (tryb Supabase: start z pamięci telefonu albo z mocków, świeży z serwera w tle –
+   * src/services/supabase/catalogCache.ts). Gminy zostają (także dopisane z GPS).
+   */
+  applyCatalog: (p: Pick<CatalogState, 'species' | 'badges' | 'dailyQuests'>) => void;
   /** Dopisuje / uzupełnia gminę wykrytą z GPS (np. spoza danych gry). */
   upsertGmina: (g: Gmina) => void;
 }
@@ -50,6 +55,14 @@ export const useCatalogStore = create<CatalogState>()((set, get) => ({
       totalSpecies,
     });
   },
+  applyCatalog: ({ species, badges, dailyQuests }) =>
+    set({
+      species,
+      speciesById: Object.fromEntries(species.map((s) => [s.id, s])),
+      badges,
+      badgeById: Object.fromEntries(badges.map((b) => [b.id, b])),
+      dailyQuests,
+    }),
   upsertGmina: (g) => {
     const prev = get().gminaById[g.id];
     if (prev && prev.teryt === g.teryt && prev.forestPct === g.forestPct && prev.powiat === g.powiat) return;

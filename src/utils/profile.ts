@@ -64,20 +64,51 @@ export function foldPl(s: string): string {
   return s.toLowerCase().replace(/[ąćęłńóśźż]/g, (c) => PL_FOLD[c] ?? c);
 }
 
+/** Lista przygotowana do wyszukiwania: posortowana alfabetycznie (po polsku) raz, z nazwami po `foldPl`. */
+interface NameIndex<T> {
+  sorted: readonly T[];
+  folded: readonly string[];
+}
+
+/** Indeksy list (np. 2479 gmin z PRG) – budowane przy pierwszym wyszukiwaniu i trzymane, dopóki żyje lista. */
+const nameIndexes = new WeakMap<readonly object[], NameIndex<object>>();
+
+let plCompare: ((a: string, b: string) => number) | null = null;
+function comparePl(a: string, b: string): number {
+  // Collator raz – wielokrotnie szybszy od `localeCompare(…, 'pl')` przy każdym porównaniu.
+  plCompare ??= typeof Intl !== 'undefined' && Intl.Collator ? new Intl.Collator('pl').compare : (x, y) => x.localeCompare(y, 'pl');
+  return plCompare(a, b);
+}
+
+function nameIndex<T extends { name: string }>(items: readonly T[]): NameIndex<T> {
+  let ix = nameIndexes.get(items) as NameIndex<T> | undefined;
+  if (!ix) {
+    const sorted = [...items].sort((a, b) => comparePl(a.name, b.name));
+    ix = { sorted, folded: sorted.map((it) => foldPl(it.name)) };
+    nameIndexes.set(items, ix as NameIndex<object>);
+  }
+  return ix;
+}
+
 /**
  * Wyszukiwanie gmin po nazwie: najpierw nazwy zaczynające się od zapytania, potem zawierające
  * (także po słowie: „mazowiecki” → „Wysokie Mazowieckie”), w obu grupach alfabetycznie.
+ * Sortowanie i `foldPl` nazw liczą się raz na listę (WeakMap po tablicy) – kolejne zapytania to jedno przejście.
+ * Lista nie może być zmieniana w miejscu (nowa zawartość = nowa tablica, jak w store'ach).
  */
 export function searchByName<T extends { name: string }>(items: readonly T[], query: string, limit = 40): T[] {
   const q = foldPl(query.trim());
-  if (!q) return [];
+  if (!q || limit <= 0) return [];
+  const { sorted, folded } = nameIndex(items);
   const starts: T[] = [];
   const contains: T[] = [];
-  for (const it of items) {
-    const n = foldPl(it.name);
-    if (n.startsWith(q)) starts.push(it);
-    else if (n.includes(q)) contains.push(it);
+  for (let i = 0; i < sorted.length; i++) {
+    const n = folded[i];
+    if (n.startsWith(q)) {
+      starts.push(sorted[i]);
+      // Dość trafień od początku nazwy – „zawierające” i tak byłyby za limitem.
+      if (starts.length >= limit) break;
+    } else if (contains.length < limit && n.includes(q)) contains.push(sorted[i]);
   }
-  const byName = (a: T, b: T) => a.name.localeCompare(b.name, 'pl');
-  return [...starts.sort(byName), ...contains.sort(byName)].slice(0, limit);
+  return starts.concat(contains).slice(0, limit);
 }

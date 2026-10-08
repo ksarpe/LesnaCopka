@@ -1,10 +1,11 @@
 /**
- * Prawdziwy aparat (expo-camera): zgoda systemowa, dostępność kamery i zdjęcie znaleziska
- * zmniejszone expo-image-manipulator. Modelu rozpoznawania jeszcze nie ma – postęp skanu 360°
- * dalej symuluje ScanService, a gatunek losuje IdentifyService.
+ * Prawdziwy aparat (expo-camera): zgoda systemowa, dostępność kamery i zdjęcie znaleziska zmniejszone
+ * expo-image-manipulator (JPEG bez EXIF). To zdjęcie rozpoznaje Edge Function `identify` (./identify.ts) i ono
+ * trafia do znaleziska. Bez zdjęcia nie ma rozpoznania (poza wymuszonym wynikiem z panelu dev).
  */
 import { Camera, CameraView, type PermissionResponse } from 'expo-camera';
 import { ImageManipulator, SaveFormat, type ImageRef } from 'expo-image-manipulator';
+import * as ImagePicker from 'expo-image-picker';
 import { Linking, Platform } from 'react-native';
 
 import { WEB_PHOTO_MAX_CHARS } from '@/utils/findPhoto';
@@ -148,12 +149,12 @@ async function shoot(camera: CameraView): Promise<string | undefined> {
   }
 }
 
-/** Dłużej nie czekamy na zdjęcie – rozpoznanie rusza bez niego. */
+/** Dłużej nie czekamy na zdjęcie – ekran skanu pokazuje wtedy „nie udało się zrobić zdjęcia”. */
 const CAPTURE_TIMEOUT_MS = 10_000;
 
 /**
  * Zdjęcie znaleziska spustem skanu. Natywnie: plik w `dokumenty/finds/`, web: data URI.
- * Nigdy nie rzuca – bez zdjęcia (błąd, brak gotowości aparatu, timeout) zwraca undefined, a rozpoznanie idzie dalej.
+ * Nigdy nie rzuca – bez zdjęcia (błąd, brak gotowości aparatu, timeout) zwraca undefined.
  */
 export function captureFindPhoto(camera: CameraView): Promise<string | undefined> {
   const work = shoot(camera);
@@ -168,4 +169,21 @@ export function captureFindPhoto(camera: CameraView): Promise<string | undefined
       resolve(uri);
     });
   });
+}
+
+/**
+ * TYLKO narzędzia dev (testy bez aparatu, np. komputer bez kamery): zdjęcie z galerii, przygotowane jak zdjęcie ze
+ * spustu (ten sam rozmiar, JPEG bez EXIF, ten sam katalog). W wydaniu skan przyjmuje wyłącznie zdjęcie z aparatu
+ * (anty-cheat) – ekran skanu nie pokazuje tej opcji bez DEV_TOOLS. 'canceled' = gracz zamknął wybór.
+ */
+export async function pickDevFindPhoto(): Promise<string | 'canceled' | undefined> {
+  try {
+    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1, exif: false });
+    if (res.canceled || !res.assets?.length) return 'canceled';
+    const uri = res.assets[0].uri;
+    return Platform.OS === 'web' ? await webPhoto(uri) : await nativePhoto(uri);
+  } catch (e) {
+    if (__DEV__) console.warn('[camera] nie udało się wczytać zdjęcia z galerii', e);
+    return undefined;
+  }
 }

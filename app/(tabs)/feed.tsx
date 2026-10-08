@@ -1,6 +1,6 @@
 import { router, useFocusEffect, useIsFocused } from 'expo-router';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, RefreshControl, View } from 'react-native';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FlatList, Pressable, RefreshControl, View, type ListRenderItemInfo } from 'react-native';
 
 import { Avatar, authorRingColor } from '@/components/Avatar';
 import { hapticLight } from '@/components/Button3D';
@@ -11,7 +11,7 @@ import { OfflineCard, StateCard } from '@/components/OfflineCard';
 import { Pill } from '@/components/Pill';
 import { Placeholder } from '@/components/Placeholder';
 import { PlayerSheet } from '@/components/PlayerSheet';
-import { Screen } from '@/components/Screen';
+import { Screen, SCREEN_LIST_PROPS, useScreenPadding } from '@/components/Screen';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { SkeletonCard } from '@/components/Skeleton';
 import { Txt } from '@/components/Txt';
@@ -28,7 +28,7 @@ import { useSimStore } from '@/store/useSimStore';
 import { useTripStore } from '@/store/useTripStore';
 import { ui, useUiStore } from '@/store/useUiStore';
 import { useUserStore } from '@/store/useUserStore';
-import { colors, medals, rarity as rarityTokens, shadows } from '@/theme/tokens';
+import { colors, heat as heatColors, medals, rarity as rarityTokens, shadows } from '@/theme/tokens';
 import type { CompactPost, LevelUpPost, Post, PostAuthor, PostScope, TripPost } from '@/types';
 import { fmtAgo, fmtDurationShort, fmtInt, fmtKm, gminaTitle, plural } from '@/utils/format';
 import { failText, isLocalPost, PENDING_POST_TEXT } from '@/utils/social';
@@ -102,7 +102,7 @@ export default function FeedScreen() {
     setRefreshing(true);
     try {
       const next = await feed.loadNewer(scope);
-      posts.setData(() => next);
+      setPosts(() => next);
       setJustHidden([]);
     } catch {
       ui.toast('Brak sieci – nie udało się odświeżyć', 'wifi_off');
@@ -111,57 +111,70 @@ export default function FeedScreen() {
     }
   };
 
-  const onReact = async (p: TripPost) => {
-    if (isLocalPost(p.id)) return pendingToast();
-    hapticLight();
-    const optimistic = { reacted: !p.reacted, reactions: p.reactions + (p.reacted ? -1 : 1) };
-    posts.setData((list) => list?.map((x) => (x.id === p.id ? { ...x, ...optimistic } : x)));
-    try {
-      // Liczba z serwera (w międzyczasie mogli zareagować inni).
-      const r = await feed.toggleReaction(p.id);
-      posts.setData((list) => list?.map((x) => (x.id === p.id && x.kind === 'trip' ? { ...x, ...r } : x)));
-      // Osiągnięcie „Darz grzyb!” i zadanie „Daj Darz grzyb! N wyprawom” (tylko cudze wpisy – jak serwer).
-      if (!p.mine && r.reacted !== p.reacted) noteSocial(r.reacted ? 'reactionGiven' : 'reactionRemoved');
-    } catch (e) {
-      posts.setData((list) => list?.map((x) => (x.id === p.id ? p : x)));
-      ui.toast(failText(e, 'Brak sieci – reakcja nie została zapisana'), 'wifi_off');
-    }
-  };
+  // Akcje kart – stabilne (useCallback), żeby reakcja na jednym wpisie nie przerysowywała pozostałych (PostView – memo).
+  const onReact = useCallback(
+    async (p: TripPost) => {
+      if (isLocalPost(p.id)) return pendingToast();
+      hapticLight();
+      const optimistic = { reacted: !p.reacted, reactions: p.reactions + (p.reacted ? -1 : 1) };
+      setPosts((list) => list?.map((x) => (x.id === p.id ? { ...x, ...optimistic } : x)));
+      try {
+        // Liczba z serwera (w międzyczasie mogli zareagować inni).
+        const r = await feed.toggleReaction(p.id);
+        setPosts((list) => list?.map((x) => (x.id === p.id && x.kind === 'trip' ? { ...x, ...r } : x)));
+        // Osiągnięcie „Darz grzyb!” i zadanie „Daj Darz grzyb! N wyprawom” (tylko cudze wpisy – jak serwer).
+        if (!p.mine && r.reacted !== p.reacted) noteSocial(r.reacted ? 'reactionGiven' : 'reactionRemoved');
+      } catch (e) {
+        setPosts((list) => list?.map((x) => (x.id === p.id ? p : x)));
+        ui.toast(failText(e, 'Brak sieci – reakcja nie została zapisana'), 'wifi_off');
+      }
+    },
+    [feed, setPosts],
+  );
 
-  const onHide = async (p: Post) => {
-    setJustHidden((ids) => [...ids, p.id]);
-    setHidden((list) => [p, ...(list ?? [])]);
-    try {
-      await feed.hidePost(p.id);
-      ui.toast('Wpis ukryty', 'visibility_off');
-    } catch (e) {
-      setJustHidden((ids) => ids.filter((x) => x !== p.id));
-      setHidden((list) => list?.filter((x) => x.id !== p.id));
-      ui.toast(failText(e, 'Brak sieci – nie udało się ukryć wpisu'), 'wifi_off');
-    }
-  };
-
-  const onReport = async (p: Post) => {
-    // Toast od razu (jak dotąd) – zgłoszenie idzie w tle; przy braku sieci mówimy, że nie dotarło.
-    ui.toast('Dziękujemy – zgłoszenie wysłane', 'flag');
-    try {
-      await feed.reportPost(p.id);
-    } catch (e) {
-      ui.toast(failText(e, 'Brak sieci – zgłoszenie nie zostało wysłane'), 'wifi_off');
-    }
-  };
-
-  const onUndoHide = async (p: Post) => {
-    setJustHidden((ids) => ids.filter((x) => x !== p.id));
-    setHidden((list) => list?.filter((x) => x.id !== p.id));
-    try {
-      await feed.unhidePosts([p.id]);
-    } catch {
+  const onHide = useCallback(
+    async (p: Post) => {
       setJustHidden((ids) => [...ids, p.id]);
       setHidden((list) => [p, ...(list ?? [])]);
-      ui.toast('Brak sieci – wpis nadal jest ukryty', 'wifi_off');
-    }
-  };
+      try {
+        await feed.hidePost(p.id);
+        ui.toast('Wpis ukryty', 'visibility_off');
+      } catch (e) {
+        setJustHidden((ids) => ids.filter((x) => x !== p.id));
+        setHidden((list) => list?.filter((x) => x.id !== p.id));
+        ui.toast(failText(e, 'Brak sieci – nie udało się ukryć wpisu'), 'wifi_off');
+      }
+    },
+    [feed, setHidden],
+  );
+
+  const onReport = useCallback(
+    async (p: Post) => {
+      // Toast od razu (jak dotąd) – zgłoszenie idzie w tle; przy braku sieci mówimy, że nie dotarło.
+      ui.toast('Dziękujemy – zgłoszenie wysłane', 'flag');
+      try {
+        await feed.reportPost(p.id);
+      } catch (e) {
+        ui.toast(failText(e, 'Brak sieci – zgłoszenie nie zostało wysłane'), 'wifi_off');
+      }
+    },
+    [feed],
+  );
+
+  const onUndoHide = useCallback(
+    async (p: Post) => {
+      setJustHidden((ids) => ids.filter((x) => x !== p.id));
+      setHidden((list) => list?.filter((x) => x.id !== p.id));
+      try {
+        await feed.unhidePosts([p.id]);
+      } catch {
+        setJustHidden((ids) => [...ids, p.id]);
+        setHidden((list) => [p, ...(list ?? [])]);
+        ui.toast('Brak sieci – wpis nadal jest ukryty', 'wifi_off');
+      }
+    },
+    [feed, setHidden],
+  );
 
   const hiddenCount = hidden.data?.length ?? 0;
   const onRestoreHidden = () =>
@@ -182,91 +195,116 @@ export default function FeedScreen() {
       },
     });
 
-  const onAuthor = (p: Post) => {
+  const onAuthor = useCallback((p: Post) => {
     // Własny wpis (także awans z serwera) → profil gracza zamiast mini profilu.
     if ((p.kind === 'trip' && p.mine) || p.author.id === useUserStore.getState().user.id) router.navigate('/profil');
     else setProfileOf(p.author);
-  };
+  }, []);
 
   /** Zablokowany: jego wpisy znikają od razu (serwer też ich już nie zwróci). */
-  const dropAuthor = (authorId: string) => posts.setData((list) => list?.filter((x) => x.author.id !== authorId));
-  const onBlock = (p: Post) => confirmBlock(feed, p.author, () => dropAuthor(p.author.id));
+  const dropAuthor = useCallback(
+    (authorId: string) => setPosts((list) => list?.filter((x) => x.author.id !== authorId)),
+    [setPosts],
+  );
+  const onBlock = useCallback((p: Post) => confirmBlock(feed, p.author, () => dropAuthor(p.author.id)), [feed, dropAuthor]);
 
-  const actions: PostActions = { onReact, onHide, onReport, onAuthor, onBlock };
+  const actions = useMemo<PostActions>(
+    () => ({ onReact, onHide, onReport, onAuthor, onBlock }),
+    [onReact, onHide, onReport, onAuthor, onBlock],
+  );
+
+  const renderItem = useCallback(
+    ({ item }: ListRenderItemInfo<Post>) =>
+      justHidden.includes(item.id) ? <HiddenStub post={item} onUndo={onUndoHide} /> : <PostView post={item} actions={actions} />,
+    [justHidden, onUndoHide, actions],
+  );
+
+  const { top, bottom } = useScreenPadding(true);
+  // Błąd albo pierwsze ładowanie: lista pusta, a stan (offline / szkielety / „Cisza w lesie”) pokazuje ListEmptyComponent.
+  const list = posts.error ? EMPTY : (posts.data ?? EMPTY);
 
   return (
-    <Screen
-      tabs
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primaryText} colors={[colors.primary]} />}
-    >
-      <View style={{ paddingTop: 6, paddingHorizontal: 20, gap: 16 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Txt f="b7" size={30}>
-            Feed
-          </Txt>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <NotificationBell />
-            <IconButton icon="person_add" iconSize={22} onPress={openFriends} accessibilityLabel="Znajomi" />
+    <Screen tabs list>
+      <FlatList
+        {...SCREEN_LIST_PROPS}
+        style={{ flex: 1 }}
+        data={list}
+        keyExtractor={postKey}
+        renderItem={renderItem}
+        extraData={justHidden}
+        ItemSeparatorComponent={PostGap}
+        contentContainerStyle={{ paddingTop: top + 6, paddingHorizontal: 20, paddingBottom: bottom }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primaryText} colors={[colors.primary]} />}
+        initialNumToRender={4}
+        maxToRenderPerBatch={4}
+        windowSize={7}
+        ListHeaderComponent={
+          <View style={{ gap: 16, paddingBottom: 16 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Txt f="b7" size={30}>
+                Feed
+              </Txt>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <NotificationBell />
+                <IconButton icon="person_add" iconSize={22} onPress={openFriends} accessibilityLabel="Znajomi" />
+              </View>
+            </View>
+            <SegmentedControl
+              value={scope}
+              onChange={setScope}
+              options={[
+                { value: 'friends', label: 'Znajomi' },
+                { value: 'gmina', label: 'Moja gmina' },
+              ]}
+            />
           </View>
-        </View>
-        <SegmentedControl
-          value={scope}
-          onChange={setScope}
-          options={[
-            { value: 'friends', label: 'Znajomi' },
-            { value: 'gmina', label: 'Moja gmina' },
-          ]}
-        />
-
-        {posts.error ? (
-          <OfflineCard onRetry={posts.reload} />
-        ) : posts.loading && !posts.data ? (
-          <>
-            <SkeletonCard media={190} lines={2} radius={26} />
-            <SkeletonCard lines={1} radius={22} />
-          </>
-        ) : posts.data && posts.data.length === 0 ? (
-          <StateCard
-            icon="forest"
-            title="Cisza w lesie"
-            text={scope === 'gmina' ? 'Nikt z Twojej gminy nie opublikował jeszcze wyprawy.' : 'Dodaj znajomych, żeby widzieć ich wyprawy.'}
-            action={scope === 'gmina' ? 'Odśwież' : 'Dodaj znajomych'}
-            onAction={scope === 'gmina' ? onRefresh : openFriends}
-          />
-        ) : (
-          <View style={{ gap: 16, paddingBottom: 8 }}>
-            {posts.data?.map((p) =>
-              justHidden.includes(p.id) ? (
-                <HiddenStub key={p.id} post={p} onUndo={() => onUndoHide(p)} />
-              ) : (
-                <PostView key={p.id} post={p} actions={actions} />
-              ),
-            )}
+        }
+        ListEmptyComponent={
+          posts.error ? (
+            <OfflineCard onRetry={posts.reload} />
+          ) : !posts.data ? (
+            <View style={{ gap: 16 }}>
+              <SkeletonCard media={190} lines={2} radius={26} />
+              <SkeletonCard lines={1} radius={22} />
+            </View>
+          ) : (
+            <StateCard
+              icon="forest"
+              title="Cisza w lesie"
+              text={scope === 'gmina' ? 'Nikt z Twojej gminy nie opublikował jeszcze wyprawy.' : 'Dodaj znajomych, żeby widzieć ich wyprawy.'}
+              action={scope === 'gmina' ? 'Odśwież' : 'Dodaj znajomych'}
+              onAction={scope === 'gmina' ? onRefresh : openFriends}
+            />
+          )
+        }
+        ListFooterComponent={
+          // paddingTop 8 – dawny odstęp pod ostatnią kartą (przy pustym stanie go nie było).
+          <View style={{ paddingTop: list.length ? 8 : 0 }}>
+            {!posts.error && posts.data && hiddenCount > 0 ? (
+              <Pressable
+                onPress={onRestoreHidden}
+                accessibilityRole="button"
+                hitSlop={6}
+                style={({ pressed }) => ({
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  alignSelf: 'center',
+                  gap: 6,
+                  marginTop: 16,
+                  paddingVertical: 6,
+                  paddingHorizontal: 12,
+                  opacity: pressed ? 0.6 : 1,
+                })}
+              >
+                <Icon name="visibility_off" size={16} color={colors.faint} />
+                <Txt f="n8" size={13} color={colors.muted}>
+                  Ukryte wpisy ({hiddenCount}) · Przywróć
+                </Txt>
+              </Pressable>
+            ) : null}
           </View>
-        )}
-
-        {!posts.error && posts.data && hiddenCount > 0 ? (
-          <Pressable
-            onPress={onRestoreHidden}
-            accessibilityRole="button"
-            hitSlop={6}
-            style={({ pressed }) => ({
-              flexDirection: 'row',
-              alignItems: 'center',
-              alignSelf: 'center',
-              gap: 6,
-              paddingVertical: 6,
-              paddingHorizontal: 12,
-              opacity: pressed ? 0.6 : 1,
-            })}
-          >
-            <Icon name="visibility_off" size={16} color={colors.faint} />
-            <Txt f="n8" size={13} color={colors.muted}>
-              Ukryte wpisy ({hiddenCount}) · Przywróć
-            </Txt>
-          </Pressable>
-        ) : null}
-      </View>
+        }
+      />
       <PlayerSheet
         author={profileOf}
         onClose={() => setProfileOf(null)}
@@ -281,14 +319,22 @@ function openFriends() {
   router.push('/znajomi');
 }
 
-function PostView({ post, actions }: { post: Post; actions: PostActions }) {
+const EMPTY: Post[] = [];
+const postKey = (p: Post) => p.id;
+
+function PostGap() {
+  return <View style={{ height: 16 }} />;
+}
+
+/** Karta wpisu – memo: przerysowuje się tylko zmieniony wpis (akcje z ekranu są stabilne). */
+const PostView = memo(function PostView({ post, actions }: { post: Post; actions: PostActions }) {
   if (post.kind === 'levelup') return <LevelUpView post={post} onAuthor={actions.onAuthor} />;
   if (post.kind === 'compact') return <CompactView post={post} onAuthor={actions.onAuthor} />;
   return <TripView post={post} actions={actions} />;
-}
+});
 
 /** Karta w miejscu ukrytego wpisu – „Cofnij” przywraca go od razu. */
-function HiddenStub({ post, onUndo }: { post: Post; onUndo: () => void }) {
+const HiddenStub = memo(function HiddenStub({ post, onUndo }: { post: Post; onUndo: (p: Post) => void }) {
   return (
     <View
       style={{
@@ -313,10 +359,10 @@ function HiddenStub({ post, onUndo }: { post: Post; onUndo: () => void }) {
           {post.author.name} · nie zobaczysz go w feedzie
         </Txt>
       </View>
-      <Pill label="Cofnij" icon="undo" iconSize={17} padV={7} padH={12} onPress={onUndo} />
+      <Pill label="Cofnij" icon="undo" iconSize={17} padV={7} padH={12} onPress={() => onUndo(post)} />
     </View>
   );
-}
+});
 
 function PostHeader({
   post,
@@ -387,7 +433,7 @@ function TripView({ post, actions }: { post: TripPost; actions: PostActions }) {
   const hl = post.highlight;
   const hlColor = hl ? rarityTokens[hl.rarity].color : undefined;
   // Okładka: własny wpis – zdjęcie znaleziska z telefonu, a gdy go nie ma (nowe urządzenie) i cudze wpisy – okładka
-  // z serwera (publiczny adres w `post-media`, tryb Supabase). Bez zdjęcia – paski z makiety.
+  // z serwera (publiczny adres w `post-media`, tryb Supabase). Bez zdjęcia – kafel w kolorze najlepszego znaleziska.
   const local = useTripStore((s) => (post.coverFindId ? s.finds[post.coverFindId]?.photoUri : undefined));
   const localSource = useFindPhotoSource(local);
   const remoteSource = useMemo(() => (post.coverUrl ? { uri: post.coverUrl } : undefined), [post.coverUrl]);
@@ -412,10 +458,8 @@ function TripView({ post, actions }: { post: TripPost; actions: PostActions }) {
         <PostStat label="XP" value={`+${fmtInt(post.xp)}`} accent />
       </View>
       <Placeholder
-        variant="sand"
-        stripe={10}
-        label="zdjęcie znaleziska"
         source={cover}
+        tile={{ tint: hlColor ?? heatColors[3], glyph: hl ? 'mushroom' : 'forest', glyphSize: 64 }}
         style={{ height: 190, borderRadius: 18 }}
       >
         {hl ? (
@@ -549,7 +593,7 @@ function LevelUpView({ post, onAuthor }: { post: LevelUpPost; onAuthor: (p: Post
       </Pressable>
       <View style={{ flex: 1 }}>
         <Txt f="n8" size={14} color={colors.onDark}>
-          {post.author.name} awansował na Lv {post.level}!
+          {post.author.name} – awans na Lv {post.level}!
         </Txt>
         <Txt f="n7" size={12} color={colors.onDark} style={{ opacity: 0.85 }}>
           {post.badgeName ? `+ odznaka „${post.badgeName}” · ` : ''}
@@ -581,7 +625,7 @@ function CompactView({ post, onAuthor }: { post: CompactPost; onAuthor: (p: Post
               borderBottomColor: rarityTokens[r].color,
             }}
           >
-            <Placeholder variant="sand" stripe={6} style={{ aspectRatio: 1 }} />
+            <Placeholder tile={{ tint: rarityTokens[r].color, glyph: 'mushroom', glyphSize: 28 }} style={{ aspectRatio: 1 }} />
           </View>
         ))}
       </View>

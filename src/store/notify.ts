@@ -13,6 +13,7 @@
  */
 import { router, type Href } from 'expo-router';
 
+import { DEV_TOOLS } from '@/config';
 import { AUTHORS } from '@/data/mock/users';
 import { systemNotifications, type SystemNotification } from '@/services/live/notifications';
 import type { FeedService, StatsService } from '@/services/types';
@@ -286,6 +287,7 @@ export function syncLongTrip() {
 /**
  * Publikacja wyprawy: „wpis widoczny dla innych” po opóźnieniu prywatności i (mocki) symulowane reakcje
  * znajomych – w trybie Supabase reakcje przychodzą z serwera (pollActivity), więc `simulatedSocial: false`.
+ * Symulowane reakcje tylko z narzędziami dev (zrzuty i scenariusze) – build bez nich nie udaje aktywności innych.
  * Host wywołuje to sam po zmianie statusu wyprawy na „published”; z dokładnym wpisem
  * (visibleFrom z serwera) można wywołać bezpośrednio – ten sam klucz podmienia plan.
  */
@@ -296,7 +298,8 @@ export function onTripPublished(
   const visibleFrom = new Date(post.visibleFrom).getTime();
   const name = catalog().gminaById[post.gminaId]?.name;
   const detail = post.detail ?? (name ? `z gminy ${name}` : '');
-  const social = opts.simulatedSocial === false ? [] : mockSocialNotifications(post.id, visibleFrom, Object.values(AUTHORS));
+  const simulated = DEV_TOOLS && opts.simulatedSocial !== false;
+  const social = simulated ? mockSocialNotifications(post.id, visibleFrom, Object.values(AUTHORS)) : [];
   const items = [visibleNotification(post.id, detail, visibleFrom), ...social];
   store().enqueue(items.map((i) => ({ ...i, system: true })));
 }

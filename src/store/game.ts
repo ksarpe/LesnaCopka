@@ -20,14 +20,23 @@ import type {
   User,
 } from '@/types';
 import { ACHIEVEMENT_BY_ID, evaluateAchievements, newlyReached, tierKind, TIER_LABEL } from '@/utils/achievements';
-import { countActiveDay, countFind, countSocial, countTripFinish, countTripStart, EMPTY_COUNTERS, type SocialEvent } from '@/utils/counters';
+import {
+  countActiveDay,
+  countFind,
+  countSocial,
+  countTripFinish,
+  countTripStart,
+  effectiveStreak,
+  EMPTY_COUNTERS,
+  type SocialEvent,
+} from '@/utils/counters';
 import { isDataUri, trimPhotoBudget } from '@/utils/findPhoto';
 import { uuid } from '@/utils/random';
 import { isPhotoOnlySpecies, isPoisonousEdibility, isProtectedSpecies } from '@/utils/species';
 import { applyXp, computeFindXp } from '@/utils/xp';
 import {
+  addDistanceProgress,
   badgesToUnlock,
-  bumpDistanceQuests,
   bumpQuests,
   currentQuests,
   pinDesignQuests,
@@ -41,6 +50,7 @@ import { usePrefsStore } from './usePrefsStore';
 import { useSimStore } from './useSimStore';
 import { useTrackStore } from './useTrackStore';
 import { tripElapsedMs, useTripStore } from './useTripStore';
+import { persistLazily } from './storage';
 import { ui } from './useUiStore';
 import { initialUserState, questsFor, todayKey, useUserStore, type AcceptedChallenge, type UserState } from './useUserStore';
 import { useVoivodeshipStore } from './useVoivodeshipStore';
@@ -63,12 +73,21 @@ function yesterdayKey() {
   return todayKey(new Date(Date.now() - 86400000));
 }
 
-/** Reset dzienny i tygodniowy (zadania z nowego losowania, „pierwszy w gminie dziś”). */
+/**
+ * Reset dzienny i tygodniowy (zadania z nowego losowania, „pierwszy w gminie dziś”) i przerwana seria: ostatni dzień
+ * w lesie przed wczoraj → seria 0 (pigułka na Starcie, odznaka „seria-7”). Następna aktywność zacznie ją od 1
+ * (bumpStreakForToday); serwer liczy to samo (effectiveStreak przy przyjęciu stanu), więc nic nie idzie do kolejki.
+ * Wołane po hydratacji store'ów, przed akcjami gry i po powrocie aplikacji na pierwszy plan (NotificationsHost).
+ */
 export function ensureDailyReset() {
   const u = useUserStore.getState();
   const today = todayKey();
   const patch: Parameters<typeof u.patch>[0] = { ...questPeriodsPatch() };
   if (u.today.date !== today) patch.today = { date: today, keys: [], km: 0 };
+  if (effectiveStreak(u.user.streakDays, u.lastActiveDate, today, yesterdayKey()) === 0) {
+    if (u.user.streakDays) patch.user = { ...u.user, streakDays: 0 };
+    if (u.counters.streakDays) patch.counters = { ...u.counters, streakDays: 0 };
+  }
   if (Object.keys(patch).length) u.patch(patch);
 }
 
@@ -307,18 +326,26 @@ export function finishTrip(): string | null {
   return trip.id;
 }
 
+/**
+ * Dystans z GPS (co ok. 5 m / 4 s – TripTracker). Wyprawa i kilometry gracza zmieniają się w pamięci od razu (UI,
+ * zadania, osiągnięcia, kolejka `trip.progress`), ale na dysk trafiają leniwie – najpóźniej po 30 s, w tle aplikacji
+ * i przy najbliższym zwykłym zapisie (koniec wyprawy, znalezisko, wypłata XP) – patrz persistLazily. Bez tego każdy
+ * odczyt GPS serializował cały store wypraw (na webie ze zdjęciami) i kilka razy stan gracza.
+ */
 export function addDistance(deltaKm: number) {
   ensureDailyReset();
   const ts = useTripStore.getState();
   const trip = ts.activeTripId ? ts.trips[ts.activeTripId] : null;
   if (!trip || deltaKm <= 0) return;
-  ts.upsertTrip({ ...trip, distanceKm: trip.distanceKm + deltaKm });
-  useOutboxStore.getState().enqueueTripProgress(trip.id, Math.round((trip.distanceKm + deltaKm) * 1000));
-  const u = useUserStore.getState();
-  const km = u.today.km + deltaKm;
-  u.patch({ today: { ...u.today, km }, counters: { ...u.counters, totalKm: u.counters.totalKm + deltaKm } });
-  // Zadania dystansu (dzienne i tygodniowe) – XP od razu; odznaka „100 km”.
-  if (bumpDistanceQuests(deltaKm)) grantPendingRewards();
+  const distanceKm = trip.distanceKm + deltaKm;
+  const questDone = persistLazily(() => {
+    ts.upsertTrip({ ...trip, distanceKm });
+    // Kilometry dnia, tygodnia i łączne + zadania dystansu – jeden zapis stanu gracza.
+    return addDistanceProgress(deltaKm);
+  });
+  useOutboxStore.getState().enqueueTripProgress(trip.id, Math.round(distanceKm * 1000));
+  // Ukończone zadania dystansu – XP od razu (zwykły zapis: utrwala też kilometry); odznaka „100 km”.
+  if (questDone) grantPendingRewards();
   unlockBadgesWithToast();
 }
 
@@ -363,7 +390,10 @@ export function noteSocial(e: SocialEvent) {
 
 /* ───────────────────────── Znaleziska ───────────────────────── */
 
-/** `parts` – ujęcia ze skanu (ScanResult.parts), wysyłane z rozpoznaniem na serwer. */
+/**
+ * Znalezisko z rozpoznania zdjęcia (IdentifyOutcome „mushroom”). `parts` – części owocnika widoczne na zdjęciu
+ * (podpowiedź na Analizie, wysyłane z rozpoznaniem na serwer jako ujęcia skanu).
+ */
 export function createPendingFind(
   id: Identification,
   gminaId: string,
@@ -385,6 +415,7 @@ export function createPendingFind(
     status: 'pending',
     foundAt: new Date().toISOString(),
     candidates: id.candidates,
+    ...(opts?.parts?.length ? { visibleParts: opts.parts } : {}),
     photoUri: opts?.photoUri,
   };
   useTripStore.getState().upsertFind(find);
@@ -393,7 +424,8 @@ export function createPendingFind(
     const trimmed = trimPhotoBudget(useTripStore.getState().finds);
     if (trimmed) useTripStore.getState().patch({ finds: trimmed });
   }
-  // Tymczasowo: rozpoznanie z telefonu (mock) – docelowo zapisze je Edge Function `identify`.
+  // Wynik rozpoznania (Edge Function `identify`) przekazuje telefon – serwer go nie podpisuje (do zrobienia: identify
+  // zapisuje znalezisko sama albo zwraca podpis wyniku, który sprawdzi submit_find – docs/backend.md, etap 7).
   emit({
     type: 'find.submit',
     payload: {
@@ -671,7 +703,8 @@ export function loadScenario(s: Scenario): string | null {
   if (s === 'start') return null;
   if (s === 'newUser') {
     // Nowy użytkownik zaczyna od onboardingu (dev-link `onboarding=0` go pomija).
-    useUserStore.getState().reset({ ...freshPlayerState(), onboarded: false });
+    // Gmina domowa jak u nowego gracza – z pierwszego wykrycia GPS na Starcie.
+    useUserStore.getState().reset({ ...freshPlayerState(), onboarded: false, homeGminaPending: true });
     return null;
   }
   const now = Date.now();

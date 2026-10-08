@@ -66,12 +66,12 @@ Do potwierdzenia na urządzeniu: pionowe położenie tekstu z `lineHeight` = roz
 - **Wstecz na Analizie (03)** prowadzi do nowego skanu (jak w pliku) i porzuca nieodebrane znalezisko.
 - **Skan bez wyprawy** (FAB z innej zakładki) – przy odbiorze nagrody wyprawa startuje automatycznie
   (w pliku „Zbieram dalej” zawsze prowadzi do aktywnej wyprawy).
-- **Spust skanu** – nieaktywny < 100% (półprzezroczysty), w trybie dev zawsze aktywny. W pliku widać
-  tylko stan aktywny. Części grzyba zaliczają się przy 15/40/65/95% – przy 68% są trzy, jak w makiecie.
+- **Spust skanu** – zawsze aktywny (jak w pliku), pulsuje, gdy aparat jest gotowy. Nie ma już procentu skanu 360°
+  ani „zaliczanych” części grzyba – skan to jedno zdjęcie rozpoznawane na serwerze (patrz „Rozpoznawanie AI” niżej).
 - **Latarka** – przełącznik (ikona `flash_on` obrysowa → wypełniona na zielonym tle) + toast.
-- **Rozpoznanie** – pierwszy skan to zawsze borowik XXL 410 g z makiety, kolejne z deterministycznego
-  seeda (wagi wg rzadkości). XXL = waga ≥ 125% typowej dla gatunku. Niska pewność < 60% →
-  „Nie jestem pewien” z listą możliwych gatunków, bez nagrody.
+- **Rozpoznanie** – model AI ze zdjęcia (Edge Function `identify`); scenariusz z makiety (borowik XXL 410 g) daje dev-link
+  `?scenario=designAnalysis` albo wymuszony wynik w panelu `/dev`. XXL = waga ≥ 125% typowej dla gatunku – tylko gdy na
+  zdjęciu jest odniesienie skali. Niska pewność < 60% → „Nie jestem pewien” z listą możliwych gatunków, bez nagrody.
 - **Gatunki trujące** – połowa bazowych XP (+50 za nowy gatunek), bez XXL/serii, nie trafiają do koszyka
   ani licznika grzybów, ale trafiają do atlasu („Tylko zdjęcie” w ostatnich znaleziskach).
 - **Seria dni** – bonus +30 od 2 dni z rzędu, do każdego znaleziska (jak w rozpisce pliku).
@@ -137,8 +137,8 @@ Do potwierdzenia na urządzeniu: pionowe położenie tekstu z `lineHeight` = roz
 - **Skan 02 z prawdziwym aparatem.** Podgląd kamery wypełnia ekran za UI z makiety; wnętrze pierścienia jest
   przezroczyste z cienką przerywaną linią, poza pierścieniem lekkie przyciemnienie i gradienty pod tekstami.
   Napis „podgląd kamery” zostaje tylko w symulacji (i w dev-linkach – domyślnie aparat symulowany, żeby zrzuty
-  zgadzały się z makietą). Postęp skanu rusza, gdy aparat jest gotowy (najpóźniej po 5 s). Zdjęcie ze spustu nie
-  blokuje analizy (limit 10 s); porzucone znalezisko kasuje swój plik.
+  zgadzały się z makietą). Pierścień wypełnia się, gdy aparat jest gotowy. Bez zdjęcia (limit 10 s, błąd aparatu)
+  rozpoznania nie ma – „Nie udało się zrobić zdjęcia”; porzucone znalezisko i odrzucone zdjęcie kasują swój plik.
 - **Zdjęcia znalezisk** zastępują paski tam, gdzie makieta ma „zdjęcie grzyba / znaleziska” (Analiza, Nagroda,
   miniatury, Podsumowanie, karta gatunku, okładka własnego wpisu). Cudze wpisy: w mockach paski, z backendem Supabase –
   okładka ze Storage (patrz „Zdjęcia w Storage”).
@@ -182,7 +182,12 @@ Do potwierdzenia na urządzeniu: pionowe położenie tekstu z `lineHeight` = roz
   się zlewają, woda wycina), znacznik tylko tam, gdzie mieści się w lesie, najpierw w najgłębszych miejscach,
   co najmniej 64 px od siebie – wynik zależy tylko od skali, więc przy przesuwaniu nie skacze. Odległość do lasu
   liczona z dokładnej pozycji (karta liczy ją od środka zaokrąglonego do ~10 m – różnica kilku metrów).
-  Do sprawdzenia na iPhonie: płynność gestów i ostrość po puszczeniu palców (pamięć bitmapy SVG ~ ekran + 30%).
+  Gesty (2026-10-08): wcześniej widok był zatwierdzany także w trakcie gestu (co ~70 px przesunięcia / ~25%
+  oddalenia) – każde przerysowanie SVG blokowało wątek UI i na iPhonie mapa szarpała. Teraz w trakcie gestu
+  tylko transform; pod spodem stały podkład z całą okolicą przy 1×, więc po dużym przybliżeniu brzegi poza
+  zakładką są przez chwilę rozmyte, a ostre po puszczeniu palców. Web: `will-change: transform` tylko na czas
+  gestu. Do sprawdzenia na iPhonie: płynność i pamięć bitmap SVG (podkład ~890 × 890 pt + po przybliżeniu
+  szczegóły: ekran + 25%).
 - **Dystans na komputerze** – Wi-Fi zwykle daje dokładność > 35 m, więc dystans z GPS praktycznie nie rośnie
   (zamierzone; do testów: symulacja albo „Spacer” w panelu dev).
 
@@ -346,11 +351,27 @@ i ekran `app/ustawienia/mapy-offline.tsx`. Opis działania – README, „Mapy o
   gdziekolwiek się liczy, a lokalnie zakończonego serwer nie cofa. Zapisani gracze sprzed tej wersji – `onboarded = true`
   (migracja v4); ich konta na serwerze mają `onboardedAt = null`, więc logowanie takim kontem na nowym telefonie pokaże
   onboarding (i poprosi o akceptację regulaminu) – świadomie, bez automatycznego „dosyłania” zgody.
-- **Gmina domowa wybierana świadomie** (bez domyślnej Supraśli z mocków), nick sprawdzany przed „Dalej”
-  (`getUserByHandle`; bez sieci – sprawdzi serwer przy zapisie, zajęty → istniejący toast „Ten nick jest już zajęty”).
-  Avatar w onboardingu tylko z motywów (zdjęcie – później w edycji profilu: mniej zgód naraz). „Mam ukończone 16 lat” jest
-  wymagane jak w zadaniu (regulamin dopuszcza młodszych za zgodą rodzica – podpis pod polem).
-- **Kolejność zdarzeń** po onboardingu: `profile.update` → (`photo.avatar`) → `terms.accept` → `onboarding.complete` (FIFO).
+- **Onboarding na jedno dotknięcie** (2026-10, zgłoszenie „za dużo klikania zgód”). Było: 6 kroków, 3 obowiązkowe pola
+  wyboru (bezpieczeństwo, regulamin + polityka, 16 lat), obowiązkowy profil (imię, nick) i gmina, ekran uprawnień –
+  ok. 10–11 dotknięć + pisanie + systemowe pytanie o lokalizację. Jest: jeden ekran, „Zaczynamy!” z oświadczeniem nad
+  przyciskiem (`ONBOARDING_CONSENT` – akceptacja regulaminu z zasadami bezpieczeństwa, „znasz” politykę prywatności –
+  to informacja, podstawą jest umowa, art. 6 ust. 1 lit. b RODO – i 16 lat / zgoda rodzica; § 3 regulaminu mówi
+  „potwierdzasz to przy pierwszym uruchomieniu”). Ramka `SAFETY_NOTICE` stoi zaraz pod powitaniem (widoczna bez
+  przewijania). Do potwierdzenia z prawnikiem: wystarczalność akceptacji przyciskiem zamiast pól wyboru i potwierdzenia
+  wieku w oświadczeniu zamiast osobnego pola.
+- **Zgody systemowe just-in-time.** Start nie pyta już o lokalizację przy wejściu (`useRegion` – `askPermission: false`):
+  bez decyzji (`undetermined` + błąd `PERMISSION`) karta „Gdzie dziś zbierasz? → Włącz lokalizację”, a „Rozpocznij
+  grzybobranie” zostaje aktywne (zapyta i wystartuje). Symulacja GPS (dev-linki) działa jak dotąd bez zgody.
+- **Gmina domowa z GPS** (bez domyślnej Supraśli z mocków, która jest tylko wartością zastępczą): `homeGminaPending`
+  w `useUserStore` (świeża instalacja z serwerem, `wipeLocalData`, scenariusz „Nowy użytkownik”) → pierwsza wykryta gmina
+  (`adoptHomeGmina`, efekt na Starcie) albo ręczny wybór w Ustawieniach. Z serwerem dopiero po pierwszym przyjęciu stanu
+  konta (`syncedUserId`) – `profile.update` niesie cały profil, a przed `replace` w telefonie jest gracz zastępczy.
+  Gmina z serwera kasuje flagę (`buildUserState`). Nick i avatar: domyślne z serwera (`grzybiarz_xxxxxxxx`), zmiana
+  w edycji profilu – onboarding nie wysyła `profile.update`.
+- **Gracz demo przed pierwszą synchronizacją.** Krótki onboarding nie zasłania już pierwszej synchronizacji: jeśli przy
+  „Zaczynamy!” stanu konta jeszcze nie ma (z serwerem, `syncedUserId = null`, np. offline), `completeOnboarding` zastępuje
+  gracza demo nowym graczem (`freshPlayerState`, jak po wylogowaniu).
+- **Kolejność zdarzeń** po onboardingu: `terms.accept` → `onboarding.complete` (FIFO).
   Serwer sprzed etapu 6 (`PGRST202`) – oba nowe zdarzenia są pomijane (`tolerated`), żeby nie blokować kolejki gry na kwadrans.
   Wersja dokumentów: `LEGAL_VERSION` = najnowsza data `updated` z `src/data/legal.ts` (dziś = `REGULAMIN.updated`).
 - **Zmiana konta pod blokadą silnika.** `switchAccount()` (`src/services/supabase/sync.ts`) jest wspólne dla logowania kodem,
@@ -386,8 +407,9 @@ i ekran `app/ustawienia/mapy-offline.tsx`. Opis działania – README, „Mapy o
   w mini profilu: chip „Zablokowany” i „Odblokuj” zamiast przycisków znajomości. Profil osoby, która zablokowała gracza,
   pokazuje „Ten profil jest niedostępny” (jak nieistniejący – serwer zwraca `P0002`). Mock: blokada tylko po stronie gracza
   (boty nikogo nie blokują); symulowane powiadomienia społecznościowe mocków nie są filtrowane.
-- **Teksty.** Z Ustawień i „O aplikacji” zniknęło „prototyp”; zostaje uczciwa informacja „Rozpoznawanie gatunków działa
-  na razie w trybie demonstracyjnym” (stopka Ustawień, „O aplikacji”, krok „Bezpieczeństwo”, § 2 regulaminu). Regulamin
+- **Teksty.** Z Ustawień i „O aplikacji” zniknęło „prototyp”. Informację „Rozpoznawanie gatunków działa na razie w trybie
+  demonstracyjnym” zastąpiło (2026-10-08, prawdziwe rozpoznawanie): „Rozpoznanie AI może się mylić – nie jedz grzyba tylko
+  na podstawie aplikacji” (stopka Ustawień, Analiza, Nagroda), opis modelu w „O aplikacji”, na ekranie powitalnym i w § 2 regulaminu. Regulamin
   i polityka (szkice) opisują teraz e-mail z kodem, usuwanie konta i eksport w aplikacji oraz blokowanie (`npm run legal:md`).
 - **Nie sprawdzone na urządzeniu w tej sesji** (bez uruchamiania przeglądarki / symulatora): przejścia `Stack.Protected`,
   udostępnianie pliku i autouzupełnianie kodu na iOS – logika jest w testach, a kontrakt z serwerem w teście integracyjnym
@@ -507,7 +529,7 @@ potwierdzenie przerwania skanu, LEVEL UP (rozbłysk, animacja etykiety, haptyka 
   je włączone (testerzy mogą symulować GPS, sieć i skan), produkcja – nie. Bez nich `/dev` robi `<Redirect href="/">`
   (zostaje w drzewie tras – deep link nie kończy się 404), a stan symulacji jest „czyszczony” już przy hydratacji
   (`merge` w persist `useSimStore`) – zanim cokolwiek go odczyta, także `mockInit`, który w trybie urządzenia odczytuje
-  zgody z systemu. Zgody i licznik skanów zostają (licznik daje powtarzalne wyniki mocka rozpoznania). Dev-linki
+  zgody z systemu. Zgody zostają, wymuszony wynik skanu jest zawsze wyłączony. Dev-linki
   `?scenario=` zostają za samym `__DEV__` (web).
 - **Ekran błędu na dwóch poziomach.** `export function ErrorBoundary` w `app/_layout.tsx` łapie błąd całego layoutu
   (start, fonty, store'y) – wtedy nie ma nawigatora i „Wróć na start” sprowadza się do ponownego zamontowania. Ten sam
@@ -539,7 +561,8 @@ potwierdzenie przerwania skanu, LEVEL UP (rozbłysk, animacja etykiety, haptyka 
 - **Szkice regulaminu i polityki** – jedno źródło (`src/data/legal.ts`): ekrany Ustawienia → „Informacje prawne” i
   `docs/legal/*.md` (`npm run legal:md`, test pilnuje zgodności, pliki porównywane bez względu na CRLF). Placeholdery
   w nawiasach kwadratowych, bez wymyślonych danych administratora. Treść opisuje stan faktyczny, w tym rzeczy jeszcze
-  niegotowe – jako „[Do uzupełnienia / Do wdrożenia: …]”: rozpoznanie gatunku jest dziś symulowane, nie ma usuwania konta
+  niegotowe – jako „[Do uzupełnienia / Do wdrożenia: …]”: (już nieaktualne: rozpoznanie gatunku jest od 2026-10-08 prawdziwe –
+  model Claude, opisany w § 2 regulaminu i pkt 4 / 10 / 11 polityki z „[Do weryfikacji prawnej …]”), nie ma usuwania konta
   ani eksportu danych w aplikacji (na razie e-mail), nie ma logowania (utrata telefonu = utrata konta anonimowego).
   Zdjęcia: polityka opisuje docelowe działanie z Supabase Storage (zdjęcia znalezisk prywatne, okładki wpisów i avatary
   publiczne, EXIF usuwany przez ponowne zakodowanie w expo-image-manipulator).
@@ -549,9 +572,47 @@ potwierdzenie przerwania skanu, LEVEL UP (rozbłysk, animacja etykiety, haptyka 
   pseudonim. Decyzja produktowa: zostawić czy pokazywać innym tylko nick.
 - **Wymogi sklepów do zrobienia w kodzie:** usuwanie konta w aplikacji (App Store 5.1.1(v) – konto z nickiem i funkcjami
   społecznościowymi), blokowanie użytkowników (1.2 – treści użytkowników: jest zgłaszanie i ukrywanie wpisów, brak blokady
-  autora), napisy „prototyp” w Ustawieniach i „O aplikacji” (2.2 – wersje demo), rozpoznanie gatunku (model albo wyraźna
-  informacja, że wynik jest symulowany).
+  autora), napisy „prototyp” w Ustawieniach i „O aplikacji” (2.2 – wersje demo). Rozpoznanie gatunku – zrobione (model AI,
+  2026-10-08); w „App Privacy” / „Bezpieczeństwie danych” zdjęcia idą też do zewnętrznego dostawcy AI.
 - **Bezpieczeństwo grzybów – bez zmian w kodzie.** Sprawdzone: Analiza pokazuje czerwony baner „Nie zbieraj – tylko zdjęcie”
   dla trujących i śmiertelnie trujących (osobny tekst), przycisk „Zapisz w atlasie” zamiast nagrody, żółty baner „Potwierdź
   u eksperta przed jedzeniem” przy sobowtórach; karta gatunku ma ten sam czerwony baner; niska pewność (< 60%) – „Nie jestem
   pewien”, bez nagrody.
+
+## Rozpoznawanie AI (2026-10-08)
+
+Symulacja skanu zniknęła: zdjęcie ze spustu rozpoznaje Edge Function `identify` (Claude, Anthropic API), a zdjęcie bez
+grzyba od razu kończy się „Nie wykryłem grzyba”. Konfiguracja, koszty i limit – README „Rozpoznawanie grzyba (AI)”.
+
+- **Skan 02 – odstępstwa od pliku.** Tytuł „Skan grzyba” zamiast „Skan 360°”, zamiast procentu (44 px) – stan aparatu
+  („Wyceluj w grzyba”, „Uruchamiam aparat…”, „Brak aparatu”), bez pigułek Kapelusz / Spód / Trzon / Podstawa (były
+  „zaliczane” na niby). Pierścień to kadr: wypełnia się na zielono, gdy aparat jest gotowy – nie udaje postępu analizy.
+  „Sweep” pierścienia kręci się tylko podczas „Analizuję…” (zwykły wskaźnik oczekiwania na serwer, ze zdjęciem w środku).
+- **Odrzucenie (nie grzyb / niewyraźne)** – karta na dole nad podglądem, który już działa (nie pełny ekran): „Spróbuj
+  ponownie” od razu wraca do celowania. Powód pisze model (po polsku, przycięty do 200 znaków); przy niewyraźnym trzy
+  stałe wskazówki. Grzyb spoza atlasu → „Niewyraźne zdjęcie” z powodem modelu (np. „tego gatunku nie ma w atlasie”).
+- **Ostrożność.** Prompt: niższa pewność przy wątpliwościach, groźny sobowtór na liście kandydatów. Aplikacja dodatkowo:
+  jadalny zwycięzca + trujący / śmiertelny kandydat z pewnością ≥ 15% → pewność najwyżej 55% („Nie jestem pewien”).
+  Analiza i Nagroda zawsze pokazują „Rozpoznanie AI może się mylić…” (onboarding nie ma już pola „Rozumiem”).
+- **Wymiary bez zmyślania.** Model podaje rozmiar tylko przy odniesieniu skali (dłoń, nóż, moneta); bez niego wymiary =
+  typowe dla gatunku (skala 1, bez XXL). Waga = typowa × skala² (jak wcześniej – te same progi XXL i anty-cheatu
+  `find_size`). Wiek z dojrzałości (młody 2 dni, dojrzały 5, stary 9, nieznany 4). Kępki – sztuki × waga jednej.
+- **Widoczne części** (`visibleParts`) zastąpiły „zaliczone” części: idą w `find.submit` jako `parts` i dają podpowiedź na
+  Analizie (brak podstawy trzonu przy śmiertelnym sobowtórze, brak spodu kapelusza przy sobowtórze).
+- **Kontekst żądania** – tylko miesiąc i województwo (nie gmina, nie współrzędne). Funkcja buduje tekst z wartości z listy
+  (bez wstrzyknięć), a prompt mówi, że tekst na zdjęciu to dane, nie polecenia.
+- **Tryb mock z adresem serwera** – rozpoznawanie też działa: osobny klient z własną sesją anonimową
+  (`identifyClient()`, klucz sesji `grzybobranie-identify-auth`), gra zostaje na mockach. Bez adresu i klucza – „Rozpoznawanie
+  wymaga połączenia z serwerem” (a nie losowy gatunek).
+- **Panel dev** – jedno wymuszenie „Wymuś wynik skanu” (gatunek + XXL / niska pewność, nie grzyb, niewyraźne) zamiast
+  losowania i nadpisań rzadkości / trującego / „spust zawsze aktywny” (te pola i licznik skanów usuwa migracja zapisu
+  symulacji do wersji 2). Galeria na ekranie skanu – tylko z narzędziami dev (anty-cheat: w wydaniu wyłącznie aparat).
+  `ScanService` (startScan / capturePartial) i `src/services/mock/identifyPick.ts` usunięte.
+- **Limit kosztów** – 60 / 24 h (okno kroczące) i jedno naraz, wywołania nieudane po stronie modelu się nie liczą; dziennik
+  `identify_calls` bez zdjęć i wyników, 7 dni, kasowany z kontem.
+- **Nie sprawdzone w tej sesji:** prawdziwe wywołanie Claude (koszty – testy na atrapach), `deno check`
+  i `supabase functions serve` funkcji, ekran skanu na telefonie z aparatem (iOS / Android), przerwanie żądania po
+  stronie Edge Function przy zamknięciu ekranu (`req.signal` – zależy od bramki Supabase).
+- **Do zrobienia:** podpis wyniku rozpoznania przez serwer (dziś `find.submit` przyjmuje gatunek od telefonu – Edge Function
+  może zapisać znalezisko sama albo zwrócić podpis do `submit_find`), rozpoznanie odłożone na później bez zasięgu,
+  weryfikacja prawna przekazania zdjęć do Anthropic, `deno.json` z przypiętą wersją `@anthropic-ai/sdk`.

@@ -13,7 +13,7 @@ import { OfflineMapSheet } from '@/components/OfflineMaps';
 import { Pill } from '@/components/Pill';
 import { Placeholder } from '@/components/Placeholder';
 import { Txt } from '@/components/Txt';
-import { MAX_ZOOM, MIN_ZOOM, ZoomableAreaMap, type ZoomableAreaMapHandle } from '@/components/ZoomableAreaMap';
+import { ZoomableAreaMap, type MapViewInfo, type ZoomableAreaMapHandle } from '@/components/ZoomableAreaMap';
 import { nearestPointOnFilledRings } from '@/geo/geometry';
 import { lonLatToWorld } from '@/geo/mercator';
 import { FULL_MAP_RADIUS_M, useAreaMap } from '@/hooks/useAreaMap';
@@ -41,7 +41,7 @@ export default function MapScreen() {
   const bottom = useBottomPadding();
   const mapRef = useRef<ZoomableAreaMapHandle>(null);
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
-  const [view, setView] = useState({ zoom: 1, atHome: true });
+  const [view, setView] = useState<MapViewInfo>({ canZoomIn: true, canZoomOut: false, atHome: true });
   const [offlineOpen, setOfflineOpen] = useState(false);
   const job = useOfflineMapsStore((s) => Object.values(s.jobs)[0]);
   // Cały zakres kafli mapy w obszarach offline – subskrypcja listy obszarów przelicza go po pobraniu / usunięciu.
@@ -179,13 +179,13 @@ export default function MapScreen() {
                 icon="add"
                 onPress={() => mapRef.current?.zoomBy(2)}
                 accessibilityLabel="Przybliż"
-                style={{ opacity: view.zoom >= MAX_ZOOM - 0.01 ? 0.5 : 1 }}
+                style={{ opacity: view.canZoomIn ? 1 : 0.5 }}
               />
               <IconButton
                 icon="remove"
                 onPress={() => mapRef.current?.zoomBy(0.5)}
                 accessibilityLabel="Oddal"
-                style={{ opacity: view.zoom <= MIN_ZOOM + 0.01 ? 0.5 : 1 }}
+                style={{ opacity: view.canZoomOut ? 1 : 0.5 }}
               />
               <IconButton
                 icon="my_location"

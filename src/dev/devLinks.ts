@@ -3,7 +3,7 @@
  * zrzutów z makietą i szybkiego testowania. Przykłady:
  *   /?scenario=start                 01 (idle)
  *   /?scenario=designActive          01 (wyprawa trwa – liczby z makiety)
- *   /?scenario=scan&scanAt=0.68      02 (skan zatrzymany na 68%)
+ *   /?scenario=scan                  02 (skan; z symulowanym aparatem – „Brak aparatu”, chyba że wynik jest wymuszony)
  *   /?scenario=designAnalysis        03 (borowik XXL z makiety)
  *   /?scenario=designReward          04 (nagroda z makiety)
  *   /?scenario=designSummary         05 (podsumowanie z makiety)
@@ -14,19 +14,24 @@
  *   src=device (prawdziwy GPS; domyślnie symulacja – powtarzalne zrzuty) · point=coarse|abroad
  *   camSrc=device (prawdziwy aparat; domyślnie paskowany placeholder z makiety)
  *   gps=0 · net=0 · loc=denied|undetermined · cam=denied|undetermined
- *   species=<id> · rarity=<rzadkość> · xxl=1|0 · poison=1 · low=1 · xp=<XP w poziomie>
+ *   wymuszony wynik skanu (zamiast rozpoznania zdjęcia – src/utils/identify.ts):
+ *     species=<id> · xxl=1 · low=1 · poison=1 (= muchomor zielonawy) · result=not_mushroom|unclear
+ *   xp=<XP w poziomie>
  * Prognoza grzybowa: pozycja z symulacji nie pyta Open-Meteo – Supraśl ma stałą prognozę z makiety
  * („Prognoza grzybowa 4/5”, „2 dni po deszczu”), patrz src/services/mock/weather.ts.
  */
 import { router } from 'expo-router';
 
+import { SPECIES } from '@/data/mock/species';
 import { useRegionStore } from '@/hooks/useRegion';
 import type { Services } from '@/services/types';
 import { claimFind, createPendingFind, loadScenario, type Scenario } from '@/store/game';
 import { devShowOnboarding, devSkipOnboarding } from '@/store/onboarding';
+import { useCatalogStore } from '@/store/useCatalogStore';
 import { useSimStore } from '@/store/useSimStore';
 import { useUserStore } from '@/store/useUserStore';
-import type { Identification, Rarity } from '@/types';
+import type { Identification } from '@/types';
+import { devScanOutcome, type ScanOverride } from '@/utils/identify';
 
 const DESIGN_FIND: Identification = {
   speciesId: 'borowik-szlachetny',
@@ -71,20 +76,21 @@ export async function applyDevLink(params: URLSearchParams, services: Services) 
     cameraSource: p('camSrc') === 'device' ? 'device' : 'sim',
   });
   if (p('point') === 'coarse' || p('point') === 'abroad') sim.set({ simPoint: p('point') as 'coarse' });
-  if (p('scanAt')) sim.set({ scanFreezeAt: Number(p('scanAt')) });
   if (p('gps') === '0') sim.set({ gpsEnabled: false });
   if (p('net') === '0') sim.set({ networkEnabled: false });
   if (p('loc')) sim.setPermission('location', p('loc') as 'denied');
   if (p('cam')) sim.setPermission('camera', p('cam') as 'denied');
-  const overrides = !!(p('species') || p('rarity') || p('xxl') || p('poison') || p('low'));
+  const result = p('result');
+  const overrides = !!(p('species') || p('xxl') || p('poison') || p('low') || result);
+  let override: ScanOverride | null = null;
   if (overrides) {
-    sim.setScan({
-      speciesId: p('species'),
-      rarity: (p('rarity') as Rarity) ?? null,
-      xxl: p('xxl') == null ? null : p('xxl') === '1',
-      poisonous: p('poison') === '1',
+    override = {
+      force: result === 'not_mushroom' || result === 'unclear' ? result : 'species',
+      speciesId: p('species') ?? (p('poison') === '1' ? 'muchomor-zielonawy' : null),
+      xxl: p('xxl') === '1',
       lowConfidence: p('low') === '1',
-    });
+    };
+    sim.setScan(override);
   }
   if (p('xp')) {
     const u = useUserStore.getState();
@@ -95,9 +101,16 @@ export async function applyDevLink(params: URLSearchParams, services: Services) 
   if (scenario === 'designSummary' && tripId) href = `/summary/${tripId}`;
   if (scenario === 'scan') href = '/scan';
   if (scenario === 'designAnalysis' || scenario === 'designReward') {
-    const ident = overrides ? await services.identify.identify(services.scan.capturePartial(['cap', 'underside', 'stem', 'base'])) : DESIGN_FIND;
-    const find = createPendingFind(ident, 'suprasl');
-    href = scenario === 'designAnalysis' ? `/analysis/${find.id}` : `/reward/${claimFind(find.id)?.id}`;
+    const loaded = useCatalogStore.getState().species;
+    const outcome = override ? devScanOutcome(override, loaded.length ? loaded : SPECIES) : null;
+    if (outcome && outcome.kind !== 'mushroom') {
+      href = '/scan';
+    } else {
+      const ident = outcome?.kind === 'mushroom' ? outcome.identification : DESIGN_FIND;
+      const parts = outcome?.kind === 'mushroom' ? outcome.visibleParts : undefined;
+      const find = createPendingFind(ident, 'suprasl', { parts });
+      href = scenario === 'designAnalysis' ? `/analysis/${find.id}` : `/reward/${claimFind(find.id)?.id}`;
+    }
   }
   if (href) setTimeout(() => router.push(href as never), 300);
 }

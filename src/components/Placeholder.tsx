@@ -10,7 +10,10 @@ import {
   type ViewStyle,
 } from 'react-native';
 
-import { stripes, type StripeVariant } from '@/theme/tokens';
+import Svg, { Path } from 'react-native-svg';
+
+import { colors, stripes, type StripeVariant } from '@/theme/tokens';
+import { Icon, type IconName } from './Icon';
 import { Txt } from './Txt';
 
 interface StripesProps {
@@ -57,6 +60,20 @@ export const Stripes = memo(function Stripes({ variant, stripe, width, height }:
   );
 });
 
+/** Znak na środku kafla: rysowany grzyb (Material Symbols go nie mają) albo dowolna ikona. */
+export type PlaceholderGlyph = 'mushroom' | IconName;
+
+/** Spokojny kafel zamiast pasków z makiety (brak zdjęcia): delikatny odcień koloru przewodniego i znak na środku. */
+export interface PlaceholderTile {
+  /** Kolor przewodni `#RRGGBB` (np. kolor rzadkości) – tło i znak to jego jasne odcienie. */
+  tint: string;
+  glyph?: PlaceholderGlyph;
+  /** Rozmiar znaku w px (domyślnie 32). */
+  glyphSize?: number;
+  /** Krótki podpis pod znakiem – zwykły tekst interfejsu, nie podpis z makiety. */
+  caption?: string;
+}
+
 export interface PlaceholderProps {
   label?: string;
   variant?: StripeVariant;
@@ -64,6 +81,8 @@ export interface PlaceholderProps {
   labelColor?: string;
   /** Gdy jest prawdziwy obraz – pokazujemy go zamiast pasków. */
   source?: ImageSourcePropType;
+  /** Bez obrazu: kafel z odcieniem i znakiem zamiast pasków (nie potrzebuje wymiarów – rysuje się od razu). */
+  tile?: PlaceholderTile;
   style?: StyleProp<ViewStyle>;
   children?: ReactNode;
   /** Znane wymiary pozwalają narysować paski bez czekania na onLayout. */
@@ -71,13 +90,17 @@ export interface PlaceholderProps {
   height?: number;
 }
 
-/** Paskowany placeholder obrazu z podpisem monospace 11 px – dokładnie jak w makiecie. */
+/**
+ * Placeholder obrazu: zdjęcie, a bez niego paski z podpisem monospace 11 px (jak w makiecie – ładowanie map itp.)
+ * albo, z `tile`, neutralny kafel ze znakiem (miejsca na zdjęcie gracza widoczne w grze).
+ */
 export function Placeholder({
   label,
   variant = 'sand',
   stripe = 6,
   labelColor,
   source,
+  tile,
   style,
   children,
   width,
@@ -86,19 +109,22 @@ export function Placeholder({
   const [size, setSize] = useState<{ w: number; h: number } | null>(
     width != null && height != null ? { w: width, h: height } : null,
   );
+  // Wymiary potrzebne tylko paskom – kafel nie mierzy się (bez drugiego renderu po onLayout).
   const onLayout = (e: LayoutChangeEvent) => {
     const { width: w, height: h } = e.nativeEvent.layout;
     if (!size || Math.abs(size.w - w) > 0.5 || Math.abs(size.h - h) > 0.5) setSize({ w, h });
   };
-  // Obraz, którego nie da się wczytać (usunięty plik, wygasły blob: na webie) → wracają paski.
+  // Obraz, którego nie da się wczytać (usunięty plik, wygasły blob: na webie) → wracają paski / kafel.
   const [failed, setFailed] = useState<{ key: unknown } | null>(null);
   const key = sourceKey(source);
   const showImage = !!source && !(failed && failed.key === key);
   const pal = stripes[variant];
   return (
-    <View onLayout={onLayout} style={[styles.base, { backgroundColor: pal.a }, style]}>
+    <View onLayout={tile ? undefined : onLayout} style={[styles.base, { backgroundColor: tile ? colors.canvas : pal.a }, style]}>
       {showImage ? (
         <Image source={source} style={StyleSheet.absoluteFill} resizeMode="cover" onError={() => setFailed({ key })} />
+      ) : tile ? (
+        <TileFill {...tile} />
       ) : (
         size && <Stripes variant={variant} stripe={stripe} width={size.w} height={size.h} />
       )}
@@ -116,6 +142,52 @@ export function Placeholder({
 function sourceKey(source?: ImageSourcePropType): unknown {
   if (source == null || typeof source === 'number') return source;
   return Array.isArray(source) ? source[0]?.uri : source.uri;
+}
+
+/** `#RRGGBB` + przezroczystość → `#RRGGBBAA` (inne zapisy koloru bez zmian). */
+function withAlpha(hex: string, a: number): string {
+  if (!/^#[0-9a-f]{6}$/i.test(hex)) return hex;
+  return `${hex}${Math.round(Math.min(1, Math.max(0, a)) * 255)
+    .toString(16)
+    .padStart(2, '0')}`;
+}
+
+/** Kafel bez zdjęcia: ukośny, ledwie widoczny gradient odcienia i znak w jego przygaszonym kolorze. */
+const TileFill = memo(function TileFill({ tint, glyph = 'mushroom', glyphSize = 32, caption }: PlaceholderTile) {
+  const ink = withAlpha(tint, 0.5);
+  return (
+    <>
+      <LinearGradient
+        pointerEvents="none"
+        colors={[withAlpha(tint, 0.08), withAlpha(tint, 0.22)]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFill}
+      />
+      <View pointerEvents="none" style={{ alignItems: 'center', gap: 6, paddingHorizontal: 12 }}>
+        {glyph === 'mushroom' ? (
+          <MushroomGlyph size={glyphSize} color={ink} />
+        ) : (
+          <Icon name={glyph} filled size={glyphSize} color={ink} />
+        )}
+        {caption ? (
+          <Txt f="n7" size={12} color={colors.muted} align="center">
+            {caption}
+          </Txt>
+        ) : null}
+      </View>
+    </>
+  );
+});
+
+/** Sylwetka grzyba (kapelusz + trzon) w siatce 24 px – odpowiednik ikony Material Symbols. */
+export function MushroomGlyph({ size = 24, color = colors.ink }: { size?: number; color?: string }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path d="M2.6 11.6C2.6 6.6 6.8 3 12 3s9.4 3.6 9.4 8.6c0 .9-.7 1.6-1.6 1.6H4.2c-.9 0-1.6-.7-1.6-1.6z" fill={color} />
+      <Path d="M9.3 14.5h5.4l.6 4.4a2.4 2.4 0 0 1-2.4 2.6h-1.8a2.4 2.4 0 0 1-2.4-2.6z" fill={color} />
+    </Svg>
+  );
 }
 
 const styles = StyleSheet.create({

@@ -74,7 +74,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Aparat jest potrzebny do skanu 360° grzyba i do zdjęcia profilowego.",
+          "cameraPermission": "Aparat jest potrzebny do zdjęcia grzyba (rozpoznanie gatunku) i do zdjęcia profilowego.",
           "microphonePermission": "Grzybobranie robi tylko zdjęcia – nie nagrywa dźwięku ani filmów.",
           "recordAudioAndroid": false
         }
@@ -83,7 +83,7 @@
         "expo-image-picker",
         {
           "photosPermission": "Dostęp do zdjęć pozwala ustawić własne zdjęcie profilowe.",
-          "cameraPermission": "Aparat jest potrzebny do skanu 360° grzyba i do zdjęcia profilowego.",
+          "cameraPermission": "Aparat jest potrzebny do zdjęcia grzyba (rozpoznanie gatunku) i do zdjęcia profilowego.",
           "microphonePermission": "Grzybobranie robi tylko zdjęcia – nie nagrywa dźwięku ani filmów."
         }
       ],

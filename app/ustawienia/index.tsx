@@ -38,6 +38,8 @@ export default function SettingsScreen() {
   const services = useServices();
   const user = useUserStore((s) => s.user);
   const home = useCatalogStore((s) => s.gminaById[user.homeGminaId]);
+  // Nowy gracz: gmina domowa przyjdzie z pierwszego wykrycia GPS (do tego czasu wartość zastępcza – nie pokazujemy jej).
+  const homePending = useUserStore((s) => !!s.homeGminaPending);
   const hideRoute = usePrefsStore((s) => s.hideRouteByDefault);
   const back = () => (router.canGoBack() ? router.back() : router.navigate('/profil'));
   const [account, setAccount] = useState<string | null>(null);
@@ -125,7 +127,7 @@ export default function SettingsScreen() {
             icon="home_pin"
             label="Gmina domowa"
             sub="Twoja drużyna w rankingu gmin"
-            value={home ? gminaTitle(home) : user.homeGminaId}
+            value={homePending ? 'Wybierz' : home ? gminaTitle(home) : user.homeGminaId}
             onPress={() => router.push('/ustawienia/gmina' as Href)}
           />
           <SettingsRow
@@ -234,7 +236,7 @@ export default function SettingsScreen() {
         </SettingsGroup>
 
         <Txt f="n6" size={12} color={colors.faint} align="center" style={{ marginBottom: 4 }}>
-          Grzybobranie {VERSION} · rozpoznawanie gatunków działa na razie w trybie demonstracyjnym
+          Grzybobranie {VERSION} · rozpoznanie AI może się mylić – nie jedz grzyba tylko na podstawie aplikacji
         </Txt>
       </View>
     </Screen>
@@ -247,8 +249,8 @@ function showAbout() {
     icon: 'forest',
     message:
       `Wersja ${VERSION}\n\n` +
-      'Rozpoznawanie gatunków działa na razie w trybie demonstracyjnym – wynik skanu jest elementem gry, a nie analizą ' +
-      'zdjęcia. Nigdy nie jedz grzyba tylko na podstawie aplikacji.\n\n' +
+      'Gatunek rozpoznaje model AI (Claude, Anthropic) ze zdjęcia wysłanego na serwer – wyłącznie do rozpoznania. ' +
+      'Wynik jest orientacyjny i może być błędny. Nigdy nie jedz grzyba tylko na podstawie aplikacji.\n\n' +
       (supabaseEnabled ? '' : 'Ta wersja działa bez serwera – feed i rankingi pokazują dane przykładowe.\n\n') +
       'Granice gmin: PRG – GUGiK (dane otwarte). Lesistość: GUS BDL. Mapa okolicy: © OpenStreetMap (ODbL), ' +
       'kafle OpenFreeMap / OpenMapTiles.\n\nIkony Material Symbols (Apache 2.0), fonty Baloo 2 i Nunito Sans (SIL OFL).',

@@ -1,6 +1,8 @@
 /**
  * Sesja Supabase (konto anonimowe) i limity czasu zapytań – wspólne dla serwisów i silnika synchronizacji.
  */
+import type { SupabaseClient } from '@supabase/supabase-js';
+
 import { supabase } from './client';
 import { backendStatus } from './status';
 
@@ -22,12 +24,15 @@ export function withTimeout<T>(p: PromiseLike<T>, ms = TIMEOUT_MS): Promise<T> {
   });
 }
 
-/** Sesja: anonimowe konto tworzone przy pierwszym uruchomieniu (profil zakłada trigger w bazie). */
-export async function ensureSession(): Promise<string> {
-  if (!supabase) throw new Error('Supabase wyłączony');
-  const { data } = await withTimeout(supabase.auth.getSession());
+/**
+ * Sesja: anonimowe konto tworzone przy pierwszym uruchomieniu (profil zakłada trigger w bazie). `client` – inny
+ * klient (rozpoznawanie w trybie mock – identifyClient() w ./client.ts); domyślnie klient gry.
+ */
+export async function ensureSession(client: SupabaseClient | null = supabase): Promise<string> {
+  if (!client) throw new Error('Supabase wyłączony');
+  const { data } = await withTimeout(client.auth.getSession());
   if (data.session) return data.session.user.id;
-  const res = await withTimeout(supabase.auth.signInAnonymously());
+  const res = await withTimeout(client.auth.signInAnonymously());
   if (res.error || !res.data.user) throw res.error ?? new Error('Nie udało się utworzyć konta');
   return res.data.user.id;
 }

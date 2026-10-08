@@ -70,21 +70,37 @@ export interface Identification {
   confidence: number;
   rarity: Rarity;
   xxl: boolean;
+  /** Szacunek: z odniesienia skali na zdjęciu, bez niego – typowe wymiary gatunku. */
   dimensions: Dimensions;
   lookalikes: Lookalike[];
   /** Alternatywy przy niskiej pewności. */
   candidates: Candidate[];
 }
 
+/** Części owocnika: kapelusz z wierzchu, spód kapelusza (blaszki / rurki), trzon, podstawa trzonu. */
 export type ScanPart = 'cap' | 'underside' | 'stem' | 'base';
 
+/** Zdjęcie do rozpoznania (spust skanu). */
 export interface ScanResult {
   id: string;
-  parts: ScanPart[];
   capturedAt: ISODate;
-  /** Zdjęcie z aparatu zrobione spustem (lokalny URI; brak = symulacja / brak kamery). */
+  /** Zdjęcie z aparatu (lokalny URI). Brak – tylko wymuszony wynik skanu z panelu dev. */
   photoUri?: string;
 }
+
+/**
+ * Wynik rozpoznania zdjęcia (IdentifyService): grzyb z gatunkiem albo odrzucenie – „to nie grzyb” lub niewyraźne
+ * ujęcie (za ciemno, rozmazane, za daleko; także grzyb spoza atlasu) z powodem po polsku. Odrzucenie nie tworzy
+ * znaleziska.
+ */
+export type IdentifyOutcome =
+  | {
+      kind: 'mushroom';
+      identification: Identification;
+      /** Części owocnika widoczne na zdjęciu – podpowiedź na Analizie, ujęcia w `find.submit`. */
+      visibleParts: ScanPart[];
+    }
+  | { kind: 'not_mushroom' | 'unclear'; reason: string };
 
 export interface XpLine {
   label: string;
@@ -120,6 +136,8 @@ export interface Find {
   foundAt: ISODate;
   /** Alternatywy z rozpoznania (ekran niskiej pewności). */
   candidates?: Candidate[];
+  /** Części owocnika widoczne na zdjęciu (rozpoznanie) – podpowiedź na Analizie; tylko w telefonie. */
+  visibleParts?: ScanPart[];
   /**
    * Zdjęcie znaleziska z aparatu (lokalny URI) – brak = paskowany placeholder. Tryb Supabase na webie: zdjęcie
    * z serwera poza budżetem localStorage to znacznik `sb-photo:<ścieżka>` (utils/findPhoto.ts).

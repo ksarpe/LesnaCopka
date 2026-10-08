@@ -272,6 +272,15 @@ export function countTripFinish(c: PlayerCounters, trip: { distanceKm: number; m
   };
 }
 
+/**
+ * Seria dni do pokazania: przerwana (0), gdy ostatnia aktywność była przed wczoraj – ta sama reguła co
+ * `bumpStreakForToday` (src/store/game.ts) i przyjęcie stanu z serwera (src/services/supabase/gameState.ts).
+ */
+export function effectiveStreak(streakDays: number, lastActiveDate: string | null, today: string, yesterday: string): number {
+  if (!lastActiveDate) return 0;
+  return lastActiveDate === today || lastActiveDate === yesterday ? streakDays : 0;
+}
+
 /** Nowy dzień aktywności (pierwsza wyprawa dnia): seria, najdłuższa seria, dni w lesie. */
 export function countActiveDay(c: PlayerCounters, streak: number): PlayerCounters {
   return { ...c, streakDays: streak, maxStreak: Math.max(c.maxStreak, streak), activeDays: c.activeDays + 1 };

@@ -22,7 +22,7 @@ import { useFeedSync } from '@/store/useFeedSync';
 import { useTripTrack } from '@/store/useTrackStore';
 import { useTripStore } from '@/store/useTripStore';
 import { ui } from '@/store/useUiStore';
-import { colors, rarity as rarityTokens, RARITY_ORDER, shadows } from '@/theme/tokens';
+import { colors, heat as heatColors, rarity as rarityTokens, RARITY_ORDER, shadows } from '@/theme/tokens';
 import type { Find, Rarity } from '@/types';
 import { fmtDuration, fmtInt, fmtKm, fmtTripDate, fmtWeight, gminaTitle, plural } from '@/utils/format';
 import { hashString } from '@/utils/random';
@@ -145,26 +145,23 @@ export default function SummaryScreen() {
           </RouteMap>
         ) : (
           <Placeholder
-            variant="moss"
-            stripe={10}
-            label={
-              !showRoute
-                ? 'trasa ukryta\n(publikujemy tylko gminę)'
+            tile={{
+              tint: heatColors[3],
+              glyph: showRoute ? 'route' : 'visibility_off',
+              glyphSize: 40,
+              caption: !showRoute
+                ? 'Trasa ukryta – publikujemy tylko gminę'
                 : route
-                  ? 'przybliżona trasa GPS\n(za krótka, by ją pokazać)'
+                  ? 'Trasa za krótka, by ją pokazać'
                   : fromHistory
                     ? // Starsza wyprawa: ślad jest tylko w pamięci, do bieżącej wyprawy (po restarcie go nie ma).
-                      'przybliżona trasa GPS\n(ślad nie jest przechowywany)'
-                    : 'przybliżona trasa GPS\n(publikowana z opóźnieniem)'
-            }
+                      'Ślad trasy nie jest przechowywany po wyprawie'
+                    : // Brak punktów GPS albo restart aplikacji w trakcie wyprawy (ślad jest tylko w pamięci).
+                      'Brak zapisanego śladu trasy',
+            }}
             style={{ height: 170, borderRadius: 24 }}
           >
             {gminaPill}
-            {!showRoute ? (
-              <View style={{ position: 'absolute', right: 12, top: 12 }}>
-                <Icon name="visibility_off" size={20} color="#6A7A55" />
-              </View>
-            ) : null}
           </Placeholder>
         )}
 

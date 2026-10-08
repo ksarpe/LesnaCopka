@@ -21,14 +21,16 @@ interface AreaMapLayersProps {
    * zostaje dokładnie jak w makiecie.
    */
   rich?: boolean;
+  /** Id wzoru lasu – osobne dla każdego `<Svg>` w jednym dokumencie (web: kilka warstw mapy naraz). */
+  patternId?: string;
   /** Elementy między drogami a granicą gminy (np. znaczniki drzew). */
   children?: ReactNode;
 }
 
 /** Warstwy mapy okolicy (wnętrze `<Svg>`): las, woda, drogi, drogi leśne, granica gminy. */
-export const AreaMapLayers = memo(function AreaMapLayers({ paths, rich, children }: AreaMapLayersProps) {
+export const AreaMapLayers = memo(function AreaMapLayers({ paths, rich, patternId, children }: AreaMapLayersProps) {
   // Osobne id wzoru: na webie karta i mapa pełnoekranowa są w jednym dokumencie.
-  const pattern = rich ? 'forestRich' : 'forest';
+  const pattern = patternId ?? (rich ? 'forestRich' : 'forest');
   return (
     <>
       <Defs>

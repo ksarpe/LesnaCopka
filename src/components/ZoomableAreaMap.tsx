@@ -1,10 +1,9 @@
-import { memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react';
+import { memo, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   cancelAnimation,
   Easing,
-  useAnimatedReaction,
   useAnimatedStyle,
   useSharedValue,
   withDecay,
@@ -14,24 +13,30 @@ import Animated, {
 import Svg, { Circle, Path } from 'react-native-svg';
 import { scheduleOnRN } from 'react-native-worklets';
 
-import { projectAreaMap, projectPoint, viewportTransform, type XY } from '@/geo/areaMapProjection';
-import { buildForestGrid, pickTreeMarkers, type ForestGrid } from '@/geo/forestMarkers';
+import { projectAreaMap, projectPoint, type MapTransform, type MapViewport, type ProjectedAreaMap, type XY } from '@/geo/areaMapProjection';
+import { baseCanvas, clampT, hasDetail, homeView, MAX_ZOOM, MIN_ZOOM, sameView, viewCenter, zoomAt, type ViewState } from '@/geo/areaMapView';
+import { buildForestGrid, pickTreeMarkers, type ForestGrid, type TreeMarker } from '@/geo/forestMarkers';
 import { colors, mapColors, shadows } from '@/theme/tokens';
 import type { AreaMap } from '@/types';
 import { AreaMapLayers, HALO_MIN, TARGET_M_PER_PX } from './AreaMap';
 
-/** Przybliżenie względem widoku startowego (~9 m/px): 1× = cała okolica, 6× ≈ 1,5 m/px. */
-export const MIN_ZOOM = 1;
-export const MAX_ZOOM = 6;
 /** Halo nie rośnie bez końca przy słabym GPS i dużym przybliżeniu. */
 const HALO_MAX = 1000;
 const HALO_BASE = 200;
 const DOT = 24;
 /** Komórka siatki lasu (piksele świata z13 ≈ 47 m) – do znaczników drzew. */
 const GRID_CELL = 4;
-const MARKER_SPACING_PX = 64;
-const MARKER_MIN_DEPTH_PX = 12;
+const MARKERS = { spacingPx: 64, minDepthPx: 12 };
+const NO_MARKERS: TreeMarker[] = [];
 const ANIM = { duration: 280, easing: Easing.out(Easing.cubic) };
+const IS_WEB = Platform.OS === 'web';
+/**
+ * Widok musi stać tyle (ms) po ostatnim ruchu, zanim narysujemy go od nowa – kilka szybkich gestów
+ * jeden po drugim (albo bezwładność) to jeden rysunek, a nie kilka.
+ */
+const SETTLE_MS = 90;
+/** Kółko myszy przychodzi porcjami – dłuższa przerwa = koniec przybliżania. */
+const WHEEL_SETTLE_MS = 160;
 
 /**
  * Sylwetka świerka (środek w 0,0; ok. 12 × 14 px) – jeden znacznik lasu. Rysowana raz z jasną obwódką,
@@ -51,37 +56,19 @@ const TREE = [
   [-4.2, -1.5],
 ];
 
-/** Stan widoku: przekształcenie ekranu startowego → bieżącego (q' = t + k·q, q względem środka). */
-interface ViewState {
-  k: number;
-  tx: number;
-  ty: number;
-}
-
-/** Przesunięcie w granicach danych: środek kadru nie wyjeżdża poza pobrany promień. */
-function clampT(t: number, k: number, half: number, extent: number) {
-  'worklet';
-  const m = Math.max(0, extent * k - half);
-  return Math.min(m, Math.max(-m, t));
-}
-
-/** Przybliżenie o `f` wokół punktu (fx, fy) ekranu (względem środka) – punkt pod palcem zostaje na miejscu. */
-function zoomAt(v: ViewState, f: number, fx: number, fy: number, hw: number, hh: number, extent: number): ViewState {
-  'worklet';
-  const k = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, v.k * f));
-  const r = k / v.k;
-  return {
-    k,
-    tx: clampT(fx - r * (fx - v.tx), k, hw, extent),
-    ty: clampT(fy - r * (fy - v.ty), k, hh, extent),
-  };
-}
-
 export interface ZoomableAreaMapHandle {
   /** Powrót do widoku startowego: pozycja na środku, skala 1×. */
   recenter(): void;
   /** Przybliżenie (> 1) / oddalenie (< 1) względem środka ekranu. */
   zoomBy(factor: number): void;
+}
+
+/** Stan przycisków mapy – zgłaszany tylko wtedy, gdy się zmienia (nie po każdym geście). */
+export interface MapViewInfo {
+  canZoomIn: boolean;
+  canZoomOut: boolean;
+  /** Widok startowy (pozycja na środku, 1×). */
+  atHome: boolean;
 }
 
 interface ZoomableAreaMapProps {
@@ -95,118 +82,169 @@ interface ZoomableAreaMapProps {
   /** Najbliższy brzeg lasu (piksele świata) – przerywana kreska od pozycji; null = w lesie albo brak lasu. */
   forestLink?: XY | null;
   /** Zatwierdzony widok (po geście) – stan przycisków. */
-  onViewChange?: (v: { zoom: number; atHome: boolean }) => void;
+  onViewChange?: (v: MapViewInfo) => void;
   ref?: Ref<ZoomableAreaMapHandle>;
 }
 
 /**
  * Mapa okolicy na pełny ekran: szczypanie, przesuwanie, podwójne tapnięcie (web: kółko myszy).
  *
- * Ostrość: w trakcie gestu przesuwamy i skalujemy gotowy obraz (transform na UI thread), a po geście
- * „zatwierdzamy” widok – ścieżki SVG liczone są od nowa dla nowej skali, więc wektory i grubości linii
- * są znów ostre. Żeby przy zatwierdzeniu nic nie mignęło, warstwy są dwie: zewnętrzna (animowana)
- * ma przekształcenie G widoku startowego → bieżącego, wewnętrzna (zwykły prop React) – odwrotność G
- * dla widoku, w którym narysowano SVG. Nowe ścieżki i nowa odwrotność trafiają na ekran w jednym
- * commicie Reacta, a G zmieniają tylko gesty – obraz w każdej klatce jest poprawny, a po zatwierdzeniu
- * złożenie warstw to tożsamość (ostre piksele). SVG ma zakładkę poza ekranem, żeby przesuwanie
- * nie odsłaniało od razu pustych brzegów; gdy zakładka się kończy, widok zatwierdzamy w trakcie gestu.
+ * Płynność: w trakcie gestu nic nie jest liczone ani rysowane od nowa – gesty zmieniają tylko wartości
+ * współdzielone (k, tx, ty), a te przekształcenie G jednej warstwy `Animated.View` (wątek UI). React
+ * i SVG ruszają dopiero, gdy palce puszczą mapę, a widok stanie (koniec bezwładności / animacji,
+ * SETTLE_MS spokoju) – wtedy widok jest „zatwierdzany”. Wcześniej zatwierdzaliśmy także w trakcie gestu
+ * (gdy kończyła się zakładka płótna) – na iPhonie każde takie przerysowanie SVG blokowało wątek UI
+ * i mapa szarpała.
+ *
+ * Warstwy pod G:
+ * - podkład – cała okolica przy 1× (`baseCanvas`), rysowany raz; pokrywa każdy dozwolony kadr, więc
+ *   przesuwanie i oddalanie nigdy nie odsłania pustego brzegu (po przybliżeniu w trakcie gestu bywa rozmyty);
+ * - szczegóły (tylko po przybliżeniu) – ostre ścieżki dla zatwierdzonego widoku (ekran + zakładka),
+ *   nieprzezroczyste, z odwrotnością G tego widoku. Nowe ścieżki i nowa odwrotność trafiają na ekran
+ *   w jednym commicie Reacta, więc po zatwierdzeniu złożenie to tożsamość (ostre piksele) i nic nie miga.
+ *
+ * Web: w trakcie gestu warstwa dostaje `will-change: transform` (własna warstwa kompozytora – przeglądarka
+ * tylko przesuwa gotowy obraz, zamiast co klatkę rasteryzować SVG), po zatwierdzeniu go traci, żeby
+ * przeglądarka narysowała ją ostro w nowej skali.
  */
-export function ZoomableAreaMap({ map, position, accuracyM, width, height, forestLink, onViewChange, ref }: ZoomableAreaMapProps) {
+export const ZoomableAreaMap = memo(function ZoomableAreaMap({
+  map,
+  position,
+  accuracyM,
+  width,
+  height,
+  forestLink,
+  onViewChange,
+  ref,
+}: ZoomableAreaMapProps) {
   const hw = width / 2;
   const hh = height / 2;
   /** Piksele ekranu na piksel świata przy 1×. */
   const S = map.metersPerPx / TARGET_M_PER_PX;
   /** Promień danych w pikselach ekranu przy 1×. */
   const extent = map.radiusM / TARGET_M_PER_PX;
-  /** Zakładka SVG poza ekranem (px) – kompromis: pamięć bitmapy vs. puste brzegi przy przesuwaniu. */
-  const pad = Math.round(Math.min(160, Math.min(width, height) * 0.3));
+  /** Zakładka warstwy szczegółów poza ekranem (px) – ostre brzegi przy krótkim przesunięciu; dalej jest podkład. */
+  const pad = Math.round(Math.min(120, Math.min(width, height) * 0.25));
   /** Pozycja względem środka widoku startowego (px przy 1×). */
   const qx = (position.x - map.center.x) * S;
   const qy = (position.y - map.center.y) * S;
-  const home = useMemo<ViewState>(
-    () => ({ k: 1, tx: clampT(-qx, 1, hw, extent), ty: clampT(-qy, 1, hh, extent) }),
-    [qx, qy, hw, hh, extent],
-  );
+  const home = useMemo(() => homeView({ x: qx, y: qy }, hw, hh, extent), [qx, qy, hw, hh, extent]);
 
   const k = useSharedValue(home.k);
   const tx = useSharedValue(home.tx);
   const ty = useSharedValue(home.ty);
-  // Widok, w którym narysowano SVG (kopia stanu Reacta dla UI thread) i „commit w drodze”.
-  const rk = useSharedValue(home.k);
-  const rtx = useSharedValue(home.tx);
-  const rty = useSharedValue(home.ty);
-  const pending = useSharedValue(false);
-  const flinging = useSharedValue(0);
+  /** Palce na mapie – dopóki są, nic nie zatwierdzamy. */
+  const pinching = useSharedValue(false);
+  const panning = useSharedValue(false);
 
-  // Zawsze nowy obiekt (efekt niżej zdejmuje „commit w drodze”); obliczenia zależą od liczb, nie od obiektu.
+  // Zatwierdzony widok – w nim narysowana jest warstwa szczegółów.
   const [view, setView] = useState<ViewState>(home);
-  const commit = useCallback((nk: number, ntx: number, nty: number) => setView({ k: nk, tx: ntx, ty: nty }), []);
-  useEffect(() => {
-    rk.set(view.k);
-    rtx.set(view.tx);
-    rty.set(view.ty);
-    pending.set(false);
-  }, [view, rk, rtx, rty, pending]);
+  const committed = useRef(view);
+
+  // Web: własna warstwa kompozytora tylko na czas gestu (opis wyżej).
+  const contentId = useId();
+  const promoted = useRef(false);
+  const promote = useCallback(
+    (on: boolean) => {
+      if (!IS_WEB || promoted.current === on) return;
+      promoted.current = on;
+      const el = document.getElementById(contentId);
+      if (el) el.style.willChange = on ? 'transform' : '';
+    },
+    [contentId],
+  );
+  const beginInteraction = useCallback(() => promote(true), [promote]);
+  // Przed malowaniem: nowe ścieżki i powrót do zwykłego malowania w tej samej klatce (chyba że palce
+  // zdążyły wrócić na mapę – wtedy zrobi to zatwierdzenie po tamtym geście).
+  useLayoutEffect(() => {
+    committed.current = view;
+    if (!pinching.get() && !panning.get()) promote(false);
+  }, [view, promote, pinching, panning]);
 
   const atHome = Math.abs(view.k - home.k) < 1e-3 && Math.abs(view.tx - home.tx) < 1 && Math.abs(view.ty - home.ty) < 1;
-  const zoom = view.k;
+  const canZoomIn = view.k < MAX_ZOOM - 0.01;
+  const canZoomOut = view.k > MIN_ZOOM + 0.01;
   useEffect(() => {
-    onViewChange?.({ zoom, atHome });
-  }, [onViewChange, zoom, atHome]);
+    onViewChange?.({ canZoomIn, canZoomOut, atHome });
+  }, [onViewChange, canZoomIn, canZoomOut, atHome]);
 
-  const requestCommit = useCallback(() => {
+  // Zatwierdzenie dopiero, gdy widok stoi: bez palców na mapie i bez zmian przez SETTLE_MS.
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const scheduleCommit = useCallback(
+    (delay: number) => {
+      const read = (): ViewState => ({ k: k.get(), tx: tx.get(), ty: ty.get() });
+      let last = read();
+      clearTimeout(timer.current);
+      const check = () => {
+        // Palce znów na mapie – zatwierdzi koniec tamtego gestu.
+        if (pinching.get() || panning.get()) return;
+        const cur = read();
+        if (cur.k !== last.k || cur.tx !== last.tx || cur.ty !== last.ty) {
+          // Jeszcze się rusza (bezwładność, animacja przycisku) – czekamy dalej.
+          last = cur;
+          timer.current = setTimeout(check, SETTLE_MS);
+          return;
+        }
+        if (sameView(cur, committed.current)) promote(false);
+        else setView(cur);
+      };
+      timer.current = setTimeout(check, delay);
+    },
+    [k, tx, ty, pinching, panning, promote],
+  );
+
+  /** Koniec gestu albo animacji – zatwierdzenie, gdy nic się już nie rusza. */
+  const settle = useCallback(() => {
     'worklet';
-    scheduleOnRN(commit, k.get(), tx.get(), ty.get());
-  }, [commit, k, tx, ty]);
+    if (pinching.get() || panning.get()) return;
+    scheduleOnRN(scheduleCommit, SETTLE_MS);
+  }, [pinching, panning, scheduleCommit]);
+
+  /** Początek gestu: przerwanie bezwładności / animacji. */
+  const begin = useCallback(() => {
+    'worklet';
+    stopAll(k, tx, ty);
+    if (IS_WEB) scheduleOnRN(beginInteraction);
+  }, [k, tx, ty, beginInteraction]);
 
   const animateTo = useCallback(
     (v: ViewState) => {
       'worklet';
+      stopAll(k, tx, ty);
       tx.set(withTiming(v.tx, ANIM));
       ty.set(withTiming(v.ty, ANIM));
       k.set(
         withTiming(v.k, ANIM, (finished) => {
-          if (finished) requestCommit();
+          if (finished) settle();
         }),
       );
     },
-    [k, tx, ty, requestCommit],
+    [k, tx, ty, settle],
   );
 
   useImperativeHandle(
     ref,
     () => ({
-      recenter: () => animateTo(home),
+      recenter: () => {
+        beginInteraction();
+        animateTo(home);
+      },
       zoomBy: (f: number) => {
-        stopAll(k, tx, ty);
+        beginInteraction();
         animateTo(zoomAt({ k: k.get(), tx: tx.get(), ty: ty.get() }, f, 0, 0, hw, hh, extent));
       },
     }),
-    [animateTo, home, k, tx, ty, hw, hh, extent],
+    [beginInteraction, animateTo, home, k, tx, ty, hw, hh, extent],
   );
 
-  // Zatwierdzenie w trakcie gestu / animacji, gdy kończy się zakładka SVG albo skala mocno odjechała.
-  useAnimatedReaction(
-    () => ({ k: k.get(), x: tx.get(), y: ty.get() }),
-    (cur) => {
-      if (pending.get()) return;
-      const ratio = cur.k / rk.get();
-      const offX = cur.x - ratio * rtx.get();
-      const offY = cur.y - ratio * rty.get();
-      // Ile zakładki zostało z każdej strony ekranu (px).
-      const mx = ratio * (hw + pad) - hw - Math.abs(offX);
-      const my = ratio * (hh + pad) - hh - Math.abs(offY);
-      if (Math.min(mx, my) > pad * 0.4 && ratio < 1.8) return;
-      pending.set(true);
-      scheduleOnRN(commit, cur.k, cur.x, cur.y);
-    },
-    [hw, hh, pad, commit],
-  );
-
+  // Callbacki gestów działają po dotknięciu (nigdy w renderze) – refy czytają tylko begin / settle.
+  /* eslint-disable react-hooks/refs */
   const gesture = useMemo(() => {
     const pinch = Gesture.Pinch()
       .onStart(() => {
-        stopAll(k, tx, ty);
+        pinching.set(true);
+        begin();
       })
       .onChange((e) => {
         const v = zoomAt({ k: k.get(), tx: tx.get(), ty: ty.get() }, e.scaleChange, e.focalX - hw, e.focalY - hh, hw, hh, extent);
@@ -215,70 +253,70 @@ export function ZoomableAreaMap({ map, position, accuracyM, width, height, fores
         ty.set(v.ty);
       })
       .onEnd(() => {
-        requestCommit();
+        pinching.set(false);
+        settle();
       });
     const pan = Gesture.Pan()
       .averageTouches(true)
       .onStart(() => {
-        stopAll(k, tx, ty);
+        panning.set(true);
+        begin();
       })
       .onChange((e) => {
         tx.set(clampT(tx.get() + e.changeX, k.get(), hw, extent));
         ty.set(clampT(ty.get() + e.changeY, k.get(), hh, extent));
       })
       .onEnd((e) => {
-        // Bezwładność w granicach danych; zatwierdzenie, gdy obie osie staną.
+        panning.set(false);
+        // Bezwładność w granicach danych; zatwierdzenie, gdy wygaśnie (scheduleCommit czeka, aż widok stanie,
+        // a koniec bezwładności dodatkowo je ponawia).
         const mx = Math.max(0, extent * k.get() - hw);
         const my = Math.max(0, extent * k.get() - hh);
-        flinging.set(2);
-        const done = () => {
+        const done = (finished?: boolean) => {
           'worklet';
-          flinging.set(flinging.get() - 1);
-          if (flinging.get() <= 0) requestCommit();
+          if (finished) settle();
         };
         tx.set(withDecay({ velocity: e.velocityX, clamp: [-mx, mx] }, done));
         ty.set(withDecay({ velocity: e.velocityY, clamp: [-my, my] }, done));
+        settle();
       });
     const doubleTap = Gesture.Tap()
       .numberOfTaps(2)
       .maxDelay(260)
       .onEnd((e, success) => {
         if (!success) return;
-        stopAll(k, tx, ty);
+        begin();
         const cur = { k: k.get(), tx: tx.get(), ty: ty.get() };
         // Na maksymalnym przybliżeniu podwójne tapnięcie wraca do całej okolicy.
         const f = cur.k >= MAX_ZOOM - 0.01 ? MIN_ZOOM / cur.k : 2;
         animateTo(zoomAt(cur, f, e.x - hw, e.y - hh, hw, hh, extent));
       });
     return Gesture.Simultaneous(pinch, pan, doubleTap);
-  }, [k, tx, ty, flinging, hw, hh, extent, requestCommit, animateTo]);
+  }, [k, tx, ty, pinching, panning, hw, hh, extent, begin, settle, animateTo]);
+  /* eslint-enable react-hooks/refs */
 
   // Web: kółko myszy / szczypanie gładzika (ctrl + wheel) przybliża wokół kursora.
   const wheelRef = useRef<View>(null);
   useEffect(() => {
-    if (Platform.OS !== 'web') return;
+    if (!IS_WEB) return;
     const el = wheelRef.current as unknown as HTMLElement | null;
     if (!el?.addEventListener) return;
-    let timer: ReturnType<typeof setTimeout> | undefined;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       const rect = el.getBoundingClientRect();
       const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? height : 1;
       const f = Math.exp(-e.deltaY * unit * (e.ctrlKey ? 0.01 : 0.002));
+      beginInteraction();
       stopAll(k, tx, ty);
       const v = zoomAt({ k: k.get(), tx: tx.get(), ty: ty.get() }, f, e.clientX - rect.left - hw, e.clientY - rect.top - hh, hw, hh, extent);
       k.set(v.k);
       tx.set(v.tx);
       ty.set(v.ty);
-      clearTimeout(timer);
-      timer = setTimeout(() => commit(k.get(), tx.get(), ty.get()), 160);
+      scheduleCommit(WHEEL_SETTLE_MS);
     };
     el.addEventListener('wheel', onWheel, { passive: false });
-    return () => {
-      clearTimeout(timer);
-      el.removeEventListener('wheel', onWheel);
-    };
-  }, [k, tx, ty, hw, hh, height, extent, commit]);
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [k, tx, ty, hw, hh, height, extent, beginInteraction, scheduleCommit]);
 
   // Siatka lasu (znaczniki drzew) – po pierwszym rysunku mapy, żeby nie opóźniać otwarcia.
   const [grid, setGrid] = useState<ForestGrid | null>(null);
@@ -297,47 +335,34 @@ export function ZoomableAreaMap({ map, position, accuracyM, width, height, fores
     return () => clearTimeout(id);
   }, [map]);
 
-  // ── Treść w zatwierdzonym widoku (płótno = ekran + zakładka) ──
+  // ── Podkład: cała okolica przy 1× (liczony raz na mapę i rozmiar ekranu) ──
+  const base = useMemo(() => baseCanvas(width, height, extent), [width, height, extent]);
+  const baseVp = useMemo<MapViewport>(
+    () => ({ width: base.width, height: base.height, mPerPx: TARGET_M_PER_PX, center: map.center }),
+    [base, map],
+  );
+  const baseMarkers = useMemo(() => (grid ? pickTreeMarkers(grid, S, MARKERS) : NO_MARKERS), [grid, S]);
+  const baseContent = useCanvasContent(map, baseVp, baseMarkers, position, forestLink);
+
+  // ── Szczegóły: zatwierdzony widok (płótno = ekran + zakładka), tylko po przybliżeniu ──
   const cw = width + 2 * pad;
   const ch = height + 2 * pad;
   const { k: vk, tx: vtx, ty: vty } = view;
-  const vp = useMemo(
-    () => ({
-      width: cw,
-      height: ch,
-      mPerPx: TARGET_M_PER_PX / vk,
-      center: { x: map.center.x - vtx / (S * vk), y: map.center.y - vty / (S * vk) },
-    }),
-    [cw, ch, vk, vtx, vty, map, S],
+  const detail = hasDetail(vk);
+  const detailVp = useMemo<MapViewport | null>(
+    () =>
+      detail
+        ? { width: cw, height: ch, mPerPx: TARGET_M_PER_PX / vk, center: viewCenter({ k: vk, tx: vtx, ty: vty }, map.center, S) }
+        : null,
+    [detail, cw, ch, vk, vtx, vty, map, S],
   );
-  const paths = useMemo(() => projectAreaMap(map, vp), [map, vp]);
-  const markers = useMemo(
-    () => (grid ? pickTreeMarkers(grid, S * vk, { spacingPx: MARKER_SPACING_PX, minDepthPx: MARKER_MIN_DEPTH_PX }) : []),
-    [grid, S, vk],
+  const detailMarkers = useMemo(
+    () => (grid && detail ? pickTreeMarkers(grid, S * vk, MARKERS) : NO_MARKERS),
+    [grid, detail, S, vk],
   );
-  const treePath = useMemo(() => {
-    const t = viewportTransform(map, vp);
-    let d = '';
-    for (const m of markers) {
-      const p = projectPoint(t, m);
-      if (p.x < -10 || p.y < -10 || p.x > cw + 10 || p.y > ch + 10) continue;
-      TREE.forEach(([dx, dy], i) => {
-        d += `${i ? 'L' : 'M'}${Math.round((p.x + dx) * 10) / 10} ${Math.round((p.y + dy) * 10) / 10}`;
-      });
-      d += 'Z';
-    }
-    return d;
-  }, [markers, map, vp, cw, ch]);
-  const link = useMemo(() => {
-    if (!forestLink) return null;
-    const t = viewportTransform(map, vp);
-    const r = (v: number) => Math.round(v * 10) / 10;
-    const a = projectPoint(t, position);
-    const b = projectPoint(t, forestLink);
-    return { d: `M${r(a.x)} ${r(a.y)}L${r(b.x)} ${r(b.y)}`, b: { x: r(b.x), y: r(b.y) } };
-  }, [forestLink, position, map, vp]);
+  const detailContent = useCanvasContent(map, detailVp, detailMarkers, position, forestLink);
 
-  // Wewnętrzna warstwa: odwrotność przekształcenia widoku, w którym narysowano SVG.
+  // Warstwa szczegółów: odwrotność przekształcenia widoku, w którym ją narysowano.
   const compensate = {
     transform: [{ translateX: -vtx / vk }, { translateY: -vty / vk }, { scale: 1 / vk }],
   };
@@ -363,10 +388,20 @@ export function ZoomableAreaMap({ map, position, accuracyM, width, height, fores
     <View ref={wheelRef} style={[StyleSheet.absoluteFill, { overflow: 'hidden', backgroundColor: mapColors.land }]}>
       <GestureDetector gesture={gesture}>
         <View collapsable={false} style={StyleSheet.absoluteFill} accessibilityLabel="Mapa okolicy">
-          <Animated.View style={[StyleSheet.absoluteFill, contentStyle]}>
-            <View style={[{ position: 'absolute', left: -pad, top: -pad, width: cw, height: ch }, compensate]}>
-              <MapCanvas width={cw} height={ch} paths={paths} treePath={treePath} link={link} />
+          <Animated.View nativeID={contentId} style={[StyleSheet.absoluteFill, contentStyle]}>
+            <View style={{ position: 'absolute', left: -base.padX, top: -base.padY, width: base.width, height: base.height }}>
+              <MapCanvas width={base.width} height={base.height} content={baseContent} patternId="forestBase" />
             </View>
+            {detailContent ? (
+              <View
+                style={[
+                  { position: 'absolute', left: -pad, top: -pad, width: cw, height: ch, backgroundColor: mapColors.land },
+                  compensate,
+                ]}
+              >
+                <MapCanvas width={cw} height={ch} content={detailContent} patternId="forestDetail" />
+              </View>
+            ) : null}
           </Animated.View>
           <Animated.View
             pointerEvents="none"
@@ -405,7 +440,7 @@ export function ZoomableAreaMap({ map, position, accuracyM, width, height, fores
       </GestureDetector>
     </View>
   );
-}
+});
 
 function stopAll(k: SharedValue<number>, tx: SharedValue<number>, ty: SharedValue<number>) {
   'worklet';
@@ -414,19 +449,63 @@ function stopAll(k: SharedValue<number>, tx: SharedValue<number>, ty: SharedValu
   cancelAnimation(ty);
 }
 
-interface MapCanvasProps {
-  width: number;
-  height: number;
-  paths: ReturnType<typeof projectAreaMap>;
+interface CanvasContent {
+  paths: ProjectedAreaMap;
   treePath: string;
   link: { d: string; b: XY } | null;
 }
 
-/** SVG w zatwierdzonym widoku – przerysowywane tylko po zatwierdzeniu, nie w trakcie gestu. */
-const MapCanvas = memo(function MapCanvas({ width, height, paths, treePath, link }: MapCanvasProps) {
+const r1 = (v: number) => Math.round(v * 10) / 10;
+
+/** Znaczniki drzew w kadrze jako jedna ścieżka (px płótna). */
+function treeMarkersPath(markers: readonly TreeMarker[], t: MapTransform, w: number, h: number): string {
+  let d = '';
+  for (const m of markers) {
+    const p = projectPoint(t, m);
+    if (p.x < -10 || p.y < -10 || p.x > w + 10 || p.y > h + 10) continue;
+    for (let i = 0; i < TREE.length; i++) d += `${i ? 'L' : 'M'}${r1(p.x + TREE[i][0])} ${r1(p.y + TREE[i][1])}`;
+    d += 'Z';
+  }
+  return d;
+}
+
+/**
+ * Treść płótna dla kadru `vp` (null = bez warstwy). Osobne memo dla ścieżek, drzew i kreski – siatka lasu
+ * czy kreska do lasu nie przeliczają warstw mapy.
+ */
+function useCanvasContent(
+  map: AreaMap,
+  vp: MapViewport | null,
+  markers: readonly TreeMarker[],
+  position: XY,
+  forestLink: XY | null | undefined,
+): CanvasContent | null {
+  const paths = useMemo(() => (vp ? projectAreaMap(map, vp) : null), [map, vp]);
+  const treePath = useMemo(() => (paths && vp ? treeMarkersPath(markers, paths, vp.width, vp.height) : ''), [markers, paths, vp]);
+  const link = useMemo(() => {
+    if (!paths || !forestLink) return null;
+    const a = projectPoint(paths, position);
+    const b = projectPoint(paths, forestLink);
+    return { d: `M${r1(a.x)} ${r1(a.y)}L${r1(b.x)} ${r1(b.y)}`, b: { x: r1(b.x), y: r1(b.y) } };
+  }, [paths, position, forestLink]);
+  return useMemo(() => (paths ? { paths, treePath, link } : null), [paths, treePath, link]);
+}
+
+interface MapCanvasProps {
+  width: number;
+  height: number;
+  content: CanvasContent | null;
+  /** Id wzoru lasu – osobne dla podkładu i szczegółów (web: jeden dokument). */
+  patternId: string;
+}
+
+/** SVG jednej warstwy – przerysowywane tylko po zatwierdzeniu widoku, nigdy w trakcie gestu. */
+const MapCanvas = memo(function MapCanvas({ width, height, content, patternId }: MapCanvasProps) {
+  if (!content) return null;
+  const { paths, treePath, link } = content;
   return (
     <Svg width={width} height={height}>
-      <AreaMapLayers paths={paths} rich>
+      <AreaMapLayers paths={paths} rich patternId={patternId}>
         {treePath ? (
           <>
             <Path d={treePath} fill={mapColors.treeHalo} stroke={mapColors.treeHalo} strokeWidth={2.5} strokeLinejoin="round" />

@@ -3,6 +3,7 @@ import { AppState } from 'react-native';
 
 import { useServices } from '@/services';
 import { systemNotifications } from '@/services/live/notifications';
+import { ensureDailyReset } from '@/store/game';
 import {
   deliverDue,
   onGminaFollowed,
@@ -69,7 +70,8 @@ export function NotificationsHost() {
     const activityTimer = realSocial ? setInterval(poll, ACTIVITY_MS) : null;
     const app = AppState.addEventListener('change', (state) => {
       if (state !== 'active') return;
-      // Po powrocie: zgoda mogła się zmienić w ustawieniach, a dzień – minąć.
+      // Po powrocie: zgoda mogła się zmienić w ustawieniach, a dzień – minąć (nowe zadania, przerwana seria).
+      ensureDailyReset();
       void refreshNotificationPermission().then(() => requestSync());
       syncLongTrip();
       tick();

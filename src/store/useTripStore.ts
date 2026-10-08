@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
 import type { Find, Trip } from '@/types';
-import { persistStorage, STORAGE_KEYS } from './storage';
+import { lazyPersistStorage, STORAGE_KEYS } from './storage';
 
 export interface TripState {
   activeTripId: string | null;
@@ -31,7 +31,8 @@ export const useTripStore = create<TripState>()(
         }),
       reset: () => set({ activeTripId: null, trips: {}, finds: {} }),
     }),
-    { name: STORAGE_KEYS.trips, storage: persistStorage, version: 1 },
+    // Dystans z GPS zapisuje się leniwie (persistLazily w addDistance) – reszta zmian od razu.
+    { name: STORAGE_KEYS.trips, storage: lazyPersistStorage, version: 1 },
   ),
 );
 

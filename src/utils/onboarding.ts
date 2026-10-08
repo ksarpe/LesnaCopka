@@ -1,109 +1,43 @@
 /**
- * Onboarding (pierwsze uruchomienie, app/onboarding.tsx) – czyste funkcje: kroki, walidacja kroków i wynik
- * do zapisania w profilu. Testy: src/utils/__tests__/onboarding.test.ts.
+ * Onboarding (pierwsze uruchomienie, app/onboarding.tsx) – czyste funkcje. Jeden ekran i jedno dotknięcie: przycisk
+ * „Zaczynamy!” z oświadczeniem tuż nad nim (regulamin z zasadami bezpieczeństwa, polityka prywatności, wiek).
+ * Bez pól wyboru i bez kroków: profil ma wartości domyślne (zmiana w Ustawieniach → Edytuj profil), gminę domową
+ * przyjmuje pierwsze wykrycie GPS (shouldAdoptHomeGmina), a o zgody systemowe pytamy dopiero, gdy są potrzebne.
+ * Testy: src/utils/__tests__/onboarding.test.ts.
  */
-import type { User, UserAvatar } from '@/types';
-import { cleanName, firstNameOf, handleBody, handleError, nameError, normalizeHandle } from './profile';
+import type { LegalDocId } from '@/data/legal';
 
-export const ONBOARDING_STEPS = ['welcome', 'safety', 'terms', 'profile', 'gmina', 'permissions'] as const;
-export type OnboardingStep = (typeof ONBOARDING_STEPS)[number];
+/** Napis na przycisku, którego naciśnięcie = akceptacja (oświadczenie cytuje go dosłownie). */
+export const ONBOARDING_CTA = 'Zaczynamy';
 
-/** To, co gracz wybrał po drodze (stan ekranu). */
-export interface OnboardingDraft {
-  /** Krok 2: „Rozumiem – aplikacja nie decyduje, czy grzyb jest jadalny”. */
-  safetyAck: boolean;
-  /** Krok 3: „Akceptuję regulamin i politykę prywatności”. */
-  termsAccepted: boolean;
-  /** Krok 3: „Mam ukończone 16 lat”. */
-  ageConfirmed: boolean;
-  /** Krok 4: imię lub pseudonim / nick (bez „@”) – null = jeszcze nieruszone, pokazujemy wartość z profilu. */
-  name: string | null;
-  handle: string | null;
-  /** Krok 4: avatar – undefined = bez zmian (z profilu), null = bez avatara. */
-  avatar?: UserAvatar | null;
-  /** Krok 5: gmina domowa wybrana świadomie (null = jeszcze nie). */
-  homeGminaId: string | null;
-}
-
-export const EMPTY_DRAFT: OnboardingDraft = {
-  safetyAck: false,
-  termsAccepted: false,
-  ageConfirmed: false,
-  name: null,
-  handle: null,
-  homeGminaId: null,
-};
-
-export const stepIndex = (step: OnboardingStep) => ONBOARDING_STEPS.indexOf(step);
-export const isLastStep = (step: OnboardingStep) => stepIndex(step) === ONBOARDING_STEPS.length - 1;
-
-export function nextStep(step: OnboardingStep): OnboardingStep {
-  return ONBOARDING_STEPS[Math.min(stepIndex(step) + 1, ONBOARDING_STEPS.length - 1)];
-}
-
-export function prevStep(step: OnboardingStep): OnboardingStep {
-  return ONBOARDING_STEPS[Math.max(stepIndex(step) - 1, 0)];
-}
-
-/** Pola profilu do pokazania: wpisane w onboardingu albo bieżące z profilu (np. po synchronizacji z serwerem). */
-export function profileFields(draft: OnboardingDraft, user: Pick<User, 'name' | 'handle'>) {
-  return { name: draft.name ?? user.name, handle: draft.handle ?? handleBody(user.handle) };
+/** Fragment oświadczenia – zwykły tekst albo link do pełnego dokumentu. */
+export interface ConsentPart {
+  text: string;
+  doc?: LegalDocId;
 }
 
 /**
- * Dlaczego z kroku nie da się przejść dalej (komunikat pod przyciskiem) – null = można.
- * Uprawnienia i powitanie są zawsze opcjonalne.
+ * Oświadczenie przy przycisku „Zaczynamy!”. Naciśnięcie przycisku = akceptacja regulaminu (z § 4 – zasady
+ * bezpieczeństwa) w wersji LEGAL_VERSION i potwierdzenie wieku (§ 3 regulaminu, pkt 13 polityki: 16 lat, młodsi za
+ * zgodą rodzica lub opiekuna). Polityka prywatności to informacja (podstawa przetwarzania: umowa – art. 6 ust. 1
+ * lit. b RODO, nie zgoda), więc gracz potwierdza, że ją zna, a nie „akceptuje”. Zgód opcjonalnych tu nie ma.
  */
-export function stepBlocker(step: OnboardingStep, draft: OnboardingDraft, user: Pick<User, 'name' | 'handle'>): string | null {
-  switch (step) {
-    case 'safety':
-      return draft.safetyAck ? null : 'Zaznacz, że rozumiesz zasady bezpieczeństwa';
-    case 'terms':
-      if (!draft.termsAccepted) return 'Zaakceptuj regulamin i politykę prywatności';
-      if (!draft.ageConfirmed) return 'Potwierdź, że masz ukończone 16 lat';
-      return null;
-    case 'profile': {
-      const f = profileFields(draft, user);
-      return nameError(f.name) ?? handleError(f.handle);
-    }
-    case 'gmina':
-      return draft.homeGminaId ? null : 'Wybierz gminę domową';
-    default:
-      return null;
-  }
-}
+export const ONBOARDING_CONSENT: readonly ConsentPart[] = [
+  { text: `Naciskając „${ONBOARDING_CTA}”, akceptujesz ` },
+  { text: 'Regulamin', doc: 'regulamin' },
+  { text: ' (w tym zasady bezpieczeństwa) i potwierdzasz, że znasz ' },
+  { text: 'Politykę prywatności', doc: 'prywatnosc' },
+  { text: ' oraz masz ukończone 16 lat (młodsi – tylko za zgodą rodzica lub opiekuna).' },
+];
 
-export const canAdvance = (step: OnboardingStep, draft: OnboardingDraft, user: Pick<User, 'name' | 'handle'>) =>
-  stepBlocker(step, draft, user) === null;
+/** Oświadczenie jako zwykły tekst (czytnik ekranu, testy). */
+export const consentText = (parts: readonly ConsentPart[] = ONBOARDING_CONSENT) => parts.map((p) => p.text).join('');
 
-/** Pierwszy krok, którego warunki nie są spełnione (np. przed zapisem) – null = komplet. */
-export function firstIncompleteStep(draft: OnboardingDraft, user: Pick<User, 'name' | 'handle'>): OnboardingStep | null {
-  return ONBOARDING_STEPS.find((s) => !canAdvance(s, draft, user)) ?? null;
-}
-
-export interface OnboardingResult {
-  /** Profil po onboardingu (store) – avatar: undefined = bez avatara. */
-  user: User;
-  /** Czy avatar się zmienił (→ zdarzenie `photo.avatar` w trybie Supabase). */
-  avatarChanged: boolean;
-}
-
-/** Profil gracza po onboardingu. Rzuca, gdy kroki nie są kompletne (UI na to nie pozwala). */
-export function onboardingResult(draft: OnboardingDraft, user: User): OnboardingResult {
-  const missing = firstIncompleteStep(draft, user);
-  if (missing) throw new Error(`Onboarding niekompletny: ${missing}`);
-  const f = profileFields(draft, user);
-  const name = cleanName(f.name);
-  const next: User = { ...user, name, firstName: firstNameOf(name), handle: normalizeHandle(f.handle), homeGminaId: draft.homeGminaId! };
-  const avatarChanged = draft.avatar !== undefined && !sameAvatar(draft.avatar ?? undefined, user.avatar);
-  if (avatarChanged) {
-    if (draft.avatar) next.avatar = draft.avatar;
-    else delete next.avatar;
-  }
-  return { user: next, avatarChanged };
-}
-
-function sameAvatar(a?: UserAvatar, b?: UserAvatar) {
-  if (!a || !b) return a === b;
-  return a.kind === 'preset' ? b.kind === 'preset' && a.id === b.id : b.kind === 'photo' && a.uri === b.uri;
+/**
+ * Czy przyjąć wykrytą gminę jako domową. Tylko gdy gracz jeszcze żadnej nie wybrał (`homeGminaPending`), a z serwerem
+ * dopiero po pierwszym przyjęciu stanu konta – wcześniej profil w telefonie to zastępczy gracz, a `profile.update`
+ * wysyła cały profil (nick, imię), więc nie może pójść przed stanem z serwera.
+ */
+export function shouldAdoptHomeGmina(s: { pending: boolean; serverMode: boolean; synced: boolean }): boolean {
+  return s.pending && (!s.serverMode || s.synced);
 }
