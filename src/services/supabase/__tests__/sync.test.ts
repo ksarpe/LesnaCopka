@@ -66,11 +66,15 @@ const mockServer = {
         return { data: this.trips.get(p.p_trip_id as string) };
       case 'submit_find': {
         const d = p.p_dimensions as Row;
+        const rid = (p.p_recognition_id as string | undefined) ?? null;
         if (!this.finds.has(p.p_find_id as string)) {
           this.finds.set(p.p_find_id as string, {
             id: p.p_find_id, tripId: p.p_trip_id, speciesId: p.p_species_id, gminaId: p.p_gmina_id, rarity: p.p_rarity,
             confidence: p.p_confidence, xxl: p.p_xxl, capCm: d.cap_cm, heightCm: d.height_cm, weightG: d.weight_g,
             ageDays: d.age_days, pieces: d.pieces ?? null, collected: true, status: 'pending', foundAt: p.p_found_at, xp: 0, reward: null,
+            // Podpisane rozpoznanie: zdjęcie i flagi z rekordu serwera (zdjęcie zapisała Edge Function identify).
+            recognitionId: rid, verified: !!rid, sizeVerified: !!rid,
+            ...(rid ? { photoPath: `${this.userId}/rec/${rid}.jpg` } : {}),
           });
         }
         return { data: this.finds.get(p.p_find_id as string) };
@@ -313,6 +317,9 @@ const MASLAK: Identification = {
   lookalikes: [],
   candidates: [{ speciesId: 'maslak-zwyczajny', confidence: 0.93 }],
 };
+
+/** Podpisane rozpoznanie (odpowiedź Edge Function identify). */
+const RID = '6f1c2b0a-3d4e-4f50-8a6b-7c8d9e0f1a2b';
 
 const outbox = () => useOutboxStore.getState();
 const types = () => outbox().items.map((x) => x.type);
@@ -569,7 +576,11 @@ describe('synchronizacja gry (local-first)', () => {
     const maslak = { id: 'ch-maslak', title: 'Znajdź maślaka', speciesId: 'maslak-zwyczajny', description: 'Opis', xp: 300 };
     expect(game.acceptChallenge('suprasl', maslak)).toBe(true);
     expect(game.acceptChallenge('suprasl', maslak)).toBe(false);
-    game.acceptChallenge('hajnowka', { id: 'ch-old', title: 'Stare wyzwanie', speciesId: 'czubajka-kania', description: 'Opis', xp: 200 });
+    // Uszczelnienia: gmina nieobserwowana (i nie domowa) – odmowa od razu w telefonie, bez zdarzenia w kolejce.
+    const kania = { id: 'ch-kania', title: 'Znajdź kanię', speciesId: 'czubajka-kania', description: 'Opis', xp: 200 };
+    expect(game.acceptChallenge('hajnowka', kania)).toBe(false);
+    expect(toast).toHaveBeenCalledWith(expect.stringContaining('obserwuj tę gminę'), 'flag');
+    game.acceptChallenge('suprasl', { id: 'ch-old', title: 'Stare wyzwanie', speciesId: 'czubajka-kania', description: 'Opis', xp: 200 });
     playTrip();
     // Lokalnie od razu: wyzwanie zaliczone maślakiem z wyprawy (zadanie dnia „zrobione”).
     expect(useUserStore.getState().quests.progress['ch:ch-maslak']).toMatchObject({ completed: true });
@@ -723,6 +734,87 @@ describe('zdjęcia w Storage (etap 5)', () => {
     expect(r).toMatchObject({ sent: 2, dropped: 0, remaining: 0 });
     expect(storageCall('remove', 'scan-photos').map((c) => c.params.arg)).toEqual([[path]]);
     expect(mockServer.objects.size).toBe(0);
+  });
+
+  it('podpisane rozpoznanie: find.submit z p_recognition_id, bez photo.find (zdjęcie ma serwer); stan z serwera potwierdza flagi', async () => {
+    mockServer.files.set('file:///finds/r.jpg', JPEG);
+    game.startTrip('suprasl');
+    const find = game.createPendingFind({ ...MASLAK, recognitionId: RID, sizeMeasured: true }, 'suprasl', { photoUri: 'file:///finds/r.jpg' });
+    expect(find).toMatchObject({ recognitionId: RID, verified: true, sizeVerified: true });
+    expect(types()).toEqual(['trip.start', 'find.submit']);
+    expect(outbox().items[1].payload).toMatchObject({ findId: find.id, recognitionId: RID });
+
+    mockServer.online = true;
+    const r = await requestSync('manual');
+    expect(r).toMatchObject({ sent: 2, dropped: 0, remaining: 0, hydrate: 'applied' });
+    expect(fns()).toEqual(['start_trip', 'submit_find', 'get_game_state']);
+    expect(mockServer.calls[1].params).toMatchObject({ p_find_id: find.id, p_recognition_id: RID });
+    expect(storageCall('upload', 'scan-photos')).toHaveLength(0);
+    // Zdjęcie z rozpoznania na serwerze, lokalne zostaje do wyświetlania.
+    expect(useTripStore.getState().finds[find.id]).toMatchObject({
+      recognitionId: RID,
+      verified: true,
+      sizeVerified: true,
+      photoUri: 'file:///finds/r.jpg',
+      photoPath: `user-1/rec/${RID}.jpg`,
+    });
+    // Porzucenie – zdjęcia z rozpoznania klient nie usuwa (zostaje przy rozpoznaniu na serwerze).
+    game.discardPendingFind(find.id);
+    expect(types()).toEqual(['find.discard']);
+  });
+
+  it('odrzucone rozpoznanie (np. wygasło): toast z opisem serwera, odbiór i zdjęcie wypadają, znalezisko zostaje oznaczone', async () => {
+    mockServer.files.set('file:///finds/e.jpg', JPEG);
+    mockServer.online = true;
+    const detail = 'Rozpoznanie wygasło (jest ważne 14 dni) – zeskanuj grzyba jeszcze raz.';
+    mockServer.override.submit_find = (p) =>
+      p.p_recognition_id ? { error: { message: 'recognition_expired', code: 'P0001', details: detail } } : undefined;
+    game.startTrip('suprasl');
+    const find = game.createPendingFind(
+      { ...MASLAK, recognitionId: RID, expiresAt: '2026-10-22T10:00:00.000Z', sizeMeasured: true },
+      'suprasl',
+      { photoUri: 'file:///finds/e.jpg' },
+    );
+    expect(find.recognitionExpiresAt).toBe('2026-10-22T10:00:00.000Z');
+    game.claimFind(find.id);
+    game.grantPendingRewards();
+    const second = game.createPendingFind({ ...MASLAK, recognitionId: RID }, 'suprasl');
+    expect(types()).toEqual(['trip.start', 'find.submit', 'find.claim', 'find.submit']);
+
+    const r = await requestSync('manual');
+    expect(r).toMatchObject({ dropped: 2, remaining: 0, hydrate: 'applied' });
+    expect(fns()).toEqual(['start_trip', 'submit_find', 'submit_find', 'get_game_state']);
+    expect(toast).toHaveBeenCalledWith(`Znalezisko nie trafiło na serwer: ${detail}`, 'cloud_off');
+    expect(outbox().failed.map((f) => f.item.type)).toEqual(['find.submit', 'find.submit']);
+    expect(useTripStore.getState().finds[second.id]).toMatchObject({ status: 'pending', serverRejected: { code: 'recognition_expired' } });
+    // Odbiór odrzuconego – liczy się tylko w telefonie (bez find.claim).
+    game.claimFind(second.id);
+    game.grantPendingRewards();
+    expect(types()).toEqual([]);
+    // Po scaleniu ze stanem serwera znalezisko zostaje (oznaczone), a nie znika bez słowa.
+    expect(useTripStore.getState().finds[find.id]).toMatchObject({
+      status: 'claimed',
+      verified: false,
+      sizeVerified: false,
+      serverRejected: { code: 'recognition_expired', reason: detail },
+    });
+  });
+
+  it('bez rozpoznania (wynik wymuszony w dev) – find.submit bez p_recognition_id, serwer: niezweryfikowane; pewność < 60% – tylko w telefonie', async () => {
+    game.startTrip('suprasl');
+    const plain = game.createPendingFind({ ...MASLAK, sizeMeasured: true }, 'suprasl');
+    expect(plain).toMatchObject({ verified: false, sizeVerified: false });
+    const low = game.createPendingFind({ ...MASLAK, confidence: 0.4 }, 'suprasl');
+    expect(types()).toEqual(['trip.start', 'find.submit']);
+    mockServer.online = true;
+    await requestSync('manual');
+    expect(mockServer.calls[1].params).not.toHaveProperty('p_recognition_id');
+    expect(useTripStore.getState().finds[plain.id]).toMatchObject({ verified: false, sizeVerified: false });
+    expect(useTripStore.getState().finds[plain.id].recognitionId).toBeUndefined();
+    expect(mockServer.finds.has(low.id)).toBe(false);
+    // Porzucenie znaleziska, które nigdy nie poszło na serwer – bez find.discard.
+    game.discardPendingFind(low.id);
+    expect(types()).toEqual([]);
   });
 
   it('publikacja: okładka (najlepsze zdjęcie) do publicznego post-media tuż przed publish_trip; bez zdjęcia – bez okładki', async () => {

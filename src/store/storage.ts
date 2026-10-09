@@ -10,6 +10,10 @@ export const STORAGE_KEYS = {
   trips: 'grzyb.trips.v1',
   sim: 'grzyb.sim.v1',
   mockDb: 'grzyb.mockdb.v1',
+  /** „Serwer” mocków pojedynków i widoczności w rankingach (src/services/mock/duelsDb.ts). */
+  mockDuels: 'grzyb.mockduels.v1',
+  /** „Serwer” mocków walk o okaz – zgłoszone okazy gracza (src/services/mock/contestsDb.ts). */
+  mockContests: 'grzyb.contests.v1',
   notifications: 'grzyb.notifications.v1',
   prefs: 'grzyb.prefs.v1',
   voivodeship: 'grzyb.voivodeship.v1',

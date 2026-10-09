@@ -15,7 +15,7 @@ import { deleteServerObjects } from './photos';
 import { rpc } from './rpc';
 import { establishSession, withTimeout } from './session';
 import { backendStatus } from './status';
-import { createStorageApi } from './storage';
+import { createStorageApi, type StorageApi } from './storage';
 import { BUCKETS, type StorageBucket } from './storagePaths';
 import { storagePathsOf, switchAccount, switchAccountLocked, withSyncLock, type SwitchResult } from './sync';
 import { classifyError, errorMessage, type SyncError } from './syncRpc';
@@ -195,6 +195,30 @@ function failure(e: SyncError): DeleteOutcome {
   return { ok: false, reason: 'server', message: `Serwer nie usunął konta (${errorMessage(e)})` };
 }
 
+/**
+ * Wszystkie pliki folderu (bez podfolderów): lista zwraca najwyżej 100 – usuwamy stronę i pytamy znowu, aż będzie pusta.
+ * Ta sama strona drugi raz (Storage nie usunął – np. brak uprawnień) albo limit stron → komunikat błędu. null = gotowe.
+ */
+export async function removeFolder(
+  api: Pick<StorageApi, 'list' | 'remove'>,
+  bucket: StorageBucket,
+  folder: string,
+  maxPages = 500,
+): Promise<string | null> {
+  let previous = '';
+  for (let page = 0; page < maxPages; page += 1) {
+    const { paths, error } = await api.list(bucket, folder);
+    if (error) return errorMessage(error);
+    if (!paths.length) return null;
+    const key = paths.join('\n');
+    if (key === previous) return `Nie udało się usunąć plików (${folder})`;
+    previous = key;
+    const err = await api.remove(bucket, paths);
+    if (err) return errorMessage(err);
+  }
+  return `Za dużo plików do usunięcia (${folder})`;
+}
+
 /** Wynik `delete_my_account()`: czy konto auth zniknęło (false → Edge Function `delete-account`). */
 export function authUserDeleted(data: unknown): boolean {
   const d = typeof data === 'string' ? (() => { try { return JSON.parse(data) as unknown; } catch { return null; } })() : data;
@@ -234,6 +258,13 @@ export function deleteAccount(wipeLocal: () => void): Promise<DeleteOutcome> {
 
     const del = await rpc('delete_my_account', undefined, 20_000);
     if (del.error) return failure(del.error);
+    // Zdjęcia rozpoznań (scan-photos/{uid}/rec/ – zapisuje je Edge Function identify) klient może usunąć dopiero, gdy
+    // nic się do nich nie odwołuje, czyli po skasowaniu danych (token sesji w telefonie jeszcze działa). Gdy konto
+    // kończy Edge Function delete-account – ona usuwa cały folder gracza.
+    if (authUserDeleted(del.data)) {
+      const err = await removeFolder(api, BUCKETS.finds, `${uid}/rec`);
+      if (err) filesError = err;
+    }
     if (!authUserDeleted(del.data)) {
       const fn = await supabase.functions.invoke('delete-account', { method: 'POST' }).catch((e: unknown) => ({ error: e }));
       if (fn.error) {

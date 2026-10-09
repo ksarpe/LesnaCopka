@@ -80,6 +80,22 @@ export interface Identification {
   lookalikes: Lookalike[];
   /** Alternatywy przy niskiej pewności. */
   candidates: Candidate[];
+  /**
+   * Podpisane rozpoznanie: id wyniku zapisanego przez serwer (Edge Function `identify`) – trafia do znaleziska
+   * i `find.submit`. Brak – wynik niezweryfikowany (wymuszony w panelu dev, starszy serwer, pewność < 60%).
+   */
+  recognitionId?: string;
+  /** Kapelusz zmierzony przez model przy odniesieniu skali (dłoń, moneta, karta, nóż…), a nie typowy dla gatunku. */
+  sizeMeasured?: boolean;
+  /** Zdjęcie ekranu / wydruku / zdjęcie zdjęcia (wtedy wynik i tak jest odrzuceniem – pole dla porządku). */
+  reproduction?: boolean;
+  /** Do kiedy serwer przyjmie znalezisko z tym rozpoznaniem (kolejka offline), ISO. */
+  expiresAt?: ISODate;
+  /**
+   * Tryb mock (bez backendu Supabase): symulacja podpisanego rozpoznania z panelu dev („z odniesieniem skali”) –
+   * znalezisko liczy się jak zweryfikowane (walki o okaz na botach). W trybie Supabase nigdy.
+   */
+  simulated?: boolean;
 }
 
 /** Części owocnika: kapelusz z wierzchu, spód kapelusza (blaszki / rurki), trzon, podstawa trzonu. */
@@ -165,6 +181,26 @@ export interface Find {
   views?: ScanView[];
   /** Tryb Supabase: ścieżka zdjęcia w prywatnym koszyku `scan-photos` (`{uid}/{findId}.jpg`), gdy jest już na serwerze. */
   photoPath?: string;
+  /**
+   * Id rozpoznania zapisanego przez serwer (Edge Function `identify`) – `find.submit` je przekazuje, a serwer bierze
+   * gatunek, pewność, wymiary i gminę z własnego rekordu. Brak – znalezisko niezweryfikowane (wynik wymuszony w panelu
+   * dev, stara wersja aplikacji).
+   */
+  recognitionId?: string;
+  /** Gatunek i wymiary potwierdzone przez serwer (podpisane rozpoznanie) – warunek rankingów i rywalizacji. */
+  verified?: boolean;
+  /**
+   * `verified` + kapelusz zmierzony przy odniesieniu skali + zdjęcie „na żywo” (nie ekran / wydruk) – warunek walk
+   * o okaz i pojedynków „największy okaz”. W telefonie – od razu z wyniku rozpoznania; serwer potwierdza w stanie gry.
+   */
+  sizeVerified?: boolean;
+  /** Do kiedy serwer przyjmie `find.submit` z tym rozpoznaniem (ISO, 14 dni – kolejka offline). */
+  recognitionExpiresAt?: ISODate;
+  /**
+   * Serwer trwale odrzucił znalezisko (`find.submit`: rozpoznanie wygasło / zużyte / nieznane / wymagane) – zostaje
+   * tylko w telefonie, oznaczone (bez weryfikacji i bez XP z serwera); odbiór i zdjęcie nie idą już na serwer.
+   */
+  serverRejected?: { code: string; reason: string; at: ISODate };
   xp?: XpBreakdown;
   /** Informacje wyliczone przy odbiorze nagrody (do ekranu Nagroda). */
   reward?: {
@@ -300,6 +336,11 @@ export interface SpeciesPercentile {
   /** 0..100 */
   percentile: number;
   biggerCount: number;
+  /**
+   * Tryb Supabase: false = za mało zweryfikowanych okazów do porównania (k-anonimowość: < 5 okazów albo < 3 znalazców) –
+   * wtedy liczby jak przy braku danych (`collected` 0). Brak pola = porównanie dostępne (mocki, starszy serwer).
+   */
+  comparable?: boolean;
 }
 
 /** Pozycja GPS – tylko w pamięci, nigdy nie zapisywana ani publikowana. */
@@ -601,9 +642,19 @@ export interface FriendsOverview {
   outgoing: SocialUser[];
 }
 
-export type ActivityKind = 'reaction' | 'comment' | 'friend_request' | 'friend_accepted';
+export type ActivityKind =
+  | 'reaction'
+  | 'comment'
+  | 'friend_request'
+  | 'friend_accepted'
+  // Rywalizacja (docs/rywalizacja.md §5): pojedynki i walki o okaz.
+  | 'duel_invite'
+  | 'duel_accepted'
+  | 'duel_finished'
+  | 'contest_award'
+  | 'contest_overtaken';
 
-/** Aktywność innych wobec gracza (tryb Supabase) – źródło powiadomień społecznościowych. */
+/** Aktywność innych wobec gracza (tryb Supabase) – źródło powiadomień społecznościowych i rywalizacji. */
 export interface ActivityItem {
   /** Stabilny identyfikator (klucz powiadomienia). */
   id: string;
@@ -613,6 +664,13 @@ export interface ActivityItem {
   /** Treść komentarza (kind = 'comment'). */
   text: string | null;
   createdAt: ISODate;
+  /** Rywalizacja: id pojedynku (`duel_*`) albo walki o okaz (`contest_*`). */
+  refId?: string | null;
+  /**
+   * Rywalizacja – szczegóły (jsonb z serwera): `duel_invite` / `duel_accepted` – `{ kind, days }`, `duel_finished` –
+   * `{ outcome, xp }`, `contest_award` – `{ place, scope, scopeName, xp, title }`, `contest_overtaken` – `{ scope, rank, title }`.
+   */
+  meta?: Record<string, unknown> | null;
 }
 
 /* ───────── Szanse na gatunki i mapa gatunku (src/utils/chances.ts) – tylko agregaty gmin, nigdy punkty ───────── */
@@ -673,4 +731,233 @@ export interface SpeciesMap {
   top: { gminaId: string; name: string; finds: number }[];
   /** Znaleziska gatunku w pokazanych gminach. */
   total: number;
+}
+
+/* ───────── Rywalizacja (docs/rywalizacja.md): walki o okaz, pojedynki, ranking grzybiarzy, trofea ───────── */
+
+/** Zasięg tablicy wyników walki o okaz. */
+export type ContestScope = 'gmina' | 'wojewodztwo' | 'polska' | 'znajomi';
+
+/**
+ * 'relative' – „Okaz tygodnia”: dowolny gatunek (bez kępek i gatunków chronionych), kapelusz względem typowego dla
+ * gatunku w %; 'species' – jeden gatunek tygodnia, kapelusz w cm.
+ */
+export type ContestKind = 'relative' | 'species';
+
+/** open – trwa; judging – tydzień minął, czekamy na rozstrzygnięcie (opóźnienie prywatności, zgłoszenia); final – wyniki i nagrody. */
+export type ContestStatus = 'open' | 'judging' | 'final';
+
+/** Walka o okaz – jedna kategoria jednego tygodnia (pon–nd, Europe/Warsaw). */
+export interface Contest {
+  /** Poniedziałek tygodnia + kategoria: '2026-10-05:okaz', '2026-10-05:borowik-szlachetny'. */
+  id: string;
+  kind: ContestKind;
+  /** Gatunek kategorii (kind = 'species'), inaczej null. */
+  speciesId: string | null;
+  /** „Okaz tygodnia”, „Największy borowik szlachetny”. */
+  title: string;
+  /** Poniedziałek 00:00 Europe/Warsaw. */
+  startsAt: ISODate;
+  /** Koniec tygodnia (następny poniedziałek 00:00) – liczą się okazy znalezione przed tą chwilą. */
+  endsAt: ISODate;
+  /** Rozstrzygnięcie i nagrody. */
+  resultsAt: ISODate;
+  status: ContestStatus;
+  /** Zgłoszone okazy w całej Polsce (widoczne dla innych). */
+  entrants: number;
+}
+
+/** Zgłoszony okaz na tablicy wyników walki. */
+export interface ContestEntry {
+  id: string;
+  contestId: string;
+  findId: string;
+  author: PostAuthor;
+  speciesId: string;
+  /** Średnica kapelusza zmierzona przez model przy odniesieniu skali (cm). */
+  capCm: number;
+  /** Kapelusz względem typowego dla gatunku, w % (125 = o 25% większy niż typowy). */
+  relativePct: number;
+  /** Wynik w tej walce: capCm (species) albo relativePct (relative). */
+  score: number;
+  /** Miejsce w zasięgu tablicy (1 = lider); null – okaz jeszcze niewidoczny dla innych albo w weryfikacji. */
+  rank: number | null;
+  gminaId: string;
+  foundAt: ISODate;
+  /** Zdjęcie w prywatnym koszyku `scan-photos` – adres podpisuje klient (polityka Storage dopuszcza zgłoszone okazy). */
+  photoPath: string | null;
+  /** Mock / własny okaz: lokalne zdjęcie z telefonu. */
+  photoUri?: string;
+  /** active – na tablicy; review – zgłoszony przez społeczność, ukryty do weryfikacji (widzi go tylko autor). */
+  status: 'active' | 'review';
+  isMine: boolean;
+  /** Własny okaz przed upływem opóźnienia prywatności: od kiedy widzą go inni (null – już widoczny). */
+  visibleFrom: ISODate | null;
+}
+
+export interface ContestBoard {
+  contest: Contest;
+  scope: ContestScope;
+  /** Gmina (slug) / województwo (nazwa) zasięgu; null – Polska i znajomi. */
+  scopeId: string | null;
+  /** Do nagłówka: „Gmina Supraśl”, „podlaskie”, „Polska”, „Znajomi”. */
+  scopeName: string;
+  /** Najlepszy okaz każdego gracza, od największego (do 50). */
+  entries: ContestEntry[];
+  /** Okaz gracza w tej walce (także spoza listy), null – nie walczy. */
+  mine: ContestEntry | null;
+  /** Wszyscy gracze z okazem w tym zasięgu. */
+  total: number;
+}
+
+/** Walka, do której pasuje znalezisko (ekran Nagroda, dziennik). */
+export interface ContestMatch {
+  contest: Contest;
+  /** Wynik okazu w tej walce (cm albo %). */
+  score: number;
+  /** Miejsce, które okaz zajmuje (albo zająłby po zgłoszeniu) – wg okazów widocznych teraz. */
+  projectedRank: { gmina: number; wojewodztwo: number; polska: number };
+  /** Ten okaz jest już zgłoszony w tej walce. */
+  entered: boolean;
+  /** Wynik obecnie zgłoszonego okazu gracza w tej walce (inny okaz), null – brak. */
+  currentBest: number | null;
+}
+
+/** Czy znalezisko może walczyć o okaz i w których walkach. */
+export interface ContestEligibility {
+  findId: string;
+  eligible: boolean;
+  /** Gdy nie: krótki powód po polsku („Na zdjęciu zabrakło odniesienia skali…”). */
+  reason: string | null;
+  /** Nagrody wymagają konta zabezpieczonego e-mailem (konto anonimowe – walczy, ale bez nagród). */
+  prizeEligible: boolean;
+  contests: ContestMatch[];
+}
+
+/** Walki tygodnia – podgląd na ekranie Rywalizacja. */
+export interface ContestWeek {
+  /** YYYY-MM-DD (poniedziałek). */
+  weekStart: string;
+  contests: Contest[];
+  /** Okaz gracza w każdej walce (id walki → wpis). */
+  mine: Record<string, ContestEntry>;
+  /** Lider każdej walki w województwie gracza (id walki → wpis albo null). */
+  leaders: Record<string, ContestEntry | null>;
+  /** Ostatnio rozstrzygnięty tydzień (wyniki do obejrzenia), null – brak. */
+  previousWeekStart: string | null;
+}
+
+export type TrophyPlace = 1 | 2 | 3;
+
+/** Miejsce na podium walki o okaz (nagroda). */
+export interface Trophy {
+  id: string;
+  contestId: string;
+  contestTitle: string;
+  scope: Exclude<ContestScope, 'znajomi'>;
+  /** „Gmina Supraśl”, „podlaskie”, „Polska”. */
+  scopeName: string;
+  place: TrophyPlace;
+  speciesId: string;
+  capCm: number;
+  /** XP nagrody (0 – podium bez nagrody, np. konto anonimowe albo lepsza nagroda w innym zasięgu). */
+  xp: number;
+  awardedAt: ISODate;
+}
+
+export interface TrophyCase {
+  gold: number;
+  silver: number;
+  bronze: number;
+  /** Najnowsze najpierw (do 20). */
+  items: Trophy[];
+}
+
+/** biggest – największy okaz (kapelusz względem typowego, %), count – najwięcej grzybów, species – najwięcej gatunków. */
+export type DuelKind = 'biggest' | 'count' | 'species';
+export type DuelDays = 1 | 3 | 7;
+export type DuelStatus = 'pending' | 'active' | 'finished' | 'declined' | 'cancelled' | 'expired';
+export type DuelOutcome = 'won' | 'lost' | 'draw';
+
+export interface DuelSide {
+  user: PostAuthor;
+  /** biggest – najlepszy kapelusz względem typowego (%), count – grzyby, species – gatunki. */
+  score: number;
+  /** biggest: najlepszy okaz (null – jeszcze żadnego). */
+  best: { findId: string; speciesId: string; capCm: number; relativePct: number; photoPath: string | null } | null;
+}
+
+/** Pojedynek dwóch znajomych – liczą się tylko znaleziska zweryfikowane przez serwer, w oknie pojedynku. */
+export interface Duel {
+  id: string;
+  kind: DuelKind;
+  days: DuelDays;
+  status: DuelStatus;
+  /** Gracz wyzwał przeciwnika (false – gracz został wyzwany). */
+  iAmChallenger: boolean;
+  createdAt: ISODate;
+  /** Zaproszenie wygasa (pending), inaczej null. */
+  expiresAt: ISODate | null;
+  /** Od przyjęcia. */
+  startsAt: ISODate | null;
+  endsAt: ISODate | null;
+  finishedAt: ISODate | null;
+  me: DuelSide;
+  opponent: DuelSide;
+  /** Po rozstrzygnięciu. */
+  outcome: DuelOutcome | null;
+  /** XP gracza za wynik (0 – bez nagrody: limit tygodniowy, przeciwnik bez wyniku, konto anonimowe). */
+  xp: number | null;
+}
+
+export interface DuelsOverview {
+  active: Duel[];
+  /** Wyzwania do gracza (czekają na „Przyjmij” / „Odrzuć”). */
+  incoming: Duel[];
+  /** Wyzwania wysłane przez gracza. */
+  outgoing: Duel[];
+  /** Zakończone w ostatnich 30 dniach (także odrzucone / wygasłe / anulowane), najnowsze najpierw, do 20. */
+  finished: Duel[];
+  record: { won: number; lost: number; draw: number };
+}
+
+export type PlayerRankingScope = 'znajomi' | 'gmina' | 'wojewodztwo' | 'polska';
+export type PlayerRankingPeriod = 'week' | 'season';
+
+export interface PlayerRankRow {
+  rank: number;
+  user: PostAuthor;
+  /** Punkty rankingu: XP ze zweryfikowanych znalezisk, wyzwań i nagród rywalizacji w okresie. */
+  xp: number;
+  isMe: boolean;
+}
+
+/** Ranking grzybiarzy (indywidualny). */
+export interface PlayerRanking {
+  scope: PlayerRankingScope;
+  /** Gmina (slug) / województwo (nazwa); null – Polska i znajomi. */
+  scopeId: string | null;
+  scopeName: string;
+  period: PlayerRankingPeriod;
+  /** Znajomi – na żywo; zasięgi publiczne – punkty sprzed 24 h (opóźnienie prywatności). */
+  live: boolean;
+  /** Do 50 wierszy. */
+  rows: PlayerRankRow[];
+  /** Wiersz gracza (także spoza listy); null – gracz ukryty w rankingach, poza rywalizacją albo bez punktów. */
+  me: PlayerRankRow | null;
+  /** Punkty gracza z ostatnich 24 h – wejdą do rankingu publicznego później (0 w zakresie znajomych). */
+  pendingXp: number;
+  total: number;
+  /** Gracz wyłączył widoczność w rankingach (Ustawienia → Prywatność). */
+  hidden: boolean;
+}
+
+/** Status gracza w rywalizacji (ekran Rywalizacja, Ustawienia → Prywatność). */
+export interface RivalryStatus {
+  /** Widoczność w rankingach grzybiarzy i na tablicach walk w zasięgach publicznych. */
+  showInRankings: boolean;
+  /** ok – bierze udział; review – wyniki wstrzymane do weryfikacji (inni ich nie widzą, bez nagród). */
+  standing: 'ok' | 'review';
+  /** Konto zabezpieczone e-mailem – warunek nagród (XP) w walkach i pojedynkach. */
+  accountSecured: boolean;
 }

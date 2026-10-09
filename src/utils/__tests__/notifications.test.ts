@@ -4,6 +4,8 @@ import { AUTHORS } from '../../data/mock/users';
 import {
   atHour,
   dayKey,
+  DEFAULT_NOTIF_PREFS,
+  NOTIF_CATEGORIES,
   groupByDay,
   lastWeeklyOccurrence,
   mockSocialNotifications,
@@ -96,5 +98,16 @@ describe('mockSocialNotifications', () => {
 
   it('za mało znajomych – brak reakcji', () => {
     expect(mockSocialNotifications('post_abc', visibleFrom, friends.slice(0, 2))).toEqual([]);
+  });
+});
+
+describe('kategorie powiadomień', () => {
+  it('„Rywalizacja” – osobny przełącznik, domyślnie włączony; każda kategoria ma wartość domyślną', () => {
+    const ids = NOTIF_CATEGORIES.map((c) => c.id);
+    expect(ids).toContain('rivalry');
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(Object.keys(DEFAULT_NOTIF_PREFS).sort()).toEqual([...ids].sort());
+    expect(DEFAULT_NOTIF_PREFS.rivalry).toBe(true);
+    expect(NOTIF_CATEGORIES.find((c) => c.id === 'rivalry')?.label).toBe('Rywalizacja');
   });
 });

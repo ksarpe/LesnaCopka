@@ -12,6 +12,7 @@ import { StateCard } from '@/components/OfflineCard';
 import { ProgressRing } from '@/components/ProgressRing';
 import { Screen } from '@/components/Screen';
 import { SectionHeader, SeeAllButton } from '@/components/SectionHeader';
+import { TrophySection } from '@/components/TrophyShelf';
 import { Txt } from '@/components/Txt';
 import { UserAvatar } from '@/components/UserAvatar';
 import { useAchievements } from '@/hooks/useAchievements';
@@ -105,6 +106,8 @@ export default function ProfileScreen() {
         <Badges />
         <AtlasPreview atlas={atlas} found={found} total={total} />
         <AchievementsPreview />
+        {/* Podia walk o okaz (Rywalizacja). */}
+        <TrophySection limit={2} expandable onSeeAll={() => router.push('/rywalizacja' as Href)} />
       </View>
     </Screen>
   );

@@ -9,9 +9,9 @@ import { citext } from '@electric-sql/pglite/contrib/citext';
 import { unaccent } from '@electric-sql/pglite/contrib/unaccent';
 import { postgis } from '@electric-sql/pglite-postgis';
 import { randomUUID } from 'node:crypto';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { tsImport } from 'tsx/esm/api';
 
 process.on('uncaughtException', (e) => {
@@ -83,11 +83,37 @@ await db.exec(`
 `);
 
 // ── Migracje + seed ──
+// DB_TEST_WIP – migracje i moduły testów w trakcie pracy (ścieżki względem katalogu projektu, rozdzielone ; albo ,),
+// np. DB_TEST_WIP=supabase/wip/20261015110000_rywalizacja.sql;scripts/db-tests/rywalizacja.wip.mjs. Migracje z listy
+// wchodzą w kolejności nazw razem z supabase/migrations, moduły *.wip.mjs – tylko z listy (patrz koniec pliku).
+const WIP = (process.env.DB_TEST_WIP ?? '')
+  .split(/[;,]/)
+  .map((s) => s.trim())
+  .filter(Boolean)
+  .map((p) => path.resolve(root, p));
 const migDir = path.join(root, 'supabase', 'migrations');
-for (const f of readdirSync(migDir).filter((f) => f.endsWith('.sql')).sort()) {
-  await db.exec(readFileSync(path.join(migDir, f), 'utf8'));
-  console.log('· migracja', f);
+const migrations = [
+  ...readdirSync(migDir).filter((f) => f.endsWith('.sql')).map((f) => path.join(migDir, f)),
+  ...WIP.filter((p) => p.endsWith('.sql')),
+].sort((a, b) => path.basename(a).localeCompare(path.basename(b)));
+for (const f of migrations) {
+  await db.exec(readFileSync(f, 'utf8'));
+  console.log('· migracja', path.basename(f), WIP.includes(f) ? '(wip)' : '');
 }
+// Same migracje (jak w chmurze, przed seedem): żadna funkcja dev_* bez EXECUTE dla klientów – nadaje je tylko seed lokalny
+// (scripts/seed-dev.ts; reguła: docs/backend.md → „Uszczelnienia anty-cheatu”).
+const devGranted = (
+  await db.query(
+    `select p.oid::regprocedure::text f from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.proname like 'dev\\_%'
+        and (has_function_privilege('authenticated', p.oid, 'execute') or has_function_privilege('anon', p.oid, 'execute'))`,
+  )
+).rows.map((r) => r.f);
+ok(
+  devGranted.length === 0,
+  'migracje: funkcje dev_* bez EXECUTE dla klientów (w migracji bez „grant execute”, nadaje je tylko seed lokalny)',
+  devGranted,
+);
 await db.exec(readFileSync(path.join(root, 'supabase', 'seed.sql'), 'utf8'));
 const counts = await one(
   `select (select count(*) from species) sp, (select count(*) from gminy) gm, (select count(*) from badges) b,
@@ -186,8 +212,8 @@ ok((await one('select streak_days from profiles where id = $1', [kuba])).streak_
 await admin();
 const find = (
   await one(
-    `insert into finds (user_id, trip_id, species_id, gmina_id, rarity, confidence, xxl, cap_cm, height_cm, weight_g, age_days, collected)
-     values ($1, $2, 'borowik-szlachetny', 'suprasl', 'rzadki', 0.96, true, 14, 17, 410, 5, true) returning id`,
+    `insert into finds (user_id, trip_id, species_id, gmina_id, rarity, confidence, xxl, cap_cm, height_cm, weight_g, age_days, collected, verified)
+     values ($1, $2, 'borowik-szlachetny', 'suprasl', 'rzadki', 0.96, true, 14, 17, 410, 5, true, true) returning id`,
     [kuba, trip.id],
   )
 ).id;
@@ -289,10 +315,14 @@ await one('select * from report_trip_progress($1, 5200)', [trip.id]);
 const kmQuest = await one(`select progress, completed_at from user_quests where user_id = $1 and quest_id = 'q-km-5'`, [kuba]);
 ok(Number(kmQuest.progress) === 5 && kmQuest.completed_at, 'report_trip_progress: 5,2 km → zadanie dystansu ukończone');
 
-// ── Zakończenie: ślad prywatny, publiczna trasa uogólniona ──
+// ── Zakończenie (uszczelnienia: ślad GPS z telefonu ignorowany, czas trwania ≤ koniec − start) ──
 const track = JSON.stringify({ type: 'LineString', coordinates: [[23.33, 53.21], [23.341, 53.215], [23.352, 53.219], [23.36, 53.226]] });
 const done = await one('select * from finish_trip($1, 5200, 11520, $2)', [trip.id, track]);
-ok(done.status === 'finished' && done.route_public, 'finish_trip: wyprawa zakończona, trasa uogólniona');
+ok(
+  done.status === 'finished' && !done.route_public && done.duration_s <= Math.round((done.ended_at - done.started_at) / 1000) &&
+    Number((await one('select count(*) n from trip_tracks where trip_id = $1', [trip.id])).n) === 0,
+  'finish_trip: wyprawa zakończona; ślad z telefonu pominięty (bez trasy i surowego śladu), czas przycięty do końca − startu',
+);
 ok((await one('select visible_from from finds where id = $1', [find])).visible_from, 'finish_trip: znaleziska dostają visible_from');
 await as(ola);
 ok((await db.query('select * from trip_tracks')).rows.length === 0, 'RLS: surowy ślad GPS widzi tylko właściciel');
@@ -300,7 +330,10 @@ ok((await db.query('select * from trip_tracks')).rows.length === 0, 'RLS: surowy
 // ── Publikacja i feed ──
 await as(kuba);
 const post = await one(`select * from publish_trip($1, false, 'Poranny obchód po deszczu')`, [trip.id]);
-ok(post.route_precision === 'approximate' && post.payload.highlight.species === 'Borowik szlachetny', 'publish_trip: wpis z przybliżoną trasą i najlepszym znaleziskiem');
+ok(
+  post.route_precision === 'gmina' && post.payload.route === null && post.payload.highlight.species === 'Borowik szlachetny',
+  'publish_trip: wpis bez trasy (tylko gmina) z najlepszym znaleziskiem',
+);
 ok(new Date(post.visible_from) > new Date(Date.now() + 23 * 3600e3), 'publish_trip: widoczny dla innych za 24 h');
 // get_feed zwraca tablicę jsonb (etap 3) – sprawdzenia jak wcześniej.
 const feed = async (scope, before, limit) =>
@@ -327,10 +360,8 @@ ok(r1.reacted === true && r1.reactions === 1 && r2.reacted === false && r2.react
 await admin();
 await db.query(`update finds set visible_from = now() - interval '1 hour', found_at = now() - interval '2 days' where id = $1`, [find]);
 await as(ola);
-const pct = await one(`select * from species_percentile('borowik-szlachetny', 'suprasl', 410)`);
-ok(Number(pct.collected) === 1 && Number(pct.mushroomers) === 1, 'species_percentile: agregat z widocznych znalezisk', pct);
-const recs = (await db.query(`select * from gmina_records('suprasl')`)).rows;
-ok(recs.length === 1 && recs[0].species_name === 'Borowik szlachetny', 'gmina_records: rekord gminy');
+// species_percentile / gmina_records (etap 1) usunięte w uszczelnieniach – statystyki gminy: get_gmina_stats (etap 4).
+ok((await fails(`select * from species_percentile('borowik-szlachetny', 'suprasl', 410)`))?.includes('does not exist'), 'species_percentile (etap 1) usunięta');
 await admin();
 await db.exec(`update xp_events set created_at = now() - interval '25 hours'`);
 await db.exec('select refresh_gmina_rankings()');
@@ -423,6 +454,30 @@ const submitArgs = (o) => [
   o.foundAt ?? iso(H),
 ];
 const submit = (o) => one(submitSql, submitArgs(o));
+// Podpisane rozpoznanie (20261015100000): rekord jak po Edge Function identify (wstawiony jako admin) – kończy jako
+// gracz `uid`. Domyślnie ważny borowik zmierzony przy dłoni (kapelusz 14 cm). Zwraca id (p_recognition_id).
+const sha = () => (randomUUID() + randomUUID()).replace(/-/g, '');
+const mkRecognition = async (uid, o = {}) => {
+  await admin();
+  const r = await one(
+    `insert into recognitions (user_id, status, verdict, reason, species_id, candidates, confidence, visible_parts, count, cap_cm,
+                               height_cm, maturity, scale_ref, reproduction, views, image_sha256, photo_path, gmina_id, model,
+                               created_at, expires_at)
+     values ($1, $2, $3, '', $4, $5, $6, '{cap,underside,stem,base}', $7, $8, $9, 'mature', $10, $11, 1, array[$12], $13, $14,
+             'claude-opus-5-5', $15, $16) returning id`,
+    [
+      uid, o.status ?? 'issued', o.verdict ?? 'mushroom', o.speciesId ?? 'borowik-szlachetny',
+      JSON.stringify(o.candidates ?? [{ speciesId: o.speciesId ?? 'borowik-szlachetny', confidence: o.confidence ?? 0.92 }]),
+      o.confidence ?? 0.92, o.count ?? 1, o.cap === undefined ? 14 : o.cap, o.height === undefined ? 16 : o.height,
+      o.scale ?? (o.cap === null ? 'none' : 'hand'), o.reproduction ?? false, o.sha ?? sha(), o.photoPath ?? null, o.gminaId ?? null,
+      o.createdAt ?? new Date().toISOString(), o.expiresAt ?? new Date(Date.now() + 14 * 24 * 3600e3).toISOString(),
+    ],
+  );
+  await as(uid);
+  return r.id;
+};
+const submitRec = (o) =>
+  one('select * from submit_find($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)', [...submitArgs(o), o.recognitionId ?? null]);
 const state = async () => (await one('select get_game_state() s')).s;
 const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -455,8 +510,9 @@ const F1 = randomUUID();
 const f1 = await submit({ id: F1, tripId: T1, xxl: true });
 ok(
   f1.id === F1 && f1.status === 'pending' && f1.trip_id === T1 && f1.gmina_id === 'gromadka' && f1.collected &&
-    Number(f1.cap_cm) === 14 && Number(f1.height_cm) === 17 && f1.weight_g === 410 && f1.age_days === 5 && f1.pieces === null,
-  'submit_find: oczekujące znalezisko z wymiarami (FK do gminy z PRG)',
+    Number(f1.cap_cm) === 14 && Number(f1.height_cm) === 17 && f1.weight_g === 435 && f1.xxl && f1.age_days === 5 && f1.pieces === null &&
+    !f1.verified && !f1.size_verified && f1.recognition_id === null,
+  'submit_find: oczekujące znalezisko z wymiarami (FK do gminy z PRG); waga i XXL z kapelusza (320 g × (14/12)² ≈ 435 g), bez rozpoznania – niezweryfikowane (dev_tools)',
   f1,
 );
 const f1again = await submit({ id: F1, tripId: T1, speciesId: 'czubajka-kania', confidence: 0.5 });
@@ -476,7 +532,7 @@ const ident = await one(
 );
 ok(
   ident.provider === 'client-sim' && ident.model === 'mock-v1' && ident.status === 'identified' && ident.trip_id === T1 &&
-    ident.parts.length === 4 && ident.candidates[0].species_id === 'borowik-szlachetny' && ident.dimensions.weight_g === 410,
+    ident.parts.length === 4 && ident.candidates[0].species_id === 'borowik-szlachetny' && ident.dimensions.weight_g === 435,
   'submit_find: zapisuje scans (identified) i identifications (client-sim / mock-v1)',
   ident,
 );
@@ -552,8 +608,8 @@ const end2 = iso(H / 2);
 const track2 = JSON.stringify({ type: 'LineString', coordinates: [[15.73, 51.4], [15.74, 51.405], [15.75, 51.41]] });
 const t2done = await one('select * from finish_trip($1, 2500, 1800, $2, $3)', [T2, track2, end2]);
 ok(
-  t2done.status === 'finished' && t2done.ended_at.getTime() === Date.parse(end2) && t2done.duration_s === 1800 && t2done.distance_m === 2500 && t2done.route_public,
-  'finish_trip z p_ended_at (offline): czas końca z telefonu, ślad i trasa uogólniona',
+  t2done.status === 'finished' && t2done.ended_at.getTime() === Date.parse(end2) && t2done.duration_s === 1800 && t2done.distance_m === 2500 && !t2done.route_public,
+  'finish_trip z p_ended_at (offline): czas końca z telefonu; ślad z telefonu pominięty (uszczelnienia)',
 );
 const t2twice = await one('select * from finish_trip($1, 9000, 1, null, null)', [T2]);
 ok(t2twice.ended_at.getTime() === Date.parse(end2) && t2twice.distance_m === 2500 && t2twice.duration_s === 1800, 'finish_trip: ponowne wysłanie nic nie zmienia');
@@ -582,16 +638,22 @@ await one('select discard_find($1)', [randomUUID()]);
 const disc = await one('select (select status from finds where id = $1) f5, (select status from finds where id = $2) f1', [F5, F1]);
 ok(disc.f5 === 'discarded' && disc.f1 === 'claimed', 'discard_find: oczekujące → discarded; odebrane / nieznane / ponowne → bez zmian i bez błędu', disc);
 
-// ── Seria dni: tylko do przodu (spóźniona synchronizacja jej nie cofa) ──
+// ── Seria dni: tylko do przodu (spóźniona synchronizacja jej nie cofa); start z kolejki najwyżej 12 h wstecz ──
 await admin();
 const streakUser = await newUser('seria.tester');
-await db.query(`update profiles set streak_days = 5, last_active_date = local_today() - 2 where id = $1`, [streakUser]);
+const startA = iso(2 * H);
+const dayA = (await one(`select to_char(($1::timestamptz at time zone 'Europe/Warsaw')::date, 'YYYY-MM-DD') d`, [startA])).d;
+await db.query(
+  `update profiles set streak_days = 5, last_active_date = ($2::timestamptz at time zone 'Europe/Warsaw')::date - 1 where id = $1`,
+  [streakUser, startA],
+);
 await as(streakUser);
 const streak = async () => (await one(`select streak_days s, to_char(last_active_date, 'YYYY-MM-DD') d from profiles where id = $1`, [streakUser]));
 const SA = randomUUID();
-const sa = await startTrip('suprasl', SA, iso(DAY));
+const sa = await startTrip('suprasl', SA, startA);
 const s1 = await streak();
-await startTrip('suprasl', randomUUID(), iso(3 * DAY));
+// Start „sprzed 3 dni” (zmodyfikowany klient albo bardzo stara kolejka) – przycięty: nie przed startem aktywnej wyprawy.
+const sb = await startTrip('suprasl', randomUUID(), iso(3 * DAY));
 const s2 = await streak();
 const saClosed = await one('select status, ended_at, duration_s from trips where id = $1', [SA]);
 await startTrip('suprasl', randomUUID(), iso(0));
@@ -601,7 +663,12 @@ await db.query(`update profiles set last_active_date = local_today() - 3 where i
 await as(streakUser);
 await startTrip('suprasl', randomUUID(), iso(0));
 const s4 = await streak();
-ok(s1.s === 6 && s2.s === 6 && s2.d === s1.d && s3.s === 7 && s3.d === today && s4.s === 1, 'seria: +1 dzień po dniu, spóźniony start sprzed ostatniej aktywności jej nie cofa, przerwa → 1', [s1, s2, s3, s4]);
+ok(
+  s1.s === 6 && s1.d === dayA && s2.s === 6 && s2.d === s1.d && sb.started_at.getTime() === sa.started_at.getTime() &&
+    s3.s === (dayA < today ? 7 : 6) && s3.d === today && s4.s === 1,
+  'seria: +1 dzień po dniu (data startu), start cofnięty o dni przycięty – serii nie buduje, przerwa → 1',
+  [s1, s2, s3, s4],
+);
 ok(
   saClosed.status === 'finished' && saClosed.ended_at.getTime() === sa.started_at.getTime() && saClosed.duration_s === 0,
   'auto-zamknięcie wyprawy przez starszą (out-of-order): koniec przycięty do startu',
@@ -649,11 +716,13 @@ ok(
   'get_game_state: wyprawy (od najnowszej, czasy ISO jak Date.toISOString)',
   gs.trips,
 );
-const findKeys = 'ageDays,capCm,collected,confidence,foundAt,gminaId,heightCm,id,photoPath,pieces,rarity,reward,speciesId,status,tripId,weightG,xp,xxl';
+// + podpisane rozpoznanie: recognitionId, verified, sizeVerified
+const findKeys = 'ageDays,capCm,collected,confidence,foundAt,gminaId,heightCm,id,photoPath,pieces,rarity,recognitionId,reward,sizeVerified,speciesId,status,tripId,verified,weightG,xp,xxl';
 const gf = Object.fromEntries(gs.finds.map((f) => [f.id, f]));
 ok(
   keys(gs.finds[0]) === findKeys && gs.finds.length === 3 && gf[F1] && gf[F3] && gf[F4] && !gf[F2] && !gf[F5] &&
-    gf[F1].status === 'claimed' && gf[F1].confidence === 0.96 && gf[F1].capCm === 14 && gf[F1].weightG === 410 && gf[F1].xxl === true &&
+    gf[F1].status === 'claimed' && gf[F1].confidence === 0.96 && gf[F1].capCm === 14 && gf[F1].weightG === 435 && gf[F1].xxl === true &&
+    gf[F1].recognitionId === null && gf[F1].verified === false && gf[F1].sizeVerified === false &&
     gf[F1].xp === rF1.xp.total && gf[F1].reward.xp.total === rF1.xp.total && gf[F4].status === 'pending' && gf[F4].tripId === null &&
     gf[F4].reward === null && gf[F4].pieces === null,
   'get_game_state: znaleziska (oczekujące i odebrane, bez odrzuconych; reward jak z claim_find)',
@@ -965,7 +1034,9 @@ const bAct0 = await call('get_activity');
 const reqItem = bAct0.find((x) => x.id === `friend_request:${A}`);
 ok(
   reqItem && reqItem.kind === 'friend_request' && reqItem.actor.id === A && keys(reqItem.actor) === AUTHOR_KEYS && reqItem.postId === null &&
-    reqItem.text === null && ISO_RE.test(reqItem.createdAt) && keys(reqItem) === 'actor,createdAt,id,kind,postId,text',
+    reqItem.text === null && ISO_RE.test(reqItem.createdAt) &&
+    // rywalizacja (20261015110000): + refId, meta – null dla dotychczasowych rodzajów
+    keys(reqItem) === 'actor,createdAt,id,kind,meta,postId,refId,text' && reqItem.refId === null && reqItem.meta === null,
   'get_activity: zaproszenie (friend_request:<userId>)',
   reqItem,
 );
@@ -1316,7 +1387,7 @@ const ROW_KEYS = 'forest,gminaId,kind,mushroomers,name,points,powiat,rank,trend'
 const STATS_KEYS = 'challenge,challengeAccepted,challengeCompleted,distribution,followed,gminaId,mushroomers,mushrooms,name,rank,records,species';
 const CH_KEYS = 'badgeId,badgeName,description,endsAt,id,speciesId,title,xp';
 const GS_CH_KEYS = 'acceptedAt,badgeId,badgeName,completedAt,description,endsAt,gminaId,id,speciesId,title,xp';
-const PCT_KEYS = 'biggerCount,collected,gminaId,mushroomers,percentile,sizeRank,speciesId';
+const PCT_KEYS = 'biggerCount,collected,comparable,gminaId,mushroomers,percentile,sizeRank,speciesId';
 const ranking = (period, voiv) => call('get_ranking', period, voiv ?? null);
 const byGmina = (rows) => Object.fromEntries(rows.map((r) => [r.gminaId, r]));
 // jsonb porządkuje klucze po swojemu – obiekty porównujemy po posortowanych parach.
@@ -1360,7 +1431,8 @@ const R4 = await newUser('rank.four');
 await db.query(`update profiles set home_gmina_id = 'bierawa', display_name = 'Ola Testowa' where id = $1`, [R1]);
 await db.query(`update profiles set home_gmina_id = 'dobrodzien', display_name = '  ' where id = $1`, [R2]);
 const xpLog = [];
-const addXp = async (user, gmina, amount, at, source = 'find') => {
+// Źródło 'challenge' – liczy się do rankingu (uszczelnienia: 'find' tylko ze zweryfikowanym znaleziskiem, bez osiągnięć itd.).
+const addXp = async (user, gmina, amount, at, source = 'challenge') => {
   await db.query(`insert into xp_events (user_id, source, ref_id, gmina_id, amount, created_at) values ($1, $2, 'test', $3, $4, $5)`, [
     user, source, gmina, amount, at,
   ]);
@@ -1386,15 +1458,17 @@ await addXp(R1, 'baborow', 10000, recentTs);
 // XP bez gminy (import) – poza rankingami i „wkładem”.
 await db.query(`insert into xp_events (user_id, source, ref_id, amount) values ($1, 'import', 'test', 777)`, [R1]);
 
-// Znaleziska (statystyki gminy, rekordy, percentyl): Dobrodzień – widoczne od dnia po znalezieniu.
+// Znaleziska (statystyki gminy, rekordy, percentyl): Dobrodzień – widoczne od dnia po znalezieniu. Zweryfikowane
+// (podpisane rozpoznanie); z kapeluszem – zmierzone przy odniesieniu skali (size_verified – rekordy gminy).
 const addFind = (user, gmina, species, rarity, weight, o = {}) =>
   db.query(
-    `insert into finds (user_id, species_id, gmina_id, rarity, confidence, collected, status, weight_g, cap_cm, found_at, claimed_at, visible_from)
-     values ($1, $2, $3, $4, 0.9, $5, 'claimed', $6, $7, $8, $8, $9)`,
-    [user, species, gmina, rarity, o.collected ?? true, weight, o.cap ?? null, o.at ?? prevWeekTs, o.visibleFrom ?? tsAt(Date.parse(o.at ?? prevWeekTs) + DAY)],
+    `insert into finds (user_id, species_id, gmina_id, rarity, confidence, collected, status, weight_g, cap_cm, found_at, claimed_at, visible_from, verified,
+                        size_verified)
+     values ($1, $2, $3, $4, 0.9, $5, 'claimed', $6, $7::numeric, $8, $8, $9, $10::boolean, $10::boolean and $7::numeric is not null)`,
+    [user, species, gmina, rarity, o.collected ?? true, weight, o.cap ?? null, o.at ?? prevWeekTs, o.visibleFrom ?? tsAt(Date.parse(o.at ?? prevWeekTs) + DAY), o.verified ?? true],
   );
 for (const w of [80, 100, 120]) await addFind(R1, 'dobrodzien', 'podgrzybek-brunatny', 'pospolity', w);
-for (const w of [150, 200]) await addFind(R2, 'dobrodzien', 'podgrzybek-brunatny', 'pospolity', w);
+for (const w of [150, 200]) await addFind(R2, 'dobrodzien', 'podgrzybek-brunatny', 'pospolity', w, w === 200 ? { cap: 11 } : {});
 for (const w of [300, 450, 520]) await addFind(R2, 'dobrodzien', 'borowik-szlachetny', 'rzadki', w, { cap: 14 });
 for (const w of [60, 70]) await addFind(R2, 'dobrodzien', 'maslak-zwyczajny', 'pospolity', w);
 await addFind(R2, 'dobrodzien', 'pieprznik-jadalny', 'pospolity', 90);
@@ -1562,9 +1636,9 @@ if (seasonOk) {
       JSON.stringify([
         ['epicki', 'Czubajka kania', 260, 34, 'Ola Testowa', foundOn],
         ['rzadki', 'Borowik szlachetny', 520, 14, 'rank.two', foundOn],
-        ['pospolity', 'Podgrzybek brunatny', 200, null, 'rank.two', foundOn],
+        ['pospolity', 'Podgrzybek brunatny', 200, 11, 'rank.two', foundOn],
       ]),
-    'get_gmina_stats: rekordy – najcięższy zebrany okaz w rzadkości (bez niewidocznych), autor = nazwa (pusta → nick), data',
+    'get_gmina_stats: rekordy – najcięższy zebrany okaz w rzadkości (bez niewidocznych; tylko zmierzone – size_verified), autor = nazwa (pusta → nick), data',
     ds.records,
   );
   ok(
@@ -1602,6 +1676,9 @@ const off = (
   await one(`insert into gmina_challenges (gmina_id, species_id, title, description, xp, active) values ('baborow', 'maslak-zwyczajny', 'Wył.', 'Nieaktywne', 100, false) returning id`)
 ).id;
 await as(R4);
+// Uszczelnienia: wyzwanie przyjmuje się w gminie domowej albo obserwowanej (R4 bez gminy domowej – obserwuje).
+await call('follow_gmina', 'cisek', true);
+await call('follow_gmina', 'suprasl', true);
 await call('accept_challenge', ech.id);
 await call('accept_challenge', ech.id);
 const inact = [await code('accept_challenge', ended), await code('accept_challenge', off)];
@@ -1620,7 +1697,11 @@ await as(R4);
 const TC = randomUUID();
 await startTrip('cisek', TC, iso(H));
 const FC = randomUUID();
-await submit({ id: FC, tripId: TC, gminaId: 'cisek', speciesId: ech.speciesId, rarity: 'pospolity', confidence: 0.92, foundAt: iso(H / 2) });
+await submit({ id: FC, tripId: TC, gminaId: 'cisek', speciesId: ech.speciesId, rarity: 'pospolity', confidence: 0.92, foundAt: iso(0) });
+// Wyzwanie zalicza tylko znalezisko zweryfikowane przez serwer (podpisane rozpoznanie) – tu jak po identify.
+await admin();
+await db.query('update finds set verified = true where id = $1', [FC]);
+await as(R4);
 const rc = (await one('select claim_find($1) r', [FC])).r;
 await admin();
 const chXp = await one(`select amount from xp_events where user_id = $1 and source = 'challenge' and ref_id = $2`, [R4, ech.id]);
@@ -1671,6 +1752,7 @@ const soon = (
   )
 );
 await as(R4);
+await call('follow_gmina', 'branice', true);
 await call('accept_challenge', soon.id);
 const gsSoon = (await state()).challenges.find((c) => c.id === soon.id);
 await admin();
@@ -1694,16 +1776,27 @@ ok(
 );
 
 // ── get_species_percentile ──
+// Progi k-anonimowości (podpisane rozpoznanie: ≥ 5 okazów, ≥ 3 znalazców) obniżone na czas tych sprawdzeń – dane
+// z Dobrodzienia mają 2 znalazców podgrzybków i 1 borowików; pełne progi sprawdza scripts/db-tests/10-podpisane-rozpoznanie.mjs.
 if (seasonOk) {
+  await admin();
+  await db.exec(`update anti_cheat_params set v = 1 where k in ('percentile_min_finds', 'percentile_min_users')`);
+  await as(R4);
   const p1 = await call('get_species_percentile', 'podgrzybek-brunatny', 'dobrodzien', 140);
   ok(
-    keys(p1) === PCT_KEYS && p1.collected === 5 && p1.mushroomers === 2 && p1.biggerCount === 2 && p1.sizeRank === 3 && p1.percentile === 60,
+    keys(p1) === PCT_KEYS && p1.collected === 5 && p1.mushroomers === 2 && p1.biggerCount === 2 && p1.sizeRank === 3 && p1.percentile === 60 &&
+      p1.comparable === true,
     'get_species_percentile: 5 okazów, 2 większe → miejsce 3, większy niż 60%',
     p1,
   );
   const p2 = await call('get_species_percentile', 'podgrzybek-brunatny', 'dobrodzien', 500);
-  const p3 = await call('get_species_percentile', 'borowik-szlachetny', 'dobrodzien', 500);
+  // 470 g – próg 64 (co 10%): 300 g i 450 g niżej / w tym samym progu, 520 g wyżej.
+  const p3 = await call('get_species_percentile', 'borowik-szlachetny', 'dobrodzien', 470);
   ok(p2.sizeRank === 1 && p2.biggerCount === 0 && p2.percentile === 100 && p3.collected === 3 && p3.biggerCount === 1, 'get_species_percentile: największy okaz; niewidoczne znaleziska pominięte', [p2, p3]);
+  await admin();
+  await db.exec(`update anti_cheat_params set v = 5 where k = 'percentile_min_finds'`);
+  await db.exec(`update anti_cheat_params set v = 3 where k = 'percentile_min_users'`);
+  await as(R4);
 }
 const p0 = await call('get_species_percentile', 'smardz-jadalny', 'cisek', 60);
 ok(
@@ -1839,7 +1932,8 @@ ok(
 );
 const storagePol = (await db.query(`select policyname, cmd from pg_policies where schemaname = 'storage' and tablename = 'objects' order by 1`)).rows;
 ok(
-  storagePol.map((p) => `${p.policyname}:${p.cmd}`).join() ===
+  // rywalizacja (20261015110000): + odczyt zdjęć zgłoszonych okazów – sprawdza scripts/db-tests/30-rywalizacja
+  storagePol.filter((p) => !p.policyname.startsWith('rywalizacja:')).map((p) => `${p.policyname}:${p.cmd}`).join() ===
     'zdjecia: odczyt wlasnych:SELECT,zdjecia: podmiana wlasnych:UPDATE,zdjecia: usuniecie wlasnych:DELETE,zdjecia: zapis wlasnych:INSERT',
   'storage.objects: 4 polityki (odczyt / zapis / podmiana / usunięcie we własnym folderze), stare zastąpione',
   storagePol,
@@ -2336,6 +2430,14 @@ await call('claim_find', FK1);
 await call('set_find_photo', FK1, `${K1}/${FK1}.jpg`);
 const trackK1 = JSON.stringify({ type: 'LineString', coordinates: [[15.73, 51.4], [15.74, 51.405], [15.75, 51.41]] });
 await one('select * from finish_trip($1, 2500, 3600, $2, null)', [TK1, trackK1]);
+// Ślad i trasa sprzed uszczelnień (finish_trip ich już nie zapisuje) – eksport nadal je obejmuje.
+await admin();
+await db.query(
+  `insert into trip_tracks (trip_id, user_id, track) values ($1, $2, extensions.st_setsrid(extensions.st_geomfromgeojson($3::text), 4326))`,
+  [TK1, K1, trackK1],
+);
+await db.query(`update trips set route_public = (select track from trip_tracks where trip_id = $1) where id = $1`, [TK1]);
+await as(K1);
 const postK1 = await one(`select * from publish_trip($1, false, 'Eksportowa wyprawa', $2)`, [TK1, `${K1}/${TK1}-okladka.jpg`]);
 await call('follow_gmina', 'gromadka', true);
 await db.query(`insert into push_tokens (token, platform) values ('ExponentPushToken[k1]', 'android')`);
@@ -2350,8 +2452,9 @@ const exp = await call('export_my_data');
 const expStr = JSON.stringify(exp);
 const EXPORT_KEYS = [
   'account', 'achievements', 'atlas', 'badges', 'blocks', 'challenges', 'comments', 'exportedAt', 'finds', 'followedGminy', 'format',
-  'friendships', 'hiddenPosts', 'posts', 'profile', 'pushTokens', 'quests', 'reactions', 'reports', 'scans', 'termsAcceptances', 'trips',
-  'userId', 'xpLedger',
+  // recognitions, rivalry – 20261015120000_rywalizacja_konto.sql (rozpoznania zdjęć, walki / trofea / pojedynki)
+  'friendships', 'hiddenPosts', 'posts', 'profile', 'pushTokens', 'quests', 'reactions', 'recognitions', 'reports', 'rivalry', 'scans',
+  'termsAcceptances', 'trips', 'userId', 'xpLedger',
 ].join();
 const expTrip = exp.trips.find((t) => t.id === TK1);
 const expFind = exp.finds.find((f) => f.id === FK1);
@@ -2646,7 +2749,7 @@ for (const f of nFinds) {
   nRewards.push(await call('claim_find', f.id));
 }
 await one('select * from report_trip_progress($1, 4100)', [TN]);
-const nDone = await one('select * from finish_trip($1, 6800, 6900, $2, null)', [TN, track2]);
+const nDone = await one('select * from finish_trip($1, 6800, 6900, null, null)', [TN]);   // aplikacja nie wysyła śladu
 const nFlags = await flagsOf(N);
 const nState = await state();
 ok(
@@ -2701,10 +2804,15 @@ const d201 = await errFull(submitSql, submitArgs({ ...podg, id: randomUUID(), fo
 const r2Flags = await flagsOf(RD2);
 await db.query(`select set_config('app.anti_cheat_bypass', 'on', false)`);
 const dBypass = await errFull(submitSql, submitArgs({ ...podg, id: randomUUID(), foundAt: iso(15 * 60e3) }));
+// Bez dev_tools znalezisko wymaga podpisanego rozpoznania (inaczej recognition_required przed limitami).
+const rd2Rec = await mkRecognition(RD2, { speciesId: 'podgrzybek-brunatny', cap: null });
 await admin();
 await db.exec(`update app_config set value = 'false' where key = 'dev_tools'`);
 await as(RD2);
-const dNoDev = await errFull(submitSql, submitArgs({ ...podg, id: randomUUID(), foundAt: iso(10 * 60e3) }));
+const dNoDev = await errFull('select * from submit_find($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)', [
+  ...submitArgs({ ...podg, id: randomUUID() }),
+  rd2Rec,
+]);
 await admin();
 await db.exec(`update app_config set value = 'true' where key = 'dev_tools'`);
 await db.query(`select set_config('app.anti_cheat_bypass', 'off', false)`);
@@ -2846,12 +2954,17 @@ ok(
   'prędkość > 50 km/h (postęp i finish_trip z p_ended_at) → przyrost nieliczony, wyprawa 0 m; flaga trip_speed_absurd (3) w jednym wierszu (hits 2)',
   { v2: v2.distance_m, v2done: v2done.distance_m, flag: flagOf(r7Flags, 'trip_speed_absurd', TV2) },
 );
+// Osobny gracz: wyprawy jednego gracza się nie nakładają (uszczelnienia), a start sprzed 3 h zaczynałby się przed
+// końcem TV2.
+await admin();
+const R7b = await newUser('ac.predkosc.b');
+await as(R7b);
 const TV3 = randomUUID();
 const tv3Start = iso(3 * H);
 await startTrip('suprasl', TV3, tv3Start);
 await one('select * from report_trip_progress($1, 20000)', [TV3]);              // 20 km / 3 h – wiarygodne „do teraz”
 const v3done = await one('select * from finish_trip($1, 20000, 1800, null, $2)', [TV3, new Date(Date.parse(tv3Start) + 30 * 60e3).toISOString()]);
-const tv3Flag = flagOf(await flagsOf(R7), 'trip_speed', TV3);
+const tv3Flag = flagOf(await flagsOf(R7b), 'trip_speed', TV3);
 ok(
   v3done.distance_m === 20000 && tv3Flag?.severity === 2 && tv3Flag.details.phase === 'finish',
   'finish_trip: dystans uznany wcześniej (kolejka offline), a wyprawa trwała 30 min → flaga trip_speed (2, phase finish); uznanego dystansu nie cofamy',
@@ -2886,15 +2999,18 @@ ok(
   'submit_find: XXL przy wadze < 1,25 × typowej (330 g borowik) albo dla kępki → xxl = false (prawda serwera), bez linii „Okaz XXL” w nagrodzie; flaga xxl_corrected (1)',
   { fx: fx.xxl, lines: rx.xp.lines },
 );
+// Podpisane rozpoznanie (20261015100000): rzadkość okazu = rzadkość gatunku – także „o stopień wyżej” z telefonu.
 ok(
-  frr.rarity === 'rzadki' && rr.xp.lines[0].label === 'Bazowe XP (rzadki)' && rr.xp.lines[0].xp === 120 &&
+  frr.rarity === 'pospolity' && rr.xp.lines[0].label === 'Bazowe XP (pospolity)' && rr.xp.lines[0].xp === 40 &&
     flagOf(r8Flags, 'rarity_clamped', FR)?.severity === 2 && flagOf(r8Flags, 'rarity_clamped', FR).details.reported === 'legendarny' &&
-    fUp.rarity === 'rzadki' && !flagOf(r8Flags, 'rarity_clamped', FUp) && fLow.rarity === 'rzadki' && !flagOf(r8Flags, 'rarity_clamped', FLow),
-  'submit_find: pospolity gatunek jako legendarny → rzadki (gatunek + 1), nagroda z bazy rzadkiego, flaga rarity_clamped (2); o stopień wyżej – bez zmian; niżej niż gatunek → rzadkość gatunku',
+    fUp.rarity === 'pospolity' && flagOf(r8Flags, 'rarity_clamped', FUp)?.severity === 2 && fLow.rarity === 'rzadki' &&
+    !flagOf(r8Flags, 'rarity_clamped', FLow),
+  'submit_find: rzadkość = rzadkość gatunku – pospolity jako legendarny albo o stopień wyżej → pospolity, nagroda z bazy pospolitego, flaga rarity_clamped (2); niżej niż gatunek → rzadkość gatunku bez flagi',
   { frr: frr.rarity, line: rr.xp.lines[0] },
 );
 const FW = randomUUID();
-await submit({ id: FW, tripId: TO, gminaId: 'suprasl', dims: { cap_cm: 14, height_cm: 15, weight_g: 1000, age_days: 3 }, foundAt: iso(35 * 60e3) });
+// Waga liczona z kapelusza (podpisane rozpoznanie): 22 cm → 320 g × (22/12)² ≈ 1075 g > 3 × typowej, kapelusz < 2,5 × typowego.
+await submit({ id: FW, tripId: TO, gminaId: 'suprasl', dims: { cap_cm: 22, height_cm: 15, weight_g: 1000, age_days: 3 }, foundAt: iso(35 * 60e3) });
 const FC2 = randomUUID();
 await submit({ id: FC2, tripId: TO, gminaId: 'suprasl', dims: { cap_cm: 31, height_cm: 15, weight_g: 400, age_days: 3 }, foundAt: iso(30 * 60e3) });
 const FO = randomUUID();
@@ -2907,7 +3023,7 @@ r8Flags = await flagsOf(R8);
 ok(
   flagOf(r8Flags, 'find_size', FW)?.severity === 2 && flagOf(r8Flags, 'find_size', FC2)?.severity === 2 && !flagOf(r8Flags, 'find_size', FKx) &&
     !flagOf(r8Flags, 'find_size', FX),
-  'submit_find: waga > 3 × typowej (1000 g borowik) albo kapelusz > 2,5 × typowego (31 cm) → flaga find_size (2); kępka liczona na sztukę – bez flagi',
+  'submit_find: waga > 3 × typowej (z kapelusza 22 cm: ~1075 g borowik) albo kapelusz > 2,5 × typowego (31 cm) → flaga find_size (2); kępka liczona na sztukę – bez flagi',
 );
 ok(
   flagOf(r8Flags, 'find_outside_trip', FO)?.severity === 1 && !flagOf(r8Flags, 'find_outside_trip', FIn),
@@ -2986,7 +3102,8 @@ const acSummary = (await db.query('select * from anti_cheat_summary where user_i
 const acAdmin = (await db.query('select * from admin_flags(1000, 3)')).rows;
 await db.exec('reset role');
 ok(
-  acSummary.some((s) => s.kind === 'trip_speed' && s.severity === 2 && Number(s.flags) === 2 && s.handle === 'ac.predkosc') &&
+  // trip_speed: TV1 (TV3 – osobny gracz od uszczelnień).
+  acSummary.some((s) => s.kind === 'trip_speed' && s.severity === 2 && Number(s.flags) === 1 && s.handle === 'ac.predkosc') &&
     acSummary.some((s) => s.kind === 'trip_speed_absurd' && s.severity === 3 && Number(s.hits) === 2) &&
     acAdmin.length > 0 && acAdmin.every((r) => r.severity === 3) && acAdmin.some((r) => r.kind === 'rate_limited' && r.user_id === RD1 && r.handle === 'ac.gestosc'),
   'moderacja (service_role): anti_cheat_summary (gracz × rodzaj × waga, flagi i powtórzenia z 7 dni), admin_flags(p_limit, p_min_severity)',
@@ -2996,6 +3113,8 @@ ok(
 // ── Rozpoznawanie (Edge Function identify): 60 / 24 h, jedno naraz, tylko service_role, dziennik bez zdjęć ──
 {
   const ID1 = await newUser('id.limit');
+  // Konto starsze niż doba – zwykły limit 60 (nowe konto ma niższy: scripts/db-tests/10-podpisane-rozpoznanie.mjs).
+  await db.query(`update profiles set created_at = now() - interval '2 days' where id = $1`, [ID1]);
   const begin = (u) => one('select identify_begin($1) id', [u]);
   const finish = (id, u, status, model = null, tokens = [null, null, null, null]) =>
     db.query('select identify_finish($1, $2, $3, $4, $5, $6, $7, $8)', [id, u, status, model, ...tokens]);
@@ -3412,7 +3531,10 @@ ok(
   };
   await claim({ speciesId: 'podgrzybek-brunatny', rarity: 'pospolity', dims: { cap_cm: 9, height_cm: 9, weight_g: 100, age_days: 3 } });
   await claim({ speciesId: 'podgrzybek-brunatny', rarity: 'pospolity', dims: { cap_cm: 8, height_cm: 9, weight_g: 90, age_days: 3 } });
-  const r3 = await claim({ speciesId: 'borowik-szlachetny', rarity: 'epicki', foundAt: iso(30 * 60e3) });
+  // Rzadkość okazu = rzadkość gatunku (podpisane rozpoznanie) – epicki okaz to epicki gatunek.
+  const r3 = await claim({
+    speciesId: 'czubajka-kania', rarity: 'epicki', dims: { cap_cm: 24, height_cm: 28, weight_g: 230, age_days: 3 }, foundAt: iso(30 * 60e3),
+  });
   const uq = async (u) =>
     Object.fromEntries(
       (await db.query(`select quest_id, progress::float8 p, completed_at is not null as done, day::text as day from user_quests where user_id = $1`, [u])).rows.map((r) => [
@@ -3525,7 +3647,9 @@ ok(
   ok(!(await one(`select 1 x from user_achievements where user_id = $1 and achievement_id = 'wataha'`, [P])), 'zaproszenie (pending) – jeszcze bez Leśnej watahy');
   await as(R);
   await call('respond_friend_request', P, true);
+  await admin();   // cudze osiągnięcia wprost z tabeli – tylko serwer (uszczelnienia: RLS – własne wiersze)
   const wat = (await db.query(`select user_id from user_achievements where achievement_id = 'wataha' and user_id = any($1)`, [[P, R]])).rows;
+  await as(R);
   ok(wat.length === 2, 'akceptacja zaproszenia → Leśna wataha (brąz) dla obu stron', wat);
   await call('add_comment', post.id, 'Piękne okazy!');
   await admin();
@@ -3591,6 +3715,33 @@ ok(
   await admin();
   // Stan jak po seedzie (pula zadań, tryb makiety dla ewentualnych dalszych testów).
   await db.query(`update quest_templates set active = true where id = any($1)`, [app.QUEST_POOL.map((q) => q.id)]);
+}
+
+// =============================================================================
+// Moduły testów: scripts/db-tests/*.mjs (kolejność nazw) – każdy eksportuje `default async (t) => {…}` i dostaje
+// pomocniki z tego pliku. Moduły *.wip.mjs (w trakcie pracy) – tylko z listy DB_TEST_WIP (patrz „Migracje + seed”).
+// Moduł zakłada własnych graczy (t.newUser / t.mkUser) i nie zależy od stanu innych modułów.
+// =============================================================================
+{
+  const testsDir = path.join(root, 'scripts', 'db-tests');
+  const modules = [
+    ...(existsSync(testsDir) ? readdirSync(testsDir) : [])
+      .filter((f) => f.endsWith('.mjs') && !f.endsWith('.wip.mjs'))
+      .map((f) => path.join(testsDir, f)),
+    ...WIP.filter((p) => p.endsWith('.mjs')),
+  ].sort((a, b) => path.basename(a).localeCompare(path.basename(b)));
+  const t = {
+    db, app, root, N_SPECIES, ok, one, as, admin, fails, err, errFull, call, code, newUser, mkUser, startTrip,
+    submit, submitSql, submitArgs, state, iso, H, DAY, ISO_RE, DAY_RE, sleep, randomUUID,
+    mkRecognition, submitRec, sha,
+  };
+  for (const f of modules) {
+    console.log(`\n── moduł ${path.basename(f)} ──`);
+    await admin();
+    const mod = await import(pathToFileURL(f).href);
+    await mod.default(t);
+  }
+  await admin();
 }
 
 console.log(`\n${passed} sprawdzeń OK`);

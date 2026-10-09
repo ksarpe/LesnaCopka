@@ -1,3 +1,4 @@
+import { router, type Href } from 'expo-router';
 import type { ReactNode } from 'react';
 import { Modal, Platform, Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 
@@ -32,6 +33,7 @@ interface PlayerSheetProps {
  * Mini profil grzybiarza (tapnięcie avatara / nicku w feedzie i komentarzach): poziom, gmina,
  * liczba wypraw i przycisk relacji zależny od statusu („Dodaj do znajomych”, „Anuluj zaproszenie”,
  * „Akceptuj” / „Odrzuć”, „Usuń ze znajomych”), a na dole „Zablokuj” / „Odblokuj”. Dane z FeedService.getUser.
+ * Znajomego (niezablokowanego) można stąd wyzwać na pojedynek – ekran Pojedynki z otwartym arkuszem wyzwania.
  */
 export function PlayerSheet({ author, onClose, onFriendChange, onBlockChange }: PlayerSheetProps) {
   if (!author) return null;
@@ -56,6 +58,10 @@ function SheetBody({ author, onClose, onFriendChange, onBlockChange }: PlayerShe
   const unblock = async () => {
     onClose();
     if (await unblockNow(feed, author)) onBlockChange?.(author, false);
+  };
+  const challenge = () => {
+    onClose();
+    setTimeout(() => router.push(`/rywalizacja/pojedynki?wyzwij=${encodeURIComponent(author.id)}` as Href), AFTER_MODAL_MS);
   };
 
   const act = async (action: FriendAction) => {
@@ -82,6 +88,7 @@ function SheetBody({ author, onClose, onFriendChange, onBlockChange }: PlayerShe
         onAction={act}
         onBlock={block}
         onUnblock={() => void unblock()}
+        onChallenge={challenge}
         footer={
           <Pressable onPress={onClose} hitSlop={6} style={({ pressed }) => ({ paddingVertical: 6, opacity: pressed ? 0.6 : 1 })}>
             <Txt f="b7" size={16} color={colors.outlineText} align="center">
@@ -114,6 +121,8 @@ interface PlayerCardProps {
   /** „Zablokuj” pod przyciskami (brak = bez blokowania, np. strona zaproszenia). */
   onBlock?: () => void;
   onUnblock?: () => void;
+  /** „Wyzwij na pojedynek” – tylko przy znajomym (brak = bez przycisku, np. strona zaproszenia). */
+  onChallenge?: () => void;
   /** Przycisk akcji nieaktywny (trwa zapis). */
   busy?: boolean;
   footer?: ReactNode;
@@ -121,7 +130,7 @@ interface PlayerCardProps {
 }
 
 /** Karta grzybiarza (mini profil, strona zaproszenia): avatar, nick, chipy i przyciski relacji. */
-export function PlayerCard({ author, user: u, error, notFound, onRetry, onAction, onBlock, onUnblock, busy, footer, style }: PlayerCardProps) {
+export function PlayerCard({ author, user: u, error, notFound, onRetry, onAction, onBlock, onUnblock, onChallenge, busy, footer, style }: PlayerCardProps) {
   const gmina = useCatalogStore((s) => (u?.homeGminaId ? s.gminaById[u.homeGminaId] : undefined));
   const chip = u ? (u.blocked ? BLOCKED_CHIP : STATUS_CHIP[u.friendStatus]) : undefined;
   const subtitle = u ? [u.handle, u.fullName].filter(Boolean).join(' · ') : '';
@@ -178,7 +187,12 @@ export function PlayerCard({ author, user: u, error, notFound, onRetry, onAction
               {onUnblock ? <OutlineButton icon="lock_open" label="Odblokuj" onPress={onUnblock} /> : null}
             </>
           ) : (
-            <FriendButtons status={u.friendStatus} onAction={onAction} busy={busy} />
+            <>
+              {u.friendStatus === 'friends' && onChallenge ? (
+                <Button3D title="Wyzwij na pojedynek" icon="bolt" size="md" onPress={onChallenge} disabled={busy} />
+              ) : null}
+              <FriendButtons status={u.friendStatus} onAction={onAction} busy={busy} />
+            </>
           )
         ) : error ? (
           onRetry && !notFound ? <OutlineButton icon="refresh" label="Spróbuj ponownie" onPress={onRetry} /> : null

@@ -36,7 +36,7 @@ import { hasSpin, heroView } from '@/scan/views';
 import { ServiceError, useServices, type ServiceErrorCode } from '@/services';
 import { captureFindPhoto, captureScanView, isCameraAvailable, pickDevFindPhoto } from '@/services/live/camera';
 import { deleteFindPhoto, deleteScanViews, findPhotoSource } from '@/services/live/findPhotos';
-import { devScanForced } from '@/services/live/identify';
+import { devScanForced, POSITION_MAX_AGE_MS } from '@/services/live/identify';
 import { createPendingFind } from '@/store/game';
 import { useCatalogStore } from '@/store/useCatalogStore';
 import { useSimStore } from '@/store/useSimStore';
@@ -69,6 +69,26 @@ const SECTOR_DEG = 360 / ORBIT.sectors;
 const NEEDED_DEG = ORBIT.sectorsNeeded * SECTOR_DEG;
 /** Kadr wewnątrz pierścienia – tam, gdzie w makiecie placeholder „grzyb w kadrze”. */
 const FRAME_INSET = 26;
+
+/** Najdłużej tyle czekamy na odczyt pozycji przed rozpoznaniem (gmina znaleziska na serwerze) – potem bez pozycji. */
+const POSITION_WAIT_MS = 4_000;
+
+/** Wynik obietnicy albo null po `ms` (albo przy błędzie) – obietnica biegnie dalej w tle. */
+function within<T>(p: Promise<T>, ms: number): Promise<T | null> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), ms);
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(null);
+      },
+    );
+  });
+}
 
 function hapticWarning() {
   if (Platform.OS !== 'web') Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
@@ -281,17 +301,27 @@ export default function ScanScreen() {
     abortRef.current = ctrl;
     setPhase('analyzing');
     try {
-      const region = useRegionStore.getState().region;
+      const known = useRegionStore.getState().region;
       const home = useUserStore.getState().user.homeGminaId;
-      // Do serwera idzie tylko miesiąc i województwo (sezon / zasięg gatunku), gmina zostaje w telefonie.
+      // Pozycja PRZED rozpoznaniem (serwer liczy z niej gminę znaleziska – podpisane rozpoznanie): świeża z pamięci
+      // (≤ 15 min), inaczej szybki odczyt (najwyżej POSITION_WAIT_MS; bez zgody na lokalizację – bez pytania i bez pozycji).
+      const fresh = known && Date.now() - Date.parse(known.position.at) <= POSITION_MAX_AGE_MS ? known : null;
+      const located = fresh ?? (await within(detectRegion(services, { askPermission: false }), POSITION_WAIT_MS));
+      if (unmountedRef.current) return;
+      if (ctrl.signal.aborted) throw new ServiceError('CANCELLED', 'Rozpoznawanie przerwane');
+      const region = located ?? known;
+      // Model dostaje tylko miesiąc i województwo (sezon / zasięg gatunku). Pozycja – wyłącznie do gminy znaleziska na
+      // serwerze; serwer jej nie zapisuje i nie przekazuje modelowi.
       const voivodeship = region?.gmina.voivodeship ?? useCatalogStore.getState().gminaById[home]?.voivodeship;
-      const [outcome, where] = await Promise.all([
-        services.identify.identify(scan, { signal: ctrl.signal, context: { month: new Date().getMonth() + 1, voivodeship } }),
-        region ? Promise.resolve(region) : detectRegion(services, { askPermission: false }),
-      ]);
+      const outcome = await services.identify.identify(scan, {
+        signal: ctrl.signal,
+        context: { month: new Date().getMonth() + 1, voivodeship, ...(located ? { position: located.position } : {}) },
+      });
       // Zamknięty ekran: zdjęcie skasował już cleanup, a router.replace podmieniłby ekran, na którym jest gracz.
       if (unmountedRef.current || ctrl.signal.aborted) return;
       if (outcome.kind === 'mushroom') {
+        // Odczyt pozycji mógł skończyć się w trakcie rozpoznania – gmina z najświeższego regionu.
+        const where = located ?? useRegionStore.getState().region ?? known;
         const find = createPendingFind(outcome.identification, where?.gmina.id ?? home, {
           photoUri: scan.photoUri,
           parts: outcome.visibleParts,

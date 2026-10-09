@@ -51,7 +51,18 @@ const list = (raw: unknown): unknown[] => {
 
 const RARITIES: Rarity[] = ['pospolity', 'rzadki', 'epicki', 'legendarny'];
 const FRIEND_STATUSES: FriendStatus[] = ['none', 'friends', 'outgoing', 'incoming'];
-const ACTIVITY_KINDS: ActivityKind[] = ['reaction', 'comment', 'friend_request', 'friend_accepted'];
+const ACTIVITY_KINDS: ActivityKind[] = [
+  'reaction',
+  'comment',
+  'friend_request',
+  'friend_accepted',
+  // Rywalizacja (docs/rywalizacja.md §5).
+  'duel_invite',
+  'duel_accepted',
+  'duel_finished',
+  'contest_award',
+  'contest_overtaken',
+];
 const SCOPES: PostScope[] = ['friends', 'gmina'];
 
 /** Kontekst telefonu dla własnych wpisów: okładka ze zdjęcia znaleziska i avatar gracza. */
@@ -238,18 +249,26 @@ export function mapComments(raw: unknown, ctx: PostMapContext = {}): PostComment
 
 /* ───────────────────────── Aktywność ───────────────────────── */
 
+/** Aktywność (`get_activity`); rywalizacja dokłada `refId` (pojedynek / walka) i `meta` (jsonb – też jako tekst). */
 export function mapActivity(raw: unknown): ActivityItem[] {
   return list(raw)
     .filter(isObj)
     .filter((a) => !!str(a.id) && ACTIVITY_KINDS.includes(a.kind as ActivityKind) && !!str(a.createdAt))
-    .map((a) => ({
-      id: str(a.id),
-      kind: a.kind as ActivityKind,
-      actor: mapAuthor(a.actor),
-      postId: strOrNull(a.postId),
-      text: strOrNull(a.text),
-      createdAt: str(a.createdAt),
-    }));
+    .map((a) => {
+      const item: ActivityItem = {
+        id: str(a.id),
+        kind: a.kind as ActivityKind,
+        actor: mapAuthor(a.actor),
+        postId: strOrNull(a.postId),
+        text: strOrNull(a.text),
+        createdAt: str(a.createdAt),
+      };
+      const refId = strOrNull(a.refId);
+      const meta = parse(a.meta);
+      if (refId) item.refId = refId;
+      if (isObj(meta)) item.meta = meta;
+      return item;
+    });
 }
 
 /* ───────────────────────── Wpisy czekające w telefonie ───────────────────────── */
@@ -301,9 +320,47 @@ const KNOWN: Record<string, [ServiceErrorCode, string]> = {
   blocked: ['SERVER', 'Nie możecie zostać znajomymi – jedno z Was zablokowało drugie'],
 };
 
-/** Błąd wywołania RPC → ServiceError: sieć → NETWORK, P0002 → NOT_FOUND, reszta → SERVER (po polsku). */
-export function toServiceError(e: SyncError): ServiceError {
-  const key = Object.keys(KNOWN).find((k) => e.message === k || e.message.includes(k));
+/**
+ * RPC rywalizacji (docs/rywalizacja.md §7): opis z serwera (`detail`, zdanie dla gracza) wygrywa z tekstami z KNOWN –
+ * te są pisane pod feed i znajomych (np. `blocked` = „Nie możecie zostać znajomymi…”).
+ */
+const DETAIL_FIRST_RPC = new Set([
+  'get_contest_week',
+  'get_contest_board',
+  'get_contest_eligibility',
+  'enter_contest',
+  'withdraw_contest_entry',
+  'report_contest_entry',
+  'get_trophies',
+  'get_duels',
+  'get_duel',
+  'create_duel',
+  'respond_duel',
+  'cancel_duel',
+  'get_player_ranking',
+  'set_ranking_visibility',
+  'get_rivalry_status',
+]);
+/** RPC z `p_duel_id uuid`: id spoza formatu (np. stary link z mocków) = 22P02 → „nie ma takiego pojedynku”. */
+const DUEL_ID_RPC = new Set(['get_duel', 'respond_duel', 'cancel_duel']);
+
+/**
+ * Błąd wywołania RPC → ServiceError: sieć → NETWORK, P0002 → NOT_FOUND, reszta → SERVER (po polsku). Kody spoza
+ * listy z polskim opisem z serwera (`detail` – np. rywalizacja: `not_friends`, `duel_limit`, `rate_limited`) → ten opis;
+ * w RPC rywalizacji (`fn`) opis z serwera ma pierwszeństwo także przed listą.
+ */
+export function toServiceError(e: SyncError, fn?: string): ServiceError {
+  const detail = e.details?.trim();
+  const usableDetail = (e.code === 'P0001' || e.code === 'P0002') && !!detail && !detail.startsWith('retry_after=');
+  const fromDetail = () => new ServiceError(e.code === 'P0002' ? 'NOT_FOUND' : 'SERVER', detail!);
+  if (fn && DETAIL_FIRST_RPC.has(fn)) {
+    if (usableDetail) return fromDetail();
+    if (e.code === '22P02' && DUEL_ID_RPC.has(fn)) return new ServiceError('NOT_FOUND', 'Nie ma takiego pojedynku');
+  }
+  const exact = Object.prototype.hasOwnProperty.call(KNOWN, e.message) ? KNOWN[e.message] : undefined;
+  if (exact) return new ServiceError(exact[0], exact[1]);
+  if (usableDetail) return fromDetail();
+  const key = Object.keys(KNOWN).find((k) => e.message.includes(k));
   if (key) return new ServiceError(KNOWN[key][0], KNOWN[key][1]);
   const kind = classifyError(e);
   if (kind === 'network' || kind === 'auth') return new ServiceError('NETWORK', 'Brak połączenia z serwerem');

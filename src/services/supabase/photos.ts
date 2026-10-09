@@ -3,7 +3,9 @@
  *
  * Wysyłka (zdarzenia kolejki, wywołuje silnik ./sync.ts; bajty czytane dopiero teraz – kolejka trzyma odnośnik):
  * - `photo.find` – zdjęcie znaleziska → prywatny `scan-photos/{uid}/{findId}.jpg` → `set_find_photo`; ścieżka trafia
- *   do `Find.photoPath` (zdjęcie odtworzone z serwera nie jest wysyłane ponownie);
+ *   do `Find.photoPath` (zdjęcie odtworzone z serwera nie jest wysyłane ponownie). Znalezisko z podpisanym
+ *   rozpoznaniem (`recognitionId`) ma zdjęcie na serwerze od Edge Function `identify` (`{uid}/rec/{id}.jpg` – to, które
+ *   widział model; serwer nie pozwala go podmienić) – nic nie wysyłamy, zdjęcie w telefonie zostaje do wyświetlania;
  * - `trip.publish` – okładka (najlepsze znalezisko ze zdjęciem) → publiczny `post-media/{uid}/{tripId}-{nonce}.jpg`,
  *   potem `publish_trip(…, p_cover_path)`; brak zdjęcia albo plik odrzucony przez serwer → publikacja bez okładki;
  * - `photo.avatar` – zdjęcie profilowe → publiczny `avatars/{uid}/avatar-{ts}.jpg` + `profiles.avatar_path`
@@ -94,8 +96,8 @@ function note(message: string) {
 /** Zdjęcie znaleziska → `scan-photos` → `set_find_photo`. Kolejka FIFO: `find.submit` już doszedł. */
 export async function sendFindPhoto(findId: string, uid: string): Promise<SyncError | null> {
   const find = useTripStore.getState().finds[findId];
-  // Porzucone znalezisko, bez zdjęcia albo zdjęcie już na serwerze (wysłane, odtworzone) – nie ma czego wysyłać.
-  if (!find?.photoUri || find.photoPath) return null;
+  // Porzucone znalezisko, bez zdjęcia albo zdjęcie już na serwerze (wysłane, odtworzone, z rozpoznania) – nie ma czego wysyłać.
+  if (!find?.photoUri || find.photoPath || find.recognitionId) return null;
   const bytes = await findPhotoBytes(find.photoUri);
   // Zdjęcia już nie ma (web: wygasły blob: po odświeżeniu strony) – zdarzenie bez znaczenia.
   if (!bytes) return null;

@@ -1,8 +1,9 @@
 /**
  * Generuje supabase/seed.sql ze słowników mocków (te same ID co w aplikacji)
  * i wszystkich gmin z indeksu PRG (assets/geo/gminy-index.geo).
- * Uruchom: npm run db:seed            – seed lokalny (włącza narzędzia deweloperskie: app_config.dev_tools = true)
- *          npm run db:seed -- --cloud – seed do chmury (dev_tools = false); potem wróć do lokalnego
+ * Uruchom: npm run db:seed            – seed lokalny (narzędzia deweloperskie: app_config.dev_tools = true i EXECUTE
+ *                                       na RPC dev_* – migracje go nie nadają, patrz scripts/seed-dev.ts)
+ *          npm run db:seed -- --cloud – seed do chmury (dev_tools = false, dev_* bez EXECUTE); potem wróć do lokalnego
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -15,6 +16,7 @@ import { ACHIEVEMENTS, tierKind, type AchievementMetric } from '../src/utils/ach
 import { BADGE_RULES } from '../src/utils/badges';
 import { counterSqlKey } from '../src/utils/counters';
 import { questKindToSql, questPeriod } from '../src/utils/quests';
+import { devToolsSeedSql } from './seed-dev';
 
 const q = (v: string | number | boolean | null | undefined): string => {
   if (v === null || v === undefined) return 'null';
@@ -45,15 +47,8 @@ const geoIndex = JSON.parse(
 const terytById = new Map(geoIndex.gminy.map((row) => [row[1], row[0]]));
 const KIND = { 1: 'miejska', 2: 'wiejska', 3: 'miejsko-wiejska' } as const;
 
-// Narzędzia deweloperskie (dev_import_state, dev_reset_player) – tylko lokalnie, w chmurze NIGDY true.
-out.push(
-  CLOUD
-    ? '-- Chmura: narzędzia deweloperskie wyłączone.'
-    : '-- LOKALNIE: narzędzia deweloperskie włączone (import stanu, reset gracza). Do chmury: npm run db:seed -- --cloud.',
-  `insert into public.app_config (key, value) values ('dev_tools', '${CLOUD ? 'false' : 'true'}')`,
-  'on conflict (key) do update set value = excluded.value;',
-  '',
-);
+// Narzędzia deweloperskie – tylko lokalnie (flaga + EXECUTE na RPC dev_*), w chmurze NIGDY: scripts/seed-dev.ts.
+out.push(...devToolsSeedSql(CLOUD));
 
 // Kompleksy leśne
 const forests = [...new Set(GMINY.map((g) => g.forest).filter((f): f is string => !!f))];

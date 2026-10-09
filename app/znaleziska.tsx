@@ -4,6 +4,7 @@ import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 
 import { Card } from '@/components/Card';
 import { ChoiceChips } from '@/components/ChoiceChips';
+import { enterFindFlow, useContestCandidates } from '@/components/ContestEnter';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { LocalOnlyNote } from '@/components/LocalOnlyNote';
@@ -16,10 +17,11 @@ import { Thumb } from '@/components/Thumb';
 import { Txt } from '@/components/Txt';
 import { useBottomPadding } from '@/hooks/useInsets';
 import { hasSpin } from '@/scan/views';
+import { useServices } from '@/services';
 import { useCatalogStore } from '@/store/useCatalogStore';
 import { useTripStore } from '@/store/useTripStore';
 import { useUserStore } from '@/store/useUserStore';
-import { colors, rarity as rarityTokens, RARITY_ORDER, shadows } from '@/theme/tokens';
+import { colors, medals, rarity as rarityTokens, RARITY_ORDER, shadows } from '@/theme/tokens';
 import type { Find, Rarity } from '@/types';
 import { fmtDayMonth, fmtInt, fmtWeight, gminaTitle, plural } from '@/utils/format';
 import {
@@ -48,7 +50,8 @@ const grzyby = (n: number) => plural(n, 'grzyb', 'grzyby', 'grzybów');
 
 /**
  * Dziennik znalezisk (z Profilu: kafel „grzybów”) – wszystkie odebrane znaleziska z telefonu z filtrami,
- * wyszukiwaniem po nazwie gatunku i sortowaniem. Tap → karta gatunku.
+ * wyszukiwaniem po nazwie gatunku i sortowaniem. Tap → karta gatunku. Okazy z tego tygodnia, które mogą walczyć
+ * o okaz (zmierzony kapelusz) – przycisk z pucharem: „Zgłoś okaz do walki”.
  */
 export default function FindsJournalScreen() {
   const finds = useTripStore((s) => s.finds);
@@ -56,6 +59,12 @@ export default function FindsJournalScreen() {
   const gminaById = useCatalogStore((s) => s.gminaById);
   const mushroomsCount = useUserStore((s) => s.user.mushroomsCount);
   const bottom = useBottomPadding();
+  const { contests } = useServices();
+  // Okazy, które mogą walczyć w walkach tygodnia (warunki z telefonu; resztę sprawdzi serwer przy zgłoszeniu).
+  const candidates = useContestCandidates();
+  // Ten sam zbiór, dopóki nie zmienią się id (kandydaci liczą się co minutę) – FlatList nie przerysowuje wszystkich wierszy.
+  const contestKey = candidates.map((c) => c.find.id).join('|');
+  const contestable = useMemo(() => new Set(contestKey ? contestKey.split('|') : []), [contestKey]);
   const [filter, setFilter] = useState<FindFilter>('all');
   const [sort, setSort] = useState<FindSort>('newest');
   const [query, setQuery] = useState('');
@@ -82,9 +91,10 @@ export default function FindsJournalScreen() {
         find={item}
         name={speciesById[item.speciesId]?.name ?? 'Nieznany gatunek'}
         place={gminaTitle(gminaById[item.gminaId])}
+        onContest={contestable.has(item.id) ? (f) => void enterFindFlow(contests, f.id) : undefined}
       />
     ),
-    [speciesById, gminaById],
+    [speciesById, gminaById, contestable, contests],
   );
 
   const header = all.length ? (
@@ -241,7 +251,18 @@ function SmallRarityPill({ rarity }: { rarity: Rarity }) {
 }
 
 /** Wiersz znaleziska: zdjęcie, gatunek, rzadkość, waga / sztuki (albo „tylko zdjęcie”), data i gmina, XP. */
-const FindRow = memo(function FindRow({ find, name, place }: { find: Find; name: string; place: string }) {
+const FindRow = memo(function FindRow({
+  find,
+  name,
+  place,
+  onContest,
+}: {
+  find: Find;
+  name: string;
+  place: string;
+  /** Okaz może walczyć o okaz tygodnia – przycisk z pucharem (zgłoszenie z potwierdzeniem). */
+  onContest?: (find: Find) => void;
+}) {
   const r = rarityTokens[find.rarity];
   const d = find.dimensions;
   const amount = d.pieces ? `${d.pieces} szt.` : fmtWeight(d.weightG);
@@ -269,7 +290,7 @@ const FindRow = memo(function FindRow({ find, name, place }: { find: Find; name:
       <Pressable
         onPress={() => router.push(`/species/${find.speciesId}`)}
         accessibilityRole="button"
-        accessibilityLabel={`${name}, ${r.labelLower}, ${find.collected ? amount : 'tylko zdjęcie'}, ${date}`}
+        accessibilityLabel={`${name}, ${r.labelLower}, ${find.collected ? amount : 'tylko zdjęcie'}, ${date}${find.serverRejected ? ', nie zapisane na serwerze' : ''}`}
         style={({ pressed }) => ({ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, opacity: pressed ? 0.9 : 1 })}
       >
         {spin ? null : thumb}
@@ -291,8 +312,35 @@ const FindRow = memo(function FindRow({ find, name, place }: { find: Find; name:
           <Txt f="n7" size={12} color={colors.muted} numberOfLines={1}>
             {place ? `${date} · ${place}` : date}
           </Txt>
+          {find.serverRejected ? (
+            // Serwer trwale odrzucił znalezisko (np. rozpoznanie wygasło) – zostaje tylko w telefonie, bez weryfikacji.
+            <Pill
+              label="Nie zapisane na serwerze"
+              icon="cloud_off"
+              bg={colors.warnBg}
+              color={colors.warnText}
+              iconColor={colors.warnIcon}
+              size={11}
+              iconSize={13}
+              padV={1}
+              padH={8}
+              gap={4}
+            />
+          ) : null}
         </View>
       </Pressable>
+      {onContest ? (
+        // Osobny przycisk obok (nie w środku wiersza) – web nie pozwala na <button> w <button>.
+        <Pressable
+          onPress={() => onContest(find)}
+          hitSlop={6}
+          accessibilityRole="button"
+          accessibilityLabel={`Zgłoś okaz do walki: ${name}`}
+          style={({ pressed }) => [styles.contest, { opacity: pressed ? 0.8 : 1 }]}
+        >
+          <Icon name="emoji_events" filled size={20} color={colors.legendInk} />
+        </Pressable>
+      ) : null}
     </View>
   );
 });
@@ -306,6 +354,15 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     padding: 12,
     boxShadow: shadows.card,
+  },
+  contest: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: medals[0],
+    alignItems: 'center',
+    justifyContent: 'center',
+    boxShadow: shadows.rankBadge,
   },
   badge3d: {
     position: 'absolute',

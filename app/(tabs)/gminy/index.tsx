@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, View } from 'react-native';
 
+import { RivalryBanner, useDesignScenario } from '@/components/ContestCard';
 import { Icon } from '@/components/Icon';
 import { OfflineCard, StateCard } from '@/components/OfflineCard';
 import { Screen } from '@/components/Screen';
@@ -12,6 +13,7 @@ import { VoivodeshipHeatmap } from '@/components/VoivodeshipHeatmap';
 import { VoivodeshipPicker } from '@/components/VoivodeshipPicker';
 import { DESIGN_VOIVODESHIP } from '@/geo/voivodeships';
 import { useAsync } from '@/hooks/useAsync';
+import { useNow } from '@/hooks/useNow';
 import { useRegionStore } from '@/hooks/useRegion';
 import { useVoivodeship } from '@/hooks/useVoivodeship';
 import { useServices } from '@/services';
@@ -22,6 +24,7 @@ import { useUserStore } from '@/store/useUserStore';
 import { useVoivodeshipStore } from '@/store/useVoivodeshipStore';
 import { colors, medalDefault, medals, shadows } from '@/theme/tokens';
 import type { Ranking, RankingPeriod, RankingRow } from '@/types';
+import { contestWeekBounds, contestWeekStart, fmtTimeLeft } from '@/utils/contests';
 import { fmtInt, plural } from '@/utils/format';
 
 export default function GminyScreen() {
@@ -72,6 +75,8 @@ export default function GminyScreen() {
           </Pressable>
         </View>
 
+        <RivalryCard />
+
         <SegmentedControl
           value={period}
           onChange={setPeriod}
@@ -99,6 +104,15 @@ export default function GminyScreen() {
       />
     </Screen>
   );
+}
+
+/** Wejście do Rywalizacji (walki o okaz, pojedynki, ranking grzybiarzy) – nie w stanach z makiety. */
+function RivalryCard() {
+  const design = useDesignScenario();
+  const now = useNow(60_000);
+  if (design) return null;
+  const left = Date.parse(contestWeekBounds(contestWeekStart(now)).endsAt) - now;
+  return <RivalryBanner title="Rywalizacja grzybiarzy" subtitle={`Okaz tygodnia, pojedynki i ranking · do końca ${fmtTimeLeft(left)}`} />;
 }
 
 const PAGE = 10;

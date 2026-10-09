@@ -16,6 +16,8 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[]): AsyncState<T
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<ServiceError | Error | null>(null);
   const call = useRef(0);
+  /** Dane już raz przyszły z serwisu (zmiana lokalna może wtedy unieważnić starsze zapytanie w toku). */
+  const loaded = useRef(false);
   const fnRef = useRef(fn);
   useLayoutEffect(() => {
     fnRef.current = fn;
@@ -27,7 +29,10 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[]): AsyncState<T
     setError(null);
     try {
       const res = await fnRef.current();
-      if (id === call.current) setDataState(res);
+      if (id === call.current) {
+        loaded.current = true;
+        setDataState(res);
+      }
     } catch (e) {
       if (id === call.current) setError(e as Error);
     } finally {
@@ -42,6 +47,16 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[]): AsyncState<T
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
 
-  const setData = useCallback((updater: (prev: T | undefined) => T | undefined) => setDataState(updater), []);
+  /**
+   * Zmiana lokalna (optymistyczna albo odpowiedź akcji) jest nowsza niż odświeżenie w toku – starsza odpowiedź jej nie
+   * nadpisze (np. przyjęty pojedynek nie wraca do „oczekuje”). Przed pierwszym wczytaniem zapytanie zostaje.
+   */
+  const setData = useCallback((updater: (prev: T | undefined) => T | undefined) => {
+    if (loaded.current) {
+      call.current += 1;
+      setLoading(false);
+    }
+    setDataState(updater);
+  }, []);
   return { data, loading, error, reload: run, setData };
 }

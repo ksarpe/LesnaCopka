@@ -14,6 +14,8 @@ import type { Badge, Edibility, Habitat, Protection, Quest, QuestPeriod, Rarity,
 import { questKindFromSql } from '@/utils/quests';
 import { cachedCatalog, type CachedCatalog } from './catalogCache';
 import { supabase } from './client';
+import { createSupabaseContests } from './contests';
+import { createSupabaseDuels } from './duels';
 import { createSupabaseFeed } from './feed';
 import { establishSession, withTimeout } from './session';
 import { createSupabaseStats } from './stats';
@@ -185,6 +187,8 @@ export function createSupabaseServices(base: Services): Services {
     catalog: supabaseCatalog(base.catalog),
     feed: createSupabaseFeed(),
     stats: createSupabaseStats(),
+    contests: createSupabaseContests(),
+    duels: createSupabaseDuels(),
     dev: {
       // „Wyczyść dane” / reset panelu: dane mocków + własne wpisy czekające na serwer (stan konta wróci z serwera).
       reset: (opts) => {

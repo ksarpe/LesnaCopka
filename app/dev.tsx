@@ -14,7 +14,7 @@ import { NotificationsPanel } from '@/dev/NotificationsPanel';
 import { devSimulateWalk } from '@/dev/simWalk';
 import { useRegionStore } from '@/hooks/useRegion';
 import { useServices } from '@/services';
-import { identifyAvailable } from '@/services/live/identify';
+import { devScanSimulatesSigned, identifyAvailable } from '@/services/live/identify';
 import type { PermissionKind, PermissionStatus } from '@/services/types';
 import {
   addDistance,
@@ -240,6 +240,16 @@ function DevPanel() {
               </Row>
               <Row label="Niska pewność (<60%)" hint="Ekran „Nie jestem pewien” z możliwymi gatunkami">
                 <Toggle value={sim.scan.lowConfidence} onChange={(v) => sim.setScan({ lowConfidence: v })} />
+              </Row>
+              <Row
+                label="Z odniesieniem skali (kapelusz zmierzony)"
+                hint={
+                  devScanSimulatesSigned()
+                    ? 'Tryb mock: symulacja podpisanego rozpoznania – znalezisko zweryfikowane i zmierzone (walki o okaz)'
+                    : 'Tryb Supabase: wynik wymuszony zawsze niezweryfikowany (serwer nie ma jego rozpoznania) – poza rankingami i walkami'
+                }
+              >
+                <Toggle value={!!sim.scan.scaleRef} onChange={(v) => sim.setScan({ scaleRef: v })} />
               </Row>
             </>
           ) : null}

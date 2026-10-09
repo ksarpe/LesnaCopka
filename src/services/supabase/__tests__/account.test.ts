@@ -369,3 +369,36 @@ describe('usunięcie konta', () => {
     expect(account.authUserDeleted('{"authUserDeleted":false}')).toBe(false);
   });
 });
+
+describe('removeFolder – zdjęcia rozpoznań po usunięciu konta', () => {
+  /** Atrapa Storage: lista po 100 plików, remove usuwa (albo nic – brak uprawnień). */
+  const fakeStorage = (n: number, canDelete = true) => {
+    const files = Array.from({ length: n }, (_, i) => `u1/rec/${String(i).padStart(4, '0')}.jpg`);
+    const calls = { list: 0, remove: 0 };
+    const api = {
+      list: async () => {
+        calls.list += 1;
+        return { paths: files.slice(0, 100), error: null };
+      },
+      remove: async (_b: string, paths: string[]) => {
+        calls.remove += 1;
+        if (canDelete) paths.forEach((p) => files.splice(files.indexOf(p), 1));
+        return null;
+      },
+    };
+    return { api, files, calls };
+  };
+
+  it('stronicuje do pustej strony (> 100 plików)', async () => {
+    const s = fakeStorage(250);
+    expect(await account.removeFolder(s.api, 'scan-photos', 'u1/rec')).toBeNull();
+    expect(s.files).toHaveLength(0);
+    expect(s.calls).toEqual({ list: 4, remove: 3 });
+  });
+
+  it('Storage nie usuwa (ta sama strona drugi raz) → komunikat zamiast pętli', async () => {
+    const s = fakeStorage(30, false);
+    expect(await account.removeFolder(s.api, 'scan-photos', 'u1/rec')).toContain('u1/rec');
+    expect(s.calls.list).toBe(2);
+  });
+});

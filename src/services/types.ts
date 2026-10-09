@@ -9,7 +9,15 @@ import type {
   Badge,
   BlockedUser,
   ChanceHorizon,
+  ContestBoard,
+  ContestEligibility,
+  ContestScope,
+  ContestWeek,
   Dimensions,
+  Duel,
+  DuelDays,
+  DuelKind,
+  DuelsOverview,
   FriendsOverview,
   FriendStatus,
   Gmina,
@@ -19,11 +27,15 @@ import type {
   MushroomForecast,
   Post,
   PostComment,
+  PlayerRanking,
+  PlayerRankingPeriod,
+  PlayerRankingScope,
   PostScope,
   Quest,
   Ranking,
   RankingPeriod,
   Region,
+  RivalryStatus,
   ScanResult,
   SocialUser,
   Species,
@@ -32,6 +44,7 @@ import type {
   SpeciesPercentile,
   Trip,
   TripPost,
+  TrophyCase,
 } from '@/types';
 import type { LatLon, TrackPoint } from '@/geo/track';
 
@@ -147,8 +160,13 @@ export interface WeatherService {
 export interface IdentifyContext {
   /** Miesiąc 1–12 (sezon). */
   month?: number;
-  /** Województwo (VOIVODESHIPS w src/geo/voivodeships.ts) – nic dokładniejszego nie wysyłamy. */
+  /** Województwo (VOIVODESHIPS w src/geo/voivodeships.ts) – model nie dostaje nic dokładniejszego. */
   voivodeship?: string;
+  /**
+   * Bieżąca pozycja (ekran skanu: ostatnio wykryty region; bez niej – ostatni punkt śladu wyprawy). Serwer liczy z niej
+   * gminę znaleziska (podpisane rozpoznanie) – współrzędne nie idą do modelu i nie są zapisywane.
+   */
+  position?: Region['position'];
 }
 
 export interface IdentifyOptions {
@@ -276,6 +294,57 @@ export interface CatalogService {
   getTotalSpecies(): Promise<number>;
 }
 
+/**
+ * Walki o okaz (docs/rywalizacja.md): co tydzień „Okaz tygodnia” (dowolny gatunek, kapelusz względem typowego) i dwa
+ * gatunki tygodnia (kapelusz w cm). Walczą tylko okazy z rozmiarem potwierdzonym przez serwer (`Find.sizeVerified`),
+ * zgłoszone przez gracza (zdjęcie okazu widzą wtedy inni). Inni widzą zgłoszenie po opóźnieniu prywatności (24 h).
+ * Błędy: ServiceError('SERVER', powód po polsku) – np. okaz nie spełnia warunków, walka zamknięta; NETWORK bez sieci.
+ */
+export interface ContestService {
+  /** Prawdziwe dane (Supabase) – puste tablice i stany „bądź pierwszy”. Brak = mocki z botami. */
+  readonly live?: boolean;
+  /** Walki tygodnia (domyślnie bieżącego) z okazami gracza i liderami w jego województwie. */
+  getContestWeek(weekStart?: string): Promise<ContestWeek>;
+  /** Tablica wyników walki w zasięgu; `scopeId` – gmina / województwo (domyślnie gmina domowa gracza i jej województwo). */
+  getContestBoard(contestId: string, scope: ContestScope, scopeId?: string | null): Promise<ContestBoard>;
+  /** Czy znalezisko może walczyć, w których walkach i na którym miejscu by było. */
+  getContestEligibility(findId: string): Promise<ContestEligibility>;
+  /** Zgłasza okaz do wszystkich pasujących walk jego tygodnia (zastępuje wcześniejszy okaz gracza w tych walkach). */
+  enterContest(findId: string): Promise<ContestEligibility>;
+  /** Wycofuje okaz gracza z walki (przed rozstrzygnięciem). */
+  withdrawContestEntry(contestId: string): Promise<void>;
+  /** „Zgłoś okaz” (podejrzany: ekran, wydruk, nie ten gatunek…). */
+  reportContestEntry(entryId: string, reason?: string): Promise<void>;
+  /** Trofea (podia walk) – gracza albo innego grzybiarza. */
+  getTrophies(userId?: string): Promise<TrophyCase>;
+}
+
+/**
+ * Pojedynki ze znajomymi i ranking grzybiarzy (docs/rywalizacja.md). Pojedynki działają tylko z siecią (bez kolejki).
+ * Błędy: ServiceError('SERVER', powód po polsku) – np. nie jesteście znajomymi, limit pojedynków; NETWORK bez sieci.
+ */
+export interface DuelService {
+  /** Prawdziwe dane (Supabase). Brak = mocki z botami. */
+  readonly live?: boolean;
+  getDuels(): Promise<DuelsOverview>;
+  getDuel(duelId: string): Promise<Duel>;
+  /**
+   * Wyzwanie znajomego; zaproszenie wygasa po 48 h. `duelId` – UUID nadany w telefonie raz na wyzwanie: ponowienie
+   * po zerwanym połączeniu z tym samym id nie dubluje pojedynku (brak – nowy id przy każdym wywołaniu).
+   */
+  createDuel(opponentId: string, kind: DuelKind, days: DuelDays, duelId?: string): Promise<Duel>;
+  /** Odpowiedź na wyzwanie: przyjęcie startuje pojedynek od teraz. */
+  respondDuel(duelId: string, accept: boolean): Promise<Duel>;
+  /** Anulowanie własnego wyzwania, zanim druga strona odpowie. */
+  cancelDuel(duelId: string): Promise<void>;
+  /** Ranking grzybiarzy; `scopeId` – gmina / województwo (domyślnie gmina domowa gracza i jej województwo). */
+  getPlayerRanking(scope: PlayerRankingScope, period: PlayerRankingPeriod, scopeId?: string | null): Promise<PlayerRanking>;
+  /** Widoczność gracza w rankingach grzybiarzy i na tablicach walk (Ustawienia → Prywatność). */
+  setRankingVisibility(visible: boolean): Promise<void>;
+  /** Widoczność w rankingach, status w rywalizacji (weryfikacja) i czy konto może odbierać nagrody. */
+  getRivalryStatus(): Promise<RivalryStatus>;
+}
+
 /** Narzędzia wyłącznie dla prototypu (panel /dev). Implementacja API może je pominąć. */
 export interface DevTools {
   /** Przywraca dane „serwera” do stanu startowego. */
@@ -294,4 +363,6 @@ export interface Services {
   stats: StatsService;
   feed: FeedService;
   catalog: CatalogService;
+  contests: ContestService;
+  duels: DuelService;
 }

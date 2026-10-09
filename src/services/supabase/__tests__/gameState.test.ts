@@ -241,6 +241,43 @@ describe('etap 5: zdjęcia w Storage', () => {
     expect(mapFind(sFind({ id: 'f', photoPath: null }), marker)).not.toHaveProperty('photoUri');
   });
 
+  it('podpisane rozpoznanie: recognitionId / verified / sizeVerified z serwera (potwierdza telefon); starszy serwer – z telefonu', () => {
+    const RID = '6f1c2b0a-3d4e-4f50-8a6b-7c8d9e0f1a2b';
+    const s = parseGameState({
+      userId: 'user-1',
+      profile: {},
+      finds: [
+        { id: 'a', status: 'pending', recognitionId: RID, verified: true, sizeVerified: true, photoPath: `user-1/rec/${RID}.jpg` },
+        { id: 'b', status: 'pending', recognitionId: null, verified: false, sizeVerified: false },
+        { id: 'c', status: 'pending', verified: 'tak' },
+      ],
+    });
+    expect(s.finds.map((f) => [f.recognitionId, f.verified, f.sizeVerified])).toEqual([
+      [RID, true, true],
+      [null, false, false],
+      [undefined, undefined, undefined],
+    ]);
+    expect(s.finds[2]).not.toHaveProperty('verified');
+
+    const local = localFind({ id: 'a', recognitionId: RID, verified: true, sizeVerified: true, photoUri: 'file:///finds/a.jpg' });
+    expect(mapFind(s.finds[0], local)).toMatchObject({
+      recognitionId: RID,
+      verified: true,
+      sizeVerified: true,
+      photoPath: `user-1/rec/${RID}.jpg`,
+      photoUri: 'file:///finds/a.jpg',
+    });
+    // Serwer nie potwierdził (np. bez rozpoznania) – wygrywa serwer.
+    expect(mapFind(sFind({ id: 'a', recognitionId: null, verified: false, sizeVerified: false }), local)).toMatchObject({
+      verified: false,
+      sizeVerified: false,
+    });
+    expect(mapFind(sFind({ id: 'a', recognitionId: null, verified: false }), local)).not.toHaveProperty('recognitionId');
+    // Starszy serwer (bez pól) – flagi z telefonu.
+    expect(mapFind(sFind({ id: 'a' }), local)).toMatchObject({ recognitionId: RID, verified: true, sizeVerified: true });
+    expect(mapFind(sFind({ id: 'x' }))).not.toHaveProperty('verified');
+  });
+
   it('avatar: z serwera, gdy w telefonie go nie ma albo zmienił się na innym urządzeniu; niewysłane zdjęcie zostaje', () => {
     const p = (avatarPath: string | null | undefined) => ({ ...state().profile, ...(avatarPath !== undefined ? { avatarPath } : {}) });
     const fromServer = mergeAvatar(undefined, p('user-1/avatar-2.jpg'), 'user-1');

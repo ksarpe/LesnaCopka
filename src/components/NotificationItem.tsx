@@ -12,6 +12,7 @@ export const NOTIF_TONE: Record<NotifKind, { bg: string; fg: string }> = {
   streak: { bg: colors.streakBg, fg: colors.streakText },
   visible: { bg: colors.infoBg, fg: colors.infoText },
   social: { bg: colors.dangerBg, fg: colors.danger },
+  rivalry: { bg: colors.warnBg, fg: colors.warnIcon },
   gminy: { bg: colors.forest, fg: colors.xpOnDark },
   weekly: { bg: colors.badgeCard, fg: colors.legendText },
   longTrip: { bg: colors.questHikeBg, fg: colors.questHikeIcon },

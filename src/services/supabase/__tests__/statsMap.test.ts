@@ -225,6 +225,18 @@ describe('mapPercentile', () => {
       collected: 0,
     });
   });
+
+  it('k-anonimowość: comparable false → kształt „brak danych” (bez porównania); comparable true zostaje', () => {
+    expect(
+      mapPercentile({ speciesId: 'a', gminaId: 'b', collected: 4, mushroomers: 2, sizeRank: 2, percentile: 50, biggerCount: 1, comparable: false }, {
+        speciesId: 'a',
+        gminaId: 'b',
+      }),
+    ).toEqual({ speciesId: 'a', gminaId: 'b', collected: 0, mushroomers: 0, sizeRank: 1, percentile: 100, biggerCount: 0, comparable: false });
+    expect(
+      mapPercentile({ collected: 9, mushroomers: 4, sizeRank: 2, percentile: 70, biggerCount: 1, comparable: true }, { speciesId: 'a', gminaId: 'b' }),
+    ).toMatchObject({ collected: 9, comparable: true });
+  });
 });
 
 describe('reconcileGminaState', () => {

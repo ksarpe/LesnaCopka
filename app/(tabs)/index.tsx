@@ -6,6 +6,7 @@ import { AreaMapView } from '@/components/AreaMap';
 import { Avatar } from '@/components/Avatar';
 import { Button3D, Press3D } from '@/components/Button3D';
 import { Card } from '@/components/Card';
+import { ContestWeekTeaser } from '@/components/ContestCard';
 import { ForecastPills } from '@/components/Forecast';
 import { ForestPill } from '@/components/ForestPill';
 import { Icon, type IconName } from '@/components/Icon';
@@ -207,6 +208,8 @@ function Idle() {
           Lokalizacja nie jest udostępniana na żywo. Wyprawa pojawi się publicznie dopiero po zakończeniu.
         </Txt>
       </View>
+      {/* Walka o okaz tygodnia → Rywalizacja (w stanach z makiety – bez karty). */}
+      <ContestWeekTeaser />
     </View>
   );
 }

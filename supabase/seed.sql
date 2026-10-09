@@ -1,9 +1,21 @@
 -- WYGENEROWANE przez scripts/gen-seed.ts z src/data/mock – nie edytuj ręcznie.
 -- Gminy z assets/geo/gminy-index.geo (PRG, npm run geo:build); granice (boundary) uzupełnia import PRG (GUGiK).
 
--- LOKALNIE: narzędzia deweloperskie włączone (import stanu, reset gracza). Do chmury: npm run db:seed -- --cloud.
+-- LOKALNIE: narzędzia deweloperskie włączone (import stanu, reset gracza, boty). Do chmury: npm run db:seed -- --cloud.
 insert into public.app_config (key, value) values ('dev_tools', 'true')
 on conflict (key) do update set value = excluded.value;
+-- EXECUTE na RPC dev_* (same sprawdzają dev_tools_enabled()) – tylko z seeda lokalnego, migracje go nie nadają.
+do $$
+declare
+  f regprocedure;
+begin
+  for f in select p.oid::regprocedure from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public' and p.proname like 'dev\_%'
+       and (p.proname = 'dev_tools_enabled' or p.prosrc like '%dev_tools_enabled()%')
+  loop
+    execute format('grant execute on function %s to authenticated', f);
+  end loop;
+end $$;
 
 insert into public.forest_regions (id, name) values
   ('puszcza-knyszynska', 'Puszcza Knyszyńska'),

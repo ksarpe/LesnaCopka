@@ -7,13 +7,14 @@ import Animated, { useAnimatedStyle, useSharedValue, withSequence, withSpring, w
 import { AchievementMedal } from '@/components/Achievement';
 import { BadgeCircle } from '@/components/Badge';
 import { Button3D, Press3D } from '@/components/Button3D';
+import { ContestRewardCard } from '@/components/ContestRewardCard';
 import { Icon } from '@/components/Icon';
 import { Pill } from '@/components/Pill';
 import { Placeholder } from '@/components/Placeholder';
 import { XpBarAnimated } from '@/components/ProgressBar';
 import { Burst, Glow, Rays } from '@/components/RewardFx';
 import { Screen, SCREEN_LIST_PROPS } from '@/components/Screen';
-import { AiSafetyNote, FIRST_IN_GMINA } from '@/components/SpeciesSheet';
+import { AiSafetyNote, FIRST_IN_GMINA, TOO_FEW_IN_GMINA } from '@/components/SpeciesSheet';
 import { Txt } from '@/components/Txt';
 import { useAsync } from '@/hooks/useAsync';
 import { useCountUp, useTicker } from '@/hooks/useCountUp';
@@ -248,11 +249,17 @@ export default function RewardScreen() {
 
           {reward.unlockedAchievements?.length ? <AchievementCard unlocks={reward.unlockedAchievements} /> : null}
 
+          {/* Walka o okaz: miejsce i „Zgłoś okaz do walki” albo podpowiedź (skala); w stanach z makiety – bez karty. */}
+          <ContestRewardCard find={find} />
+
           <Txt f="n7" size={13} color={colors.onDarkMuted} align="center">
-            {/* collected = 0 (tryb Supabase): nikt jeszcze nie zebrał tu tego gatunku w tym sezonie. */}
-            {pct.data?.collected === 0
-              ? FIRST_IN_GMINA
-              : pct.data
+            {/* collected = 0 (tryb Supabase): nikt jeszcze nie zebrał tu tego gatunku w tym sezonie; comparable = false –
+                za mało zweryfikowanych okazów, żeby porównać (k-anonimowość). */}
+            {pct.data?.comparable === false
+              ? TOO_FEW_IN_GMINA
+              : pct.data?.collected === 0
+                ? FIRST_IN_GMINA
+                : pct.data
                 ? `${pct.data.mushroomers} ${plural(pct.data.mushroomers, 'osoba znalazła', 'osoby znalazły', 'osób znalazło')} ten gatunek w gminie w tym sezonie – ${
                     pct.data.biggerCount === 0
                       ? 'Twój okaz jest największy!'

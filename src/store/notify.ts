@@ -113,8 +113,8 @@ export function deliverDue(opts: { all?: boolean; toast?: boolean } = {}): Inbox
 let activityPoll: Promise<number> | null = null;
 
 /**
- * Tryb Supabase: nowa aktywność innych (reakcje, komentarze, zaproszenia) → wpisy w centrum (klucz = id
- * aktywności, więc nic nie przychodzi dwa razy; wyłączona kategoria „social” – pomijane) i toast. Zapamiętuje
+ * Tryb Supabase: nowa aktywność innych (reakcje, komentarze, zaproszenia, rywalizacja) → wpisy w centrum (klucz = id
+ * aktywności, więc nic nie przychodzi dwa razy; wyłączona kategoria „social” / „rivalry” – pomijane) i toast. Zapamiętuje
  * najnowszy znacznik z serwera. Bez `getActivity` (mocki) – nic. Nie rzuca; zwraca liczbę nowych wpisów.
  */
 export function pollActivity(feed: Pick<FeedService, 'getActivity'>, opts: { toast?: boolean } = {}): Promise<number> {
@@ -467,6 +467,7 @@ export function addSampleNotifications() {
   const [a, b] = [AUTHORS.ola, AUTHORS.marek];
   const samples: (Omit<InboxItem, 'id' | 'createdAt'> & { ago: number })[] = [
     { kind: 'social', title: `${a.name}: Darz grzyb!`, body: 'Pierwsza reakcja na Twoją wyprawę – wpis właśnie pojawił się u znajomych.', icon: 'favorite', href: '/feed', read: false, ago: 6 * min },
+    { kind: 'rivalry', title: `${b.name} wyzywa Cię na pojedynek`, body: '„Największy okaz” · 3 dni. Przyjmij wyzwanie, zanim wygaśnie (48 h).', icon: 'bolt', href: '/rywalizacja/pojedynki', read: false, ago: 20 * min },
     { kind: 'social', title: `Nowy komentarz od ${b.name}`, body: '„Piękne okazy! Gdzie takie rosną?”', icon: 'chat_bubble', href: '/feed', read: false, ago: 48 * min },
     { kind: 'visible', title: 'Twoja wyprawa jest już widoczna', body: `Znajomi widzą już Twoją wyprawę z gminy ${name} (6,4 km, 9 grzybów) – bez dokładnej lokalizacji.`, icon: 'visibility', href: '/feed', read: false, ago: 3 * 60 * min },
     { kind: 'gminy', title: `Wyzwanie w gminie ${name}`, body: 'Znajdź kanię w Puszczy Knyszyńskiej · +300 XP. Przyjmij je na ekranie gminy.', icon: 'flag', href: `/gminy/${home}`, read: false, ago: 26 * 60 * min },

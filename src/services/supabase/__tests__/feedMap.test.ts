@@ -228,6 +228,24 @@ describe('komentarze i aktywność', () => {
       ['comment', 'Marek_K', 'p1', 'Gdzie?'],
       ['friend_request', 'Ewa', null, null],
     ]);
+    expect(items[0]).not.toHaveProperty('refId');
+  });
+
+  it('aktywność rywalizacji: `refId` (pojedynek / walka) i `meta` – obiekt albo jsonb w tekście', () => {
+    const items = mapActivity([
+      { id: 'duel_invite:d1', kind: 'duel_invite', actor: author(), postId: null, text: null, refId: 'd1', meta: { kind: 'biggest', days: 3 }, createdAt: '2026-10-06T10:00:00Z' },
+      { id: 'duel_finished:d1', kind: 'duel_finished', actor: author(), refId: 'd1', meta: '{"outcome":"won","xp":100}', createdAt: '2026-10-06T11:00:00Z' },
+      { id: 'contest_award:c1', kind: 'contest_award', actor: author(), refId: '2026-10-05:okaz', meta: { place: 1, xp: 500 }, createdAt: '2026-10-06T12:00:00Z' },
+      { id: 'contest_overtaken:c1', kind: 'contest_overtaken', actor: author(), refId: 'c1', meta: 'zepsute', createdAt: '2026-10-06T13:00:00Z' },
+      { id: 'duel_accepted:d2', kind: 'duel_accepted', actor: author(), createdAt: '2026-10-06T14:00:00Z' },
+    ]);
+    expect(items.map((a) => [a.kind, a.refId, a.meta])).toEqual([
+      ['duel_invite', 'd1', { kind: 'biggest', days: 3 }],
+      ['duel_finished', 'd1', { outcome: 'won', xp: 100 }],
+      ['contest_award', '2026-10-05:okaz', { place: 1, xp: 500 }],
+      ['contest_overtaken', 'c1', undefined],
+      ['duel_accepted', undefined, undefined],
+    ]);
   });
 });
 
@@ -269,5 +287,32 @@ describe('toServiceError', () => {
     const generic = err('duplicate key', '23505', 409);
     expect(generic).toBeInstanceOf(ServiceError);
     expect(generic).toMatchObject({ code: 'SERVER', message: expect.stringContaining('Serwer') });
+  });
+
+  it('kody spoza listy z polskim `detail` (rywalizacja) → ten opis; znany kod ma pierwszeństwo', () => {
+    const withDetail = (message: string, code: string, details?: string) => toServiceError({ message, code, status: 400, details });
+    expect(withDetail('not_friends', 'P0001', 'Wyzwać możesz tylko znajomych')).toMatchObject({ code: 'SERVER', message: 'Wyzwać możesz tylko znajomych' });
+    expect(withDetail('duel_limit', 'P0001', 'Masz już 3 pojedynki w toku')).toMatchObject({ code: 'SERVER', message: 'Masz już 3 pojedynki w toku' });
+    expect(withDetail('duel_not_found', 'P0002', 'Nie znaleziono pojedynku')).toMatchObject({ code: 'NOT_FOUND', message: 'Nie znaleziono pojedynku' });
+    // „blocked” z listy pasuje tylko dokładnie – kod rywalizacji z tym słowem bierze opis z serwera.
+    expect(withDetail('opponent_blocked', 'P0001', 'Nie możesz wyzwać tej osoby')).toMatchObject({ message: 'Nie możesz wyzwać tej osoby' });
+    expect(withDetail('invalid_comment', 'P0001', 'Komentarz musi mieć od 1 do 280 znaków')).toMatchObject({ message: 'Komentarz jest pusty albo za długi' });
+    // Sama podpowiedź terminu (bez opisu) – nie do pokazania.
+    expect(withDetail('rate_limited', 'P0001', 'retry_after=2026-10-06T12:00:00Z')).toMatchObject({ code: 'SERVER', message: expect.stringContaining('Serwer') });
+  });
+
+  it('RPC rywalizacji: opis z serwera wygrywa z tekstem feedu; feed zostaje przy swoich tekstach', () => {
+    const e = (message: string, code: string, details?: string) => ({ message, code, status: 400, details });
+    expect(toServiceError(e('blocked', 'P0001', 'Nie możesz wyzwać tej osoby'), 'create_duel')).toMatchObject({ code: 'SERVER', message: 'Nie możesz wyzwać tej osoby' });
+    expect(toServiceError(e('blocked', 'P0001', 'Nie możesz wyzwać tej osoby'), 'send_friend_request')).toMatchObject({
+      message: 'Nie możecie zostać znajomymi – jedno z Was zablokowało drugie',
+    });
+    expect(toServiceError(e('blocked', 'P0001', 'Nie możesz wyzwać tej osoby'))).toMatchObject({ message: expect.stringContaining('znajomymi') });
+    expect(toServiceError(e('user_not_found', 'P0002', 'Nie ma takiego grzybiarza'), 'get_trophies')).toMatchObject({ code: 'NOT_FOUND', message: 'Nie ma takiego grzybiarza' });
+    // Bez opisu – lista jak dotąd.
+    expect(toServiceError(e('blocked', 'P0001'), 'create_duel')).toMatchObject({ message: expect.stringContaining('znajomymi') });
+    // Id pojedynku spoza formatu UUID (stary link z mocków).
+    expect(toServiceError(e('invalid input syntax for type uuid: "duel_x"', '22P02'), 'get_duel')).toMatchObject({ code: 'NOT_FOUND', message: 'Nie ma takiego pojedynku' });
+    expect(toServiceError(e('invalid input syntax for type uuid', '22P02'), 'get_feed')).toMatchObject({ code: 'SERVER' });
   });
 });

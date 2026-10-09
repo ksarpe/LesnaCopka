@@ -1,6 +1,7 @@
 /**
  * Rozpoznanie → wynik gry (src/utils/identify.ts): gatunek i pewność z bezpiecznikiem sobowtórów, wymiary bez
- * losowania (skala tylko z odniesienia na zdjęciu), XXL, kępki, odrzucenia, podpowiedź części i wymuszony wynik dev.
+ * losowania (skala tylko z odniesienia na zdjęciu), XXL, kępki, odrzucenia, podpisane rozpoznanie (id, zmierzony
+ * kapelusz), podpowiedź części i wymuszony wynik dev (w mockach – symulacja podpisanego rozpoznania).
  */
 import { describe, expect, it } from '@jest/globals';
 
@@ -30,8 +31,11 @@ const mushroom = (over: Partial<IdentifyResponse> = {}): IdentifyResponse => ({
   capCm: null,
   heightCm: null,
   maturity: 'mature',
+  scaleReference: 'none',
+  reproduction: false,
   ...over,
 });
+const RID = '6f1c2b0a-3d4e-4f50-8a6b-7c8d9e0f1a2b';
 
 describe('toIdentifyOutcome', () => {
   it('grzyb: gatunek z katalogu, rzadkość gatunku, sobowtóry, widoczne części; bez skali – typowe wymiary, bez XXL', () => {
@@ -56,7 +60,7 @@ describe('toIdentifyOutcome', () => {
   });
 
   it('XXL tylko z odniesieniem skali: kapelusz 16 cm borowika (typowo 12) → waga ≥ 1,25 × typowej', () => {
-    const out = toIdentifyOutcome(mushroom({ capCm: 16, heightCm: 18 }), BY_ID);
+    const out = toIdentifyOutcome(mushroom({ capCm: 16, heightCm: 18, scaleReference: 'hand' }), BY_ID);
     if (out.kind !== 'mushroom') throw new Error('oczekiwano grzyba');
     expect(out.identification.dimensions.capCm).toBe(16);
     expect(out.identification.dimensions.heightCm).toBe(18);
@@ -84,6 +88,45 @@ describe('toIdentifyOutcome', () => {
       BY_ID,
     );
     expect(out.kind === 'mushroom' && out.identification.speciesId).toBe('czubajka-kania');
+  });
+});
+
+describe('toIdentifyOutcome – podpisane rozpoznanie', () => {
+  it('id, termin i zmierzony kapelusz z odpowiedzi serwera; bez nich – wynik niezweryfikowany', () => {
+    const signed = toIdentifyOutcome(mushroom({ capCm: 14, scaleReference: 'coin' }), BY_ID, {
+      recognitionId: RID,
+      sizeMeasured: true,
+      expiresAt: '2026-10-12T10:00:00.000Z',
+    });
+    expect(signed.kind === 'mushroom' && signed.identification).toMatchObject({
+      recognitionId: RID,
+      expiresAt: '2026-10-12T10:00:00.000Z',
+      sizeMeasured: true,
+      reproduction: false,
+    });
+    const plain = toIdentifyOutcome(mushroom(), BY_ID);
+    if (plain.kind !== 'mushroom') throw new Error('oczekiwano grzyba');
+    expect(plain.identification.recognitionId).toBeUndefined();
+    expect(plain.identification.sizeMeasured).toBe(false);
+    // Serwer twierdzi „zmierzony”, ale bez skali i wymiarów – nie wierzymy.
+    const noScale = toIdentifyOutcome(mushroom(), BY_ID, { recognitionId: RID, sizeMeasured: true });
+    expect(noScale.kind === 'mushroom' && noScale.identification.sizeMeasured).toBe(false);
+  });
+
+  it('pewność < 60% (także po bezpieczniku sobowtórów) → bez rozpoznania (serwer go nie wydaje)', () => {
+    const low = toIdentifyOutcome(mushroom({ candidates: [{ speciesId: 'borowik-szlachetny', confidence: 0.5 }] }), BY_ID, { recognitionId: RID });
+    expect(low.kind === 'mushroom' && low.identification.recognitionId).toBeUndefined();
+    const danger = toIdentifyOutcome(
+      mushroom({
+        candidates: [
+          { speciesId: 'czubajka-kania', confidence: 0.8 },
+          { speciesId: 'muchomor-zielonawy', confidence: 0.2 },
+        ],
+      }),
+      BY_ID,
+      { recognitionId: RID },
+    );
+    expect(danger.kind === 'mushroom' && danger.identification.recognitionId).toBeUndefined();
   });
 });
 
@@ -165,5 +208,23 @@ describe('devScanOutcome – wymuszony wynik z panelu dev', () => {
 
     const first = devScanOutcome({ force: 'species', speciesId: null, xxl: false, lowConfidence: false }, SPECIES);
     expect(first?.kind === 'mushroom' && first.identification.speciesId).toBe(SPECIES[0].id);
+  });
+
+  it('„z odniesieniem skali”: w mockach symulacja podpisanego rozpoznania (zmierzony kapelusz); w Supabase – niezweryfikowany', () => {
+    const o = { ...NO_SCAN_OVERRIDE, force: 'species' as const, speciesId: 'borowik-szlachetny', scaleRef: true };
+    const mock = devScanOutcome(o, SPECIES, { simulateSigned: true });
+    if (mock?.kind !== 'mushroom') throw new Error('oczekiwano grzyba');
+    expect(mock.identification).toMatchObject({ simulated: true, sizeMeasured: true, xxl: false });
+    expect(mock.identification.recognitionId).toBeUndefined();
+    expect(mock.identification.dimensions.capCm).toBe(sp('borowik-szlachetny').typical.capCm);
+
+    const supa = devScanOutcome(o, SPECIES, { simulateSigned: false });
+    expect(supa?.kind === 'mushroom' && supa.identification.simulated).toBeUndefined();
+
+    // Bez opcji (także samo XXL) albo przy niskiej pewności – bez symulacji.
+    const plain = devScanOutcome({ ...o, scaleRef: false, xxl: true }, SPECIES, { simulateSigned: true });
+    expect(plain?.kind === 'mushroom' && plain.identification.simulated).toBeUndefined();
+    const low = devScanOutcome({ ...o, lowConfidence: true }, SPECIES, { simulateSigned: true });
+    expect(low?.kind === 'mushroom' && low.identification.simulated).toBeUndefined();
   });
 });

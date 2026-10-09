@@ -27,6 +27,11 @@ export interface FindSubmitPayload {
   candidates: { speciesId: string; confidence: number }[];
   parts: ScanPart[];
   foundAt: string;
+  /**
+   * Podpisane rozpoznanie (Edge Function `identify`) – serwer bierze z niego gatunek, wymiary, gminę, czas i zdjęcie,
+   * a pola powyżej pomija. Brak – znalezisko niezweryfikowane (tylko przy narzędziach dev na serwerze).
+   */
+  recognitionId?: string;
 }
 
 /** Cały profil (ostatnia wersja wygrywa) – nick bez „@”. */

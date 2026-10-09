@@ -30,7 +30,8 @@ const BLOCKED = new Set([
 
 /**
  * Rozpoznanie przez Gemini → ten sam kształt co classify() w index.ts:
- * { status: 'ok' | 'refused', result, meta } albo { status: 'failed', error, meta? }.
+ * { status: 'ok' | 'refused', result, meta } albo { status: 'failed', error, meta?, charged? }. Schemat (z polami
+ * `reproduction` i `scaleReference`) i normalizacja – wspólne z Claude (./contract.ts).
  */
 export async function classifyGemini(opts) {
   const { apiKey, model, systemPrompt, schema, images, text, signal, isKnown, refused } = opts;
@@ -74,8 +75,9 @@ export async function classifyGemini(opts) {
     }
   } catch (e) {
     // Limit czasu, przerwanie (aplikacja zamknęła połączenie) albo brak sieci. Nic z żądania nie trafia do logu.
+    // Żądanie mogło już dojść do modelu – liczy się do limitu (charged).
     console.error('[identify] Gemini: brak połączenia / limit czasu', e instanceof Error ? e.name : typeof e);
-    return { status: 'failed', error: 'model_unavailable' };
+    return { status: 'failed', error: 'model_unavailable', charged: true };
   }
 
   if (!res.ok) {

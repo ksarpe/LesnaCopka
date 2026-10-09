@@ -613,8 +613,8 @@ grzyba od razu kończy się „Nie wykryłem grzyba”. Konfiguracja, koszty i l
 - **Nie sprawdzone w tej sesji:** prawdziwe wywołanie Claude (koszty – testy na atrapach), `deno check`
   i `supabase functions serve` funkcji, ekran skanu na telefonie z aparatem (iOS / Android), przerwanie żądania po
   stronie Edge Function przy zamknięciu ekranu (`req.signal` – zależy od bramki Supabase).
-- **Do zrobienia:** podpis wyniku rozpoznania przez serwer (dziś `find.submit` przyjmuje gatunek od telefonu – Edge Function
-  może zapisać znalezisko sama albo zwrócić podpis do `submit_find`), rozpoznanie odłożone na później bez zasięgu,
+- **Do zrobienia** (podpis wyniku przez serwer – zrobione, „Podpisane rozpoznanie” niżej): rozpoznanie
+  odłożone na później bez zasięgu,
   weryfikacja prawna przekazania zdjęć do Anthropic, `deno.json` z przypiętą wersją `@anthropic-ai/sdk`.
 
 ## Skan 3D (2026-10-08)
@@ -660,3 +660,107 @@ Katalog rozszerzony ze 120 do 360 gatunków – pod przyszły własny model rozp
   outputs); Gemini przy 400 sam ponawia w trybie JSON.
 - **Do decyzji:** nazewnictwo (tradycyjne vs rekomendowane PTMyk – zasada w docs), wariant ostrożny przy spornych
   gatunkach (np. piestrzenica infułowata jako śmiertelna, mleczaje kiszone jako trujące), siedzuń sosnowy (bez zmian).
+
+## Pojedynki i ranking grzybiarzy – aplikacja (2026-10-09)
+
+Część aplikacyjna rywalizacji ze znajomymi (docs/rywalizacja.md §3–6); walki o okaz i hub „Rywalizacja” – osobno.
+
+- **Pojedynki** (`app/rywalizacja/pojedynki.tsx`) – ciemna karta z bilansem W / R / P i „Wyzwij znajomego” na górze,
+  potem sekcje tylko gdy niepuste: wyzwania do mnie (Przyjmij / Odrzuć pod kartą – poza obszarem tapnięcia, jak
+  zaproszenia na ekranie Znajomi), trwające (pasek: gracz zielony z lewej, przeciwnik brązowy z prawej), wysłane
+  (Anuluj), zakończone (30 dni). Odrzucenie i anulowanie pytają (dialog), przyjęcie – od razu. Faza „Liczymy wyniki”
+  po końcu okna: serwer czeka jeszcze 6 h na znaleziska z kolejki offline – UI to mówi wprost („Wyniki za 3 h”).
+- **Arkusz „Wyzwij”** – od dołu jak wybór województwa (nie dialog z `useUiStore`: ten ma tylko tytuł / tekst /
+  przyciski). Znajomi jako avatary w poziomym pasku; ci z pojedynkiem w toku – wyszarzeni („w pojedynku”, jeden na
+  parę). Rodzaje jako karty z jednozdaniowymi zasadami (przy „Największym okazie” – że liczą się tylko okazy zmierzone
+  przy dłoni / monecie), czas – SegmentedControl. Błąd wysyłki pokazujemy w arkuszu (toast ekranu byłby pod modalem).
+  Z mini profilu znajomego „Wyzwij na pojedynek” przechodzi na ekran Pojedynki z otwartym arkuszem (`?wyzwij=<id>`) –
+  bez modala w modalu; „Rewanż” w szczegółach otwiera arkusz z tym samym rodzajem i czasem.
+- **Pojedynek** (`[duelId].tsx`) – „Ty vs przeciwnik” z dużymi wynikami i pucharkiem przy prowadzącym; przy
+  „Największym okazie” karty najlepszych okazów (zdjęcie: własne z telefonu, cudze – podpisany adres ze `scan-photos`,
+  w mockach kafel w kolorze rzadkości). Baner wyniku wyjaśnia brak XP przy wygranej / remisie (warunki nagrody).
+- **Ranking** – 4 zasięgi w SegmentedControl: „Województwo” nie mieści się w ¼ szerokości 375 px, więc w przełączniku
+  „Woj.”, a w nagłówku pełne „Województwo podlaskie”. Wiersz gracza przypięty na dole ekranu (nad krawędzią, z cieniem
+  dialogu) zamiast „⋯ + mój wiersz” w liście – zawsze widać swoje miejsce; w liście tylko obwódka. Bez mini profilu po
+  tapnięciu wiersza (w mockach wygenerowani grzybiarze nie mają profili).
+- **Prywatność** – przełącznik w grupie Ustawienia → Prywatność (`app/ustawienia/index.tsx`), nie w
+  `app/ustawienia/prywatnosc.tsx` – ta trasa to dokument „Polityka prywatności”. Zmiana od razu w UI, bez sieci cofnięta
+  z toastem; podpis opisuje skutek (ukryty: widzą Cię tylko znajomi, okazy walczą tylko wśród znajomych i w pojedynkach).
+- **Mocki** – wynik gracza z jego znalezisk w telefonie liczony tą samą funkcją co opis zasad (`duelSideScore`), ale
+  łagodniej: znaleziska bez flagi weryfikacji (mocki nie mają serwera, wymuszony skan w panelu dev) się liczą, jawne
+  `verified/sizeVerified: false` – nie. „Konto” gracza demo może odbierać nagrody (bez e-maila – w mockach nie ma konta);
+  XP za pojedynek trafia do poziomu i wkładu tygodnia. Punkty rankingu gracza: tydzień = wkład tygodnia, sezon = całe XP
+  (próg poziomów + bieżące) – przybliżenie, bo mocki nie mają `xp_events`.
+- **Teksty bez płci gracza** („Wygrywasz pojedynek z Ola_W!”, „Twoje wyzwanie dla: …”); formy przeciwnika z nicku
+  (`looksFeminine`, jak w powiadomieniach społeczności).
+
+## Walki o okaz i ekran Rywalizacja – aplikacja (2026-10-09)
+
+Część aplikacyjna walk o największego grzyba (docs/rywalizacja.md §2, §6), hub „Rywalizacja” i trofea. Makieta nie
+ma tych ekranów – układ z istniejących klocków (karty, wiersze rankingu gmin, baner lidera, SegmentedControl).
+
+- **Wejścia bez psucia makiety.** Baner „Rywalizacja grzybiarzy” na górze zakładki Gminy (nad przełącznikiem, w stylu
+  banera lidera) i karta „Walka o okaz tygodnia” na ekranie Wyprawa (na dole stanu „idle”, pod notką o prywatności –
+  główny przycisk zostaje tam, gdzie w makiecie) są ukryte w stanach z makiety: scenariusze dev-linków i panelu /dev
+  przypinają zadania dnia z makiety (`quests.pinned`) – po tym rozpoznajemy tryb makiety (`useDesignScenario`). Karta
+  na ekranie Nagroda też (`?scenario=designReward` wygląda jak plik). Trofea w Profilu – na końcu, pod osiągnięciami
+  (jak osiągnięcia: sekcja spoza makiety, zawsze widoczna).
+- **Nagroda** – karta „Walka o okaz” w stylu ramki XP (półprzezroczysta na ciemnym tle), pod kartami odznaki /
+  osiągnięcia. Pokazujemy ją tylko, gdy coś znaczy: okaz pasuje („Twój okaz byłby 2. w województwie!” – najciekawsze
+  miejsce: podium w Polsce > w województwie > w gminie, inaczej województwo), albo brakuje skali / kapelusz jest
+  nietypowo duży (podpowiedź). Kępki, gatunki chronione, kilka owocników – bez karty (to nie jest „do naprawienia”).
+  Informacja o zdjęciu jest na karcie, więc „Zgłoś okaz do walki” zgłasza od razu (pyta tylko przy zastąpieniu
+  większego okazu mniejszym); w dzienniku i na ekranie walki – dialog z walkami, miejscem i informacją o zdjęciu.
+- **Dziennik znalezisk** – okrągły złoty przycisk z pucharem na końcu wiersza okazu, który może walczyć (warunki
+  z telefonu); osobny przycisk obok wiersza, nie w środku (web – bez `<button>` w `<button>`), jak podgląd 3D.
+- **Tablica walki** – wiersze jak ranking gmin (medal z miejscem, obwódka własnego okazu), z miniaturą zdjęcia (tap –
+  powiększenie w karcie-dialogu) i drugim wynikiem drobno (w walce gatunku % typowego, w „Okazie tygodnia” cm). Własny
+  okaz przed upływem 24 h: na swojej pozycji, z „–” zamiast miejsca i podpisem „Inni zobaczą go jutro o 10:05”.
+  Domyślny zasięg – województwo (spójnie z liderem na ekranie Rywalizacja). Zasięg „Znajomi” bez gmin (prywatność:
+  znajomi widzą tylko wynik i gatunek). „Zgłoś okaz” (moderacja) pod „⋮” wiersza, z powodami jak przy wpisach.
+- **„Zgłoś okaz” vs „Zgłoś okaz do walki”.** Specyfikacja używa „Zgłoś okaz” w dwóch znaczeniach; w UI zgłoszenie
+  własnego okazu to zawsze „Zgłoś okaz do walki”, a „Zgłoś okaz” – zgłoszenie cudzego do moderacji (ikona flagi).
+- **Trofea jednej walki razem** – gracz dostaje w walce tylko najwyższą nagrodę, pozostałe podia to trofea bez XP;
+  w Profilu i na ekranie Rywalizacja to jeden wiersz („1. w Polsce · 21,6 cm”, niżej „Też: 1. w województwie…”),
+  liczniki złoto / srebro / brąz liczą wszystkie podia.
+- **Tytuły walk gatunku z odmianą** – „Największa czubajka kania”, „Największa żagiew…”: rodzaj z pierwszego słowa
+  nazwy (-a albo lista wyjątków). W trybie Supabase tytuł liczy telefon z katalogu (gdy zna gatunek), więc nie zależy
+  od tego, jak serwer odmienia.
+- **Czas Warszawy w telefonie** – reguła UE (ostatnia niedziela marca / października, 01:00 UTC) zamiast `Intl`
+  ze strefami (Hermes na starszych Androidach ich nie ma); test na tygodniu ze zmianą czasu (169 h).
+- **Mocki** – XP z podium walk nie dopisuje się do poziomu (w trybie Supabase robi to serwer); miejsce gracza
+  w `ContestWeek.mine` = miejsce w województwie znaleziska (karta: „4. w województwie”). Ukrycie w rankingach
+  (`show_in_rankings`) mock walk pomija – okazy gracza zawsze walczą (serwer to egzekwuje).
+
+## Podpisane rozpoznanie – aplikacja (2026-10-09)
+
+Anty-cheat przed rywalizacją: wynik rozpoznania zapisuje serwer, a znalezisko powstaje z jego rekordu (serwer –
+docs/backend.md → „Podpisane rozpoznanie”, kontrakt – docs/rywalizacja.md §1).
+
+- **Skan** – do `identify` idzie też bieżąca pozycja (`IdentifyContext.position`): ekran skanu pobiera ją PRZED
+  rozpoznaniem – świeży region z pamięci (≤ 15 min), inaczej szybki odczyt (najwyżej 4 s, bez pytania o zgodę); bez niej
+  ostatni punkt śladu wyprawy; starsza niż 15 min – bez pól, ~1 m dokładności. Serwer liczy z niej tylko gminę.
+- **Odrzucone przez serwer** – trwała odmowa `find.submit` (`recognition_expired` / `_used` / `_not_found` /
+  `_required`): toast „Znalezisko nie trafiło na serwer: <powód>”, `find.claim` / `photo.find` / `find.discard` tego
+  znaleziska wypadają z kolejki, znalezisko zostaje z `serverRejected` (`verified` false) – scalanie stanu go nie usuwa,
+  liczniki odznak go pomijają. Do rozważenia (RC1 / koordynator): plakietka „Nie zapisane na serwerze” w dzienniku.
+- **Wydanie bez serwerowego potwierdzenia** – tryb Supabase bez narzędzi dev: grzyb z pewnością ≥ 60% bez `recognitionId`
+  (starsza Edge Function, gatunek top serwera ≠ gatunek top telefonu) → błąd „Serwer nie potwierdził rozpoznania –
+  spróbuj ponownie”. `service_busy` (dzienny limit gry) → ekran „Limit rozpoznań”.
+- **Wynik** (`Identification`): `recognitionId` (tylko przy pewności ≥ 60% – serwer niżej nie wydaje rozpoznania),
+  `sizeMeasured`, `reproduction`, `expiresAt`. Znalezisko: `recognitionId`, `verified` (= jest id), `sizeVerified`
+  (+ kapelusz zmierzony, nie reprodukcja); `get_game_state` je potwierdza (serwer wygrywa, starszy serwer – telefon).
+- **Kolejka** – `find.submit` niesie `recognitionId` (`p_recognition_id`); znalezisko z rozpoznaniem nie wysyła
+  `photo.find` (zdjęcie zapisała Edge Function – `scan-photos/{uid}/rec/{id}.jpg`) ani `photo.delete` przy porzuceniu;
+  zdjęcie z aparatu zostaje w telefonie do wyświetlania. Znalezisko z pewnością < 60% w ogóle nie idzie na serwer.
+- **To samo zdjęcie drugi raz** (409 `image_reused`) → karta „Niewyraźne zdjęcie” z powodem serwera („zrób własne zdjęcie”),
+  nie ekran błędu. Reprodukcja (ekran / wydruk) → „Niewyraźne” z powodem „To wygląda na zdjęcie ekranu albo wydruku…”.
+- **Percentyl** – `comparable: false` (k-anonimowość) mapowane na stan „brak danych” (ekrany bez zmian – pokazują
+  „Pierwszy taki okaz…”; do rozważenia osobny tekst „Za mało okazów do porównania”).
+- **Panel dev** – „Z odniesieniem skali (kapelusz zmierzony)”: w trybie mock symulacja podpisanego rozpoznania
+  (`Identification.simulated` → `verified` + `sizeVerified`, walki o okaz na botach), w trybie Supabase wynik wymuszony
+  jest zawsze niezweryfikowany (serwer przyjmuje go tylko przy `dev_tools`).
+- **Usunięcie konta** – po `delete_my_account` druga runda usuwania `scan-photos/{uid}/rec` (wcześniej Storage nie pozwala
+  – pliki są jeszcze przypięte do rozpoznań).
+- **Nie sprawdzone w tej sesji:** `deno check` i prawdziwe wywołanie Edge Function (SHA-256, zapis do Storage,
+  `EdgeRuntime.waitUntil`), usunięcie plików `rec/` tokenem sesji usuniętego konta na prawdziwym Storage API.

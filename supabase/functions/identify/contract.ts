@@ -9,6 +9,11 @@
  */
 
 export type IdentVerdict = 'mushroom' | 'not_mushroom' | 'unclear';
+/**
+ * Odniesienie skali leżące przy grzybie (tylko z nim model podaje wymiary): dłoń / palce, moneta, karta (płatnicza,
+ * dokument), nóż, inny przedmiot o znanym rozmiarze (telefon, zapalniczka, linijka…); none – brak.
+ */
+export type IdentScaleRef = 'none' | 'hand' | 'coin' | 'card' | 'knife' | 'other';
 /** Części owocnika: kapelusz z wierzchu, spód kapelusza (blaszki / rurki / kolce), trzon, podstawa trzonu. */
 export type IdentPart = 'cap' | 'underside' | 'stem' | 'base';
 export type IdentMaturity = 'young' | 'mature' | 'old' | 'unknown';
@@ -35,6 +40,29 @@ export interface IdentifyResponse {
   capCm: number | null;
   heightCm: number | null;
   maturity: IdentMaturity;
+  /** Odniesienie skali przy grzybie; `none` → bez wymiarów. */
+  scaleReference: IdentScaleRef;
+  /**
+   * Zdjęcie ekranu, wydruku albo zdjęcie zdjęcia, a nie grzyb przed aparatem. Wtedy werdykt `unclear` z powodem
+   * REPRODUCTION_REASON – bez znaleziska.
+   */
+  reproduction: boolean;
+}
+
+/**
+ * Odpowiedź Edge Function: znormalizowana odpowiedź modelu + podpisane rozpoznanie zapisane przez serwer
+ * (tabela recognitions, migracja 20261015100000_podpisane_rozpoznanie.sql).
+ */
+export interface IdentifyFunctionResponse extends IdentifyResponse {
+  /**
+   * Id rozpoznania do `find.submit` (submit_find bierze z niego gatunek, wymiary, gminę, czas i zdjęcie). null – nie da
+   * się z niego zapisać znaleziska (nie grzyb, niewyraźne, reprodukcja, gatunek spoza atlasu, pewność < 60%).
+   */
+  recognitionId: string | null;
+  /** Kapelusz zmierzony przez model przy odniesieniu skali (nie typowy rozmiar gatunku) – warunek walk o okaz. */
+  sizeMeasured: boolean;
+  /** Do kiedy serwer przyjmie znalezisko z tym rozpoznaniem (kolejka offline), ISO; null bez rozpoznania. */
+  expiresAt: string | null;
 }
 
 /** Skąd jest dodatkowe ujęcie skanu 3D: z boku (inna strona), z góry, nisko przy ziemi (spód kapelusza, trzon). */
@@ -55,8 +83,16 @@ export interface IdentifyRequestBody {
   views?: IdentExtraView[];
   /** Miesiąc 1–12 (sezon) – opcjonalnie. */
   month?: number;
-  /** Województwo (nazwa z listy VOIVODESHIPS) – opcjonalnie, nic dokładniejszego. */
+  /** Województwo (nazwa z listy VOIVODESHIPS) – opcjonalnie, dla modelu nic dokładniejszego. */
   voivodeship?: string;
+  /**
+   * Bieżąca pozycja (opcjonalnie, tylko razem lat i lon): serwer liczy z niej gminę znaleziska (`gmina_at`) – NIE trafia
+   * do modelu i nie jest zapisywana (w rozpoznaniu zostaje sama gmina).
+   */
+  lat?: number;
+  lon?: number;
+  /** Promień niepewności pozycji (m) – przy zbyt słabej dokładności serwer nie ustala gminy. */
+  accuracyM?: number;
 }
 
 /** Błąd Edge Function (status ≠ 200): kod + opis po polsku do pokazania graczowi. */
@@ -66,9 +102,15 @@ export interface IdentifyErrorBody {
     | 'not_authenticated'
     | 'bad_request'
     | 'rate_limited'
+    /** To samo zdjęcie (SHA-256) jest już w grze – u innego gracza albo zużyte (409). */
+    | 'image_reused'
+    /** Globalny dzienny limit rozpoznań gry (503). */
+    | 'service_busy'
     | 'not_configured'
     | 'model_unavailable'
     | 'model_error'
+    /** Nie udało się zapisać zdjęcia w Storage (503) – bez wywołania modelu. */
+    | 'storage_error'
     | 'internal';
   message?: string;
   /** Przy `rate_limited`: kiedy ponowienie ma sens (ISO). */
@@ -88,6 +130,7 @@ export const IDENT_VERDICTS: readonly IdentVerdict[] = ['mushroom', 'not_mushroo
 export const IDENT_PARTS: readonly IdentPart[] = ['cap', 'underside', 'stem', 'base'];
 export const IDENT_MATURITY: readonly IdentMaturity[] = ['young', 'mature', 'old', 'unknown'];
 export const IDENT_VIEWS: readonly IdentView[] = ['side', 'top', 'low'];
+export const IDENT_SCALE_REFS: readonly IdentScaleRef[] = ['none', 'hand', 'coin', 'card', 'knife', 'other'];
 export const MAX_CANDIDATES = 3;
 /** Najwięcej znaków base64 zdjęcia (~1,1 MB JPEG; zdjęcie z aparatu ma ~60–150 KB). */
 export const MAX_IMAGE_B64 = 1_500_000;
@@ -95,6 +138,8 @@ export const MAX_IMAGE_B64 = 1_500_000;
 export const MAX_EXTRA_VIEWS = 3;
 /** Najwięcej znaków base64 wszystkich zdjęć żądania razem (~3 MB JPEG). */
 export const MAX_TOTAL_B64 = 4_000_000;
+/** Najwięcej bajtów treści żądania (zdjęcia + JSON z zapasem) – Edge Function odrzuca większe (413) przed parsowaniem. */
+export const MAX_BODY_BYTES = 6_000_000;
 /** Najdłuższy powód odrzucenia pokazywany graczowi. */
 export const MAX_REASON = 200;
 
@@ -133,6 +178,12 @@ const MONTHS = [
   'grudzień',
 ];
 
+/** Powód przy zdjęciu ekranu / wydruku / zdjęciu zdjęcia (reproduction) – ten sam w SQL (recognition_finish). */
+export const REPRODUCTION_REASON = 'To wygląda na zdjęcie ekranu albo wydruku – zrób zdjęcie prawdziwego grzyba.';
+
+/** Ten sam obraz drugi raz (409 image_reused) – gdy serwer nie poda opisu. */
+export const IMAGE_REUSED_REASON = 'To zdjęcie jest już w grze – zrób własne zdjęcie grzyba.';
+
 /** Powody odrzucenia, gdy model zostawi `reason` pusty. */
 export const DEFAULT_REASON: Record<Exclude<IdentVerdict, 'mushroom'>, string> = {
   not_mushroom: 'Nie widzę tu grzyba – wyceluj aparat w owocnik i spróbuj jeszcze raz.',
@@ -148,11 +199,27 @@ export const DEFAULT_REASON: Record<Exclude<IdentVerdict, 'mushroom'>, string> =
  */
 export function buildIdentSchema(speciesIds: readonly string[]) {
   const nullableNumber = (description: string) => ({ anyOf: [{ type: 'number' }, { type: 'null' }], description });
+  // Kolejność pól = kolejność generowania: najpierw ocena „reprodukcji”, potem werdykt; odniesienie skali przed wymiarami.
   return {
     type: 'object',
     additionalProperties: false,
-    required: ['verdict', 'reason', 'candidates', 'visibleParts', 'count', 'capCm', 'heightCm', 'maturity'],
+    required: [
+      'reproduction',
+      'verdict',
+      'reason',
+      'candidates',
+      'visibleParts',
+      'count',
+      'scaleReference',
+      'capCm',
+      'heightCm',
+      'maturity',
+    ],
     properties: {
+      reproduction: {
+        type: 'boolean',
+        description: 'true, gdy to zdjęcie ekranu, wydruku albo zdjęcie zdjęcia, a nie prawdziwy grzyb przed aparatem.',
+      },
       verdict: { type: 'string', enum: [...IDENT_VERDICTS] },
       reason: { type: 'string', description: 'Krótkie zdanie po polsku dla gracza; przy "mushroom" pusty napis.' },
       candidates: {
@@ -170,8 +237,13 @@ export function buildIdentSchema(speciesIds: readonly string[]) {
       },
       visibleParts: { type: 'array', items: { type: 'string', enum: [...IDENT_PARTS] } },
       count: { type: 'integer', description: 'Liczba owocników najlepszego kandydata na zdjęciu; 0, gdy to nie grzyb.' },
-      capCm: nullableNumber('Średnica kapelusza w cm – tylko przy odniesieniu skali na zdjęciu, inaczej null.'),
-      heightCm: nullableNumber('Wysokość owocnika w cm – tylko przy odniesieniu skali na zdjęciu, inaczej null.'),
+      scaleReference: {
+        type: 'string',
+        enum: [...IDENT_SCALE_REFS],
+        description: 'Przedmiot o znanym rozmiarze tuż przy grzybie (dłoń, moneta, karta, nóż, inny); "none" – brak.',
+      },
+      capCm: nullableNumber('Średnica kapelusza w cm – tylko gdy scaleReference nie jest "none", inaczej null.'),
+      heightCm: nullableNumber('Wysokość owocnika w cm – tylko gdy scaleReference nie jest "none", inaczej null.'),
       maturity: { type: 'string', enum: [...IDENT_MATURITY] },
     },
   } as const;
@@ -216,10 +288,16 @@ export function buildSystemPrompt(catalog: readonly IdentCatalogEntry[]): string
     'verdict:',
     '- "mushroom" – na zdjęciu wyraźnie widać prawdziwy owocnik grzyba w naturze lub świeżo zebrany.',
     '- "not_mushroom" – na zdjęciu nie ma grzyba (liść, kamień, szyszka, kora, ściana, zwierzę, roślina, przedmiot),',
-    '  albo jest tylko obraz grzyba: zdjęcie ekranu lub wydruku, rysunek, zabawka, dekoracja; także grzyb pokrojony,',
-    '  ugotowany albo w sklepowym opakowaniu (gra liczy tylko grzyby znalezione w naturze).',
+    '  albo to nie jest prawdziwy owocnik: rysunek, zabawka, dekoracja; także grzyb pokrojony, ugotowany albo',
+    '  w sklepowym opakowaniu (gra liczy tylko grzyby znalezione w naturze).',
     '- "unclear" – nie da się ocenić, czy to grzyb: zdjęcie zbyt ciemne, prześwietlone, rozmazane, obiekt za daleko,',
     '  za mały albo w większości zasłonięty.',
+    'reproduction: true, gdy przed aparatem nie ma prawdziwego owocnika, tylko jego obraz: zdjęcie ekranu (telefonu,',
+    'monitora, telewizora), wydruk, plakat, zdjęcie w książce lub gazecie, zdjęcie zdjęcia. Zdradzają to m.in. piksele',
+    'i mora, ramka albo krawędź ekranu, odblaski szyby, płaski papier, brak głębi. Wtedy verdict "unclear". W razie',
+    'wątpliwości – false (gracz fotografuje grzyba w lesie). Rysunek, zabawka czy dekoracja to "not_mushroom"',
+    'z reproduction false.',
+    '',
     'Jeśli to na pewno grzyb, ale cech nie widać dość dobrze, zwróć "mushroom" z niską pewnością. Jeśli to grzyb,',
     'który nie pasuje do żadnego gatunku z katalogu, zwróć "mushroom" z pustym candidates, a w reason napisz, że',
     'tego gatunku nie ma w atlasie gry.',
@@ -236,8 +314,11 @@ export function buildSystemPrompt(catalog: readonly IdentCatalogEntry[]): string
     'Puste, gdy to nie grzyb.',
     'count: liczba owocników najlepszego kandydata na zdjęciu (ważne przy gatunkach rosnących w kępkach); 1 dla',
     'pojedynczego grzyba; 0, gdy to nie grzyb.',
-    'capCm, heightCm: szacunek w centymetrach TYLKO wtedy, gdy na zdjęciu jest odniesienie skali (dłoń, palce, nóż,',
-    'moneta, telefon, but); bez takiego odniesienia – null. Nie szacuj rozmiaru z samego kadru.',
+    'scaleReference: przedmiot o znanym rozmiarze leżący tuż przy grzybie – "hand" (dłoń, palce), "coin" (moneta),',
+    '"card" (karta płatnicza albo dokument w formacie karty), "knife" (nóż, scyzoryk), "other" (inny: telefon,',
+    'zapalniczka, linijka, but); "none" – nic takiego nie widać.',
+    'capCm, heightCm: szacunek w centymetrach TYLKO wtedy, gdy scaleReference nie jest "none"; inaczej null. Nie szacuj',
+    'rozmiaru z samego kadru.',
     'maturity: "young" (młody, kapelusz zamknięty), "mature" (dojrzały), "old" (stary, rozpadający się, mocno',
     'robaczywy), "unknown" (nie da się ocenić albo to nie grzyb).',
     '',
@@ -288,7 +369,10 @@ function cleanJpeg(raw: unknown): { image: string } | { message: string } {
   if (typeof raw !== 'string' || !raw) return { message: 'Brak zdjęcia' };
   const image = raw.replace(/^data:image\/jpeg;base64,/, '').replace(/\s+/g, '');
   if (image.length > MAX_IMAGE_B64) return { message: 'Zdjęcie jest za duże' };
-  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(image) || !image.startsWith('/9j/')) return { message: 'Zdjęcie musi być plikiem JPEG' };
+  // Długość podzielna przez 4 – inaczej atob w Edge Function rzuca wyjątek.
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(image) || image.length % 4 !== 0 || !image.startsWith('/9j/')) {
+    return { message: 'Zdjęcie musi być plikiem JPEG' };
+  }
   return { image };
 }
 
@@ -319,6 +403,12 @@ export function parseRequestBody(raw: unknown): { ok: true; body: IdentifyReques
   }
   if (isMonth(r.month)) body.month = r.month;
   if (typeof r.voivodeship === 'string' && VOIVODESHIPS.includes(r.voivodeship)) body.voivodeship = r.voivodeship;
+  // Pozycja – tylko para współrzędnych w zakresie (do gminy na serwerze; model jej nie dostaje).
+  if (finite(r.lat) && finite(r.lon) && Math.abs(r.lat) <= 90 && Math.abs(r.lon) <= 180) {
+    body.lat = r.lat;
+    body.lon = r.lon;
+    if (finite(r.accuracyM) && r.accuracyM >= 0) body.accuracyM = r.accuracyM;
+  }
   return { ok: true, body };
 }
 
@@ -346,7 +436,9 @@ function size(v: unknown, max: number): number | null {
  * Odpowiedź modelu (albo Edge Function – w aplikacji) → IdentifyResponse. null = nie da się jej użyć (zły werdykt,
  * nie obiekt). Nieznane gatunki (`isKnownId`) i części odpadają, pewność 0..1, kandydaci bez powtórzeń, malejąco,
  * najwyżej 3; werdykt ≠ `mushroom` → bez kandydatów, części i wymiarów, z powodem (domyślnym, gdy pusty).
- * Wymiary: kapelusz ≤ 80 cm, wysokość ≤ 100 cm (jak walidacja serwera), sztuk 1–200.
+ * Reprodukcja (zdjęcie ekranu / wydruku) → `unclear` z REPRODUCTION_REASON. Wymiary tylko z odniesieniem skali
+ * (`scaleReference` ≠ none; odpowiedź bez tego pola – starszy serwer: skala jest, gdy są wymiary): kapelusz ≤ 80 cm,
+ * wysokość ≤ 100 cm (jak walidacja serwera), sztuk 1–200.
  */
 export function normalizeIdent(raw: unknown, isKnownId: (id: string) => boolean): IdentifyResponse | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
@@ -354,16 +446,19 @@ export function normalizeIdent(raw: unknown, isKnownId: (id: string) => boolean)
   const verdict = IDENT_VERDICTS.find((v) => v === r.verdict);
   if (!verdict) return null;
   const reason = cleanReason(r.reason);
-  if (verdict !== 'mushroom') {
+  const reproduction = r.reproduction === true;
+  if (verdict !== 'mushroom' || reproduction) {
     return {
-      verdict,
-      reason: reason || DEFAULT_REASON[verdict],
+      verdict: reproduction ? 'unclear' : verdict,
+      reason: reproduction ? REPRODUCTION_REASON : reason || DEFAULT_REASON[verdict as Exclude<IdentVerdict, 'mushroom'>],
       candidates: [],
       visibleParts: [],
       count: 0,
       capCm: null,
       heightCm: null,
       maturity: 'unknown',
+      scaleReference: 'none',
+      reproduction,
     };
   }
 
@@ -382,14 +477,45 @@ export function normalizeIdent(raw: unknown, isKnownId: (id: string) => boolean)
 
   const parts = new Set(Array.isArray(r.visibleParts) ? r.visibleParts : []);
   const count = finite(r.count) ? clamp(Math.round(r.count), 1, 200) : 1;
+  const scaleReference =
+    IDENT_SCALE_REFS.find((x) => x === r.scaleReference) ?? (finite(r.capCm) || finite(r.heightCm) ? 'other' : 'none');
+  const scaled = scaleReference !== 'none';
   return {
     verdict,
     reason,
     candidates,
     visibleParts: IDENT_PARTS.filter((p) => parts.has(p)),
     count,
-    capCm: size(r.capCm, 80),
-    heightCm: size(r.heightCm, 100),
+    capCm: scaled ? size(r.capCm, 80) : null,
+    heightCm: scaled ? size(r.heightCm, 100) : null,
     maturity: IDENT_MATURITY.find((m) => m === r.maturity) ?? 'unknown',
+    scaleReference,
+    reproduction: false,
+  };
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Część odpowiedzi Edge Function od serwera (podpisane rozpoznanie) – w aplikacji, po normalizeIdent: id tylko przy
+ * grzybie z gatunkiem (nie reprodukcja) i tylko, gdy najlepszy kandydat serwera (surowy `candidates[0]`) jest tym samym
+ * gatunkiem co najlepszy kandydat znany aplikacji – inaczej telefon pokazałby inny gatunek niż zapisał serwer.
+ * `sizeMeasured` tylko z wymiarami przy skali, `expiresAt` tylko z id. Starszy serwer (bez pól) → bez rozpoznania.
+ */
+export function normalizeRecognition(
+  raw: unknown,
+  ident: IdentifyResponse,
+): Pick<IdentifyFunctionResponse, 'recognitionId' | 'sizeMeasured' | 'expiresAt'> {
+  const r = (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
+  const rawTop = Array.isArray(r.candidates) ? (r.candidates[0] as { speciesId?: unknown } | undefined)?.speciesId : undefined;
+  const usable =
+    ident.verdict === 'mushroom' && !ident.reproduction && ident.candidates.length > 0 && rawTop === ident.candidates[0].speciesId;
+  const recognitionId = usable && typeof r.recognitionId === 'string' && UUID_RE.test(r.recognitionId) ? r.recognitionId : null;
+  const expiresAt =
+    recognitionId && typeof r.expiresAt === 'string' && Number.isFinite(Date.parse(r.expiresAt)) ? r.expiresAt : null;
+  return {
+    recognitionId,
+    sizeMeasured: r.sizeMeasured === true && !ident.reproduction && ident.scaleReference !== 'none' && ident.capCm != null,
+    expiresAt,
   };
 }

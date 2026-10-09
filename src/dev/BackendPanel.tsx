@@ -9,6 +9,7 @@ import { useServices } from '@/services';
 import { connect } from '@/services/supabase';
 import { getAccountInfo, type AccountInfo } from '@/services/supabase/account';
 import { BACKEND, supabase, SUPABASE_URL } from '@/services/supabase/client';
+import { devFinalizeRivalry, devRivalryAct, devSeedRivalry } from '@/services/supabase/duels';
 import { devBotsAct, devSeedSocial } from '@/services/supabase/feed';
 import { DEV_ACTIVITY_WEEKS, devRefreshRankings, devSeedActivity } from '@/services/supabase/stats';
 import { useBackendStatus } from '@/services/supabase/status';
@@ -359,6 +360,24 @@ export function BackendPanel() {
             Ciche boty zbierają grzyby w gminach województwa (i zawsze w podlaskim) – do {DEV_ACTIVITY_WEEKS} tyg. wstecz,
             już po 24 h, więc liczą się w rankingach, rekordach i porównaniu okazów; serwer od razu przelicza rankingi.
             Twoje wyprawy wchodzą do rankingów po 24 h (ranking odświeża się sam najwyżej co 15 min).
+          </Txt>
+
+          <Label>Rywalizacja (walki o okaz, pojedynki, ranking grzybiarzy)</Label>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+            <Chip disabled={busy} onPress={social('Rywale', () => devSeedRivalry(voivodeship), pollNow)}>
+              Dodaj rywali
+            </Chip>
+            <Chip disabled={busy} onPress={social('Rywale działają', devRivalryAct, pollNow)}>
+              Rywale działają
+            </Chip>
+            <Chip disabled={busy} onPress={social('Rozstrzygnięcie', devFinalizeRivalry, pollNow)}>
+              Rozstrzygnij teraz
+            </Chip>
+          </View>
+          <Txt f="n6" size={12} color={colors.muted}>
+            „Dodaj rywali” – boty ze zmierzonymi okazami tego tygodnia (widoczne od razu), boty-znajomi, wyzwanie bota do Ciebie
+            i trwający pojedynek. „Rywale działają” – boty przyjmują Twoje wyzwania, dokładają okazy w pojedynkach i wyprzedzają
+            Cię w walce. „Rozstrzygnij teraz” – zakończone tygodnie walk i pojedynki bez czekania (nagrody, trofea, powiadomienia).
           </Txt>
           {result ? (
             <Txt f="n7" size={12} color={result.ok ? colors.primaryText : colors.danger} selectable>

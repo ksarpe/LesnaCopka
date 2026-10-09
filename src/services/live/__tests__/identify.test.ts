@@ -1,7 +1,8 @@
 /**
  * IdentifyService (src/services/live/identify.ts) z atrapą Supabase – bez prawdziwych wywołań Claude:
- * treść żądania (base64, miesiąc, województwo), mapowanie odpowiedzi, błędy (limit, serwer, sieć, czas, przerwanie),
- * brak zdjęcia / serwera i wymuszony wynik z panelu dev (bez wywołania funkcji).
+ * treść żądania (base64, miesiąc, województwo, pozycja do gminy), mapowanie odpowiedzi (podpisane rozpoznanie),
+ * błędy (limit, serwer, sieć, czas, przerwanie, to samo zdjęcie w grze), brak zdjęcia / serwera i wymuszony wynik
+ * z panelu dev (bez wywołania funkcji; w mockach „z odniesieniem skali” – symulacja podpisanego rozpoznania).
  */
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { FunctionsFetchError, FunctionsHttpError, FunctionsRelayError } from '@supabase/supabase-js';
@@ -17,6 +18,8 @@ type Invoke = (name: string, opts: { body: Record<string, unknown>; signal?: Abo
 /** Atrapa serwera (prefiks `mock` – dozwolony w fabrykach jest.mock). */
 const mockServer = {
   configured: true,
+  /** Gra na backendzie Supabase (false = tryb mock). */
+  enabled: false,
   invoke: jest.fn<Invoke>(),
   ensureSession: jest.fn(async (_client?: unknown) => 'uid-1'),
   bytes: new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]) as Uint8Array | null,
@@ -24,6 +27,9 @@ const mockServer = {
 
 jest.mock('../../supabase/client', () => ({
   supabaseConfigured: true,
+  get supabaseEnabled() {
+    return mockServer.enabled;
+  },
   identifyClient: () => (mockServer.configured ? { functions: { invoke: (...a: Parameters<Invoke>) => mockServer.invoke(...a) } } : null),
 }));
 jest.mock('../../supabase/session', () => ({ ensureSession: (c: unknown) => mockServer.ensureSession(c) }));
@@ -33,6 +39,8 @@ jest.mock('../photoBytes', () => ({ readImageBytes: async () => mockServer.bytes
 import { liveIdentify } from '../identify';
 // eslint-disable-next-line import/first
 import { useSimStore } from '@/store/useSimStore';
+// eslint-disable-next-line import/first
+import { useTrackStore } from '@/store/useTrackStore';
 // eslint-disable-next-line import/first
 import { NO_SCAN_OVERRIDE } from '@/utils/identify';
 
@@ -47,7 +55,10 @@ const OK = {
   capCm: null,
   heightCm: null,
   maturity: 'mature',
+  scaleReference: 'none',
+  reproduction: false,
 };
+const RID = '6f1c2b0a-3d4e-4f50-8a6b-7c8d9e0f1a2b';
 
 /** Odpowiedź HTTP z błędem (FunctionsHttpError.context = Response). */
 const httpError = (status: number, body: unknown) =>
@@ -65,6 +76,8 @@ async function failure(p: Promise<unknown>): Promise<ServiceError> {
 
 beforeEach(() => {
   mockServer.configured = true;
+  mockServer.enabled = false;
+  useTrackStore.getState().clear();
   mockServer.bytes = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
   mockServer.invoke.mockReset();
   mockServer.ensureSession.mockClear();
@@ -121,6 +134,104 @@ describe('liveIdentify – prawdziwe rozpoznanie (Edge Function identify)', () =
     expect(await liveIdentify.identify(SCAN)).toEqual({ kind: 'not_mushroom', reason: 'Nie widzę tu grzyba – to wygląda na liść.' });
     // Bez kontekstu – bieżący miesiąc, bez województwa.
     expect(mockServer.invoke.mock.calls[0][1].body).toEqual({ image: '/9j/4AECAw==', month: new Date().getMonth() + 1 });
+  });
+
+  it('podpisane rozpoznanie: recognitionId, zmierzony kapelusz i termin z odpowiedzi serwera trafiają do wyniku', async () => {
+    mockServer.invoke.mockResolvedValue({
+      data: { ...OK, scaleReference: 'hand', capCm: 15.5, heightCm: 17, recognitionId: RID, sizeMeasured: true, expiresAt: '2026-10-12T10:00:00.000Z' },
+      error: null,
+    });
+    const out = await liveIdentify.identify(SCAN);
+    expect(out.kind === 'mushroom' && out.identification).toMatchObject({
+      speciesId: 'borowik-szlachetny',
+      recognitionId: RID,
+      sizeMeasured: true,
+      reproduction: false,
+      expiresAt: '2026-10-12T10:00:00.000Z',
+    });
+    // Starszy serwer (bez pól) – wynik niezweryfikowany.
+    mockServer.invoke.mockResolvedValue({ data: OK, error: null });
+    const old = await liveIdentify.identify(SCAN);
+    expect(old.kind === 'mushroom' && old.identification.recognitionId).toBeUndefined();
+  });
+
+  it('pozycja do gminy (serwer): z kontekstu (≤ 15 min, ~1 m), bez niej – ostatni punkt śladu wyprawy; starsza – bez pól', async () => {
+    mockServer.invoke.mockResolvedValue({ data: OK, error: null });
+    const now = new Date().toISOString();
+    await liveIdentify.identify(SCAN, { context: { month: 10, position: { lat: 53.2512345, lon: 23.3498765, accuracyM: 12.4, at: now } } });
+    expect(mockServer.invoke.mock.calls[0][1].body).toMatchObject({ lat: 53.25123, lon: 23.34988, accuracyM: 12 });
+
+    const old = new Date(Date.now() - 20 * 60_000).toISOString();
+    await liveIdentify.identify(SCAN, { context: { month: 10, position: { lat: 53.25, lon: 23.35, accuracyM: 10, at: old } } });
+    expect(mockServer.invoke.mock.calls[1][1].body).not.toHaveProperty('lat');
+
+    useTrackStore.getState().begin('trip-1', 'device');
+    useTrackStore.getState().add('trip-1', [{ lat: 52.1, lon: 21.0, accuracyM: 8, t: Date.now() - 60_000 }]);
+    await liveIdentify.identify(SCAN, { context: { month: 10 } });
+    expect(mockServer.invoke.mock.calls[2][1].body).toMatchObject({ lat: 52.1, lon: 21, accuracyM: 8 });
+  });
+
+  it('to samo zdjęcie już w grze (409 image_reused) → odrzucenie z powodem serwera (nowe zdjęcie), nie błąd', async () => {
+    mockServer.invoke.mockResolvedValue({
+      data: null,
+      error: httpError(409, { error: 'image_reused', message: 'To zdjęcie jest już w grze – zrób własne zdjęcie grzyba.' }),
+    });
+    expect(await liveIdentify.identify(SCAN)).toEqual({ kind: 'unclear', reason: 'To zdjęcie jest już w grze – zrób własne zdjęcie grzyba.' });
+    mockServer.invoke.mockResolvedValue({
+      data: null,
+      error: httpError(503, { error: 'service_busy', message: 'Rozpoznawanie zdjęć jest dziś przeciążone – spróbuj ponownie jutro.' }),
+    });
+    const e = await failure(liveIdentify.identify(SCAN));
+    // Globalny limit dobowy – jak limit (ekran „Limit rozpoznań”), z opisem „spróbuj później / jutro”.
+    expect([e.code, e.message]).toEqual(['RATE_LIMITED', 'Rozpoznawanie zdjęć jest dziś przeciążone – spróbuj ponownie jutro.']);
+    mockServer.invoke.mockResolvedValue({ data: null, error: httpError(503, { error: 'service_busy' }) });
+    const e2 = await failure(liveIdentify.identify(SCAN));
+    expect([e2.code, e2.message]).toEqual(['RATE_LIMITED', 'Dzienny limit rozpoznań w grze został wyczerpany – spróbuj później albo jutro.']);
+  });
+
+  it('tryb Supabase bez narzędzi dev: grzyb bez podpisanego rozpoznania (starsza funkcja, inny gatunek niż na serwerze) → błąd, nie znalezisko', async () => {
+    // Wydanie (DEV_TOOLS = false) – osobna instancja modułu z podmienioną flagą.
+    let release!: typeof import('../identify');
+    jest.isolateModules(() => {
+      jest.doMock('@/config', () => ({ ...(jest.requireActual('@/config') as object), DEV_TOOLS: false }));
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      release = require('../identify') as typeof import('../identify');
+    });
+    const liveIdentify = release.liveIdentify;
+    // ServiceError z osobnej instancji modułów – bez instanceof.
+    const failure = async (p: Promise<unknown>) => {
+      try {
+        await p;
+      } catch (e) {
+        return e as { code: string; message: string };
+      }
+      throw new Error('oczekiwano błędu');
+    };
+    mockServer.enabled = true;
+    mockServer.invoke.mockResolvedValue({ data: OK, error: null });
+    const e = await failure(liveIdentify.identify(SCAN));
+    expect([e.code, e.message]).toEqual(['SERVER', 'Serwer nie potwierdził rozpoznania – spróbuj ponownie.']);
+    // Gatunek z serwera nieznany telefonowi – telefon pokazałby innego grzyba niż zapisał serwer.
+    mockServer.invoke.mockResolvedValue({
+      data: {
+        ...OK,
+        candidates: [{ speciesId: 'nowy-gatunek', confidence: 0.95 }, { speciesId: 'borowik-szlachetny', confidence: 0.9 }],
+        recognitionId: RID,
+        expiresAt: '2026-10-22T10:00:00.000Z',
+      },
+      error: null,
+    });
+    expect((await failure(liveIdentify.identify(SCAN))).message).toBe('Serwer nie potwierdził rozpoznania – spróbuj ponownie.');
+    // Z rozpoznaniem – grzyb; niska pewność (bez rozpoznania z definicji) i odrzucenia – bez zmian.
+    mockServer.invoke.mockResolvedValue({ data: { ...OK, recognitionId: RID, expiresAt: '2026-10-22T10:00:00.000Z' }, error: null });
+    const ok = await liveIdentify.identify(SCAN);
+    expect(ok.kind === 'mushroom' && ok.identification.recognitionId).toBe(RID);
+    mockServer.invoke.mockResolvedValue({ data: { ...OK, candidates: [{ speciesId: 'borowik-szlachetny', confidence: 0.4 }] }, error: null });
+    expect((await liveIdentify.identify(SCAN)).kind).toBe('mushroom');
+    // Tryb mock (gra bez serwera) – wynik bez rozpoznania przechodzi (znalezisko niezweryfikowane).
+    mockServer.enabled = false;
+    mockServer.invoke.mockResolvedValue({ data: OK, error: null });
+    expect((await liveIdentify.identify(SCAN)).kind).toBe('mushroom');
   });
 
   it('niezrozumiała odpowiedź → SERVER', async () => {
@@ -203,5 +314,21 @@ describe('liveIdentify – bez zdjęcia, bez serwera, wymuszony wynik dev', () =
     const out = await p2;
     expect(out.kind === 'mushroom' && out.identification.speciesId).toBe('czubajka-kania');
     expect(mockServer.invoke).not.toHaveBeenCalled();
+  });
+
+  it('wymuszony wynik „z odniesieniem skali”: tryb mock – symulacja podpisanego rozpoznania; tryb Supabase – niezweryfikowany', async () => {
+    jest.useFakeTimers();
+    useSimStore.setState({ scan: { force: 'species', speciesId: 'borowik-szlachetny', xxl: false, lowConfidence: false, scaleRef: true } });
+    const p = liveIdentify.identify({ ...SCAN, photoUri: undefined });
+    await jest.advanceTimersByTimeAsync(800);
+    const mock = await p;
+    expect(mock.kind === 'mushroom' && mock.identification).toMatchObject({ simulated: true, sizeMeasured: true });
+
+    mockServer.enabled = true;
+    const p2 = liveIdentify.identify({ ...SCAN, photoUri: undefined });
+    await jest.advanceTimersByTimeAsync(800);
+    const supa = await p2;
+    expect(supa.kind === 'mushroom' && supa.identification.simulated).toBeUndefined();
+    expect(supa.kind === 'mushroom' && supa.identification.recognitionId).toBeUndefined();
   });
 });

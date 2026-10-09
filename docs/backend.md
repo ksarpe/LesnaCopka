@@ -204,8 +204,9 @@ Migracje: `20261006100000_achievements.sql` (atlas) + `20261013110000_progressio
   nagrodzone, bez XP; seed uruchamia ją dla istniejących profili, więc wdrożenie nie zasypie graczy XP.
 - `get_game_state().counters` = `player_metrics` – aplikacja przyjmuje liczniki z serwera (cała historia; okno 30 wypraw
   dawało tylko dolne oszacowanie), a postęp osiągnięć liczy z nich lokalnie jak w trybie mock.
-- RLS: słownik publiczny; zdobyte stopnie (`user_achievements`) widzą zalogowani jak odznaki; postęp tylko własny przez
-  `achievement_progress()`. Zapis wyłącznie przez funkcje serwera; `player_metrics` / `sync_achievements` wewnętrzne.
+- RLS: słownik publiczny; zdobyte stopnie (`user_achievements`) i odznaki – wprost z tabeli tylko własne (od
+  [uszczelnień](#uszczelnienia-anty-cheatu)); postęp tylko własny przez `achievement_progress()`. Zapis wyłącznie przez
+  funkcje serwera; `player_metrics` / `sync_achievements` wewnętrzne.
 
 Nowe osiągnięcie: dopisz je w `ACHIEVEMENTS` w aplikacji i `npm run db:seed`. Nowa metryka licznika: pole
 w `PlayerCounters` (aplikacja), wartość w enumie `achievement_metric` i klucz w `player_metrics()` (nowa migracja).
@@ -232,8 +233,11 @@ w `PlayerCounters` (aplikacja), wartość w enumie `achievement_metric` i klucz 
 
 ## Prywatność (wymóg produktowy)
 
-- Surowy ślad GPS (`trip_tracks`) i punkt znaleziska (`find_locations`) – RLS: tylko właściciel.
-- Publicznie istnieje wyłącznie `trips.route_public`: trasa uproszczona i przyciągnięta do siatki ~200 m.
+- Surowy ślad GPS (`trip_tracks`) i punkt znaleziska (`find_locations`) – RLS: tylko właściciel. Od
+  [uszczelnień](#uszczelnienia-anty-cheatu) `finish_trip` śladu z telefonu nie zapisuje, a `publish_trip` nie publikuje trasy
+  (`route: null`, `route_precision = 'gmina'`) – `trips.route_public` zostaje tylko w danych sprzed zmiany (eksport RODO).
+- Bezpośredni odczyt tabel `profiles`, `posts`, `user_badges`, `user_achievements` – tylko własne wiersze; cudze dane wyłącznie
+  przez RPC (blokady, `deleted_at`, ukrycie w wyszukiwarce).
 - `finds.visible_from = koniec wyprawy + 24 h` – dopiero wtedy znalezisko liczy się w statystykach gminy
   (`get_gmina_stats`, `get_species_percentile`, rekordy w `get_ranking`); rankingi biorą XP starsze niż 24 h.
   Wyjątek: `userContribution` w `get_ranking` – własne XP gracza bez opóźnienia.
@@ -269,7 +273,7 @@ w `PlayerCounters` (aplikacja), wartość w enumie `achievement_metric` i klucz 
 | `get_ranking(period, voivodeship?)` | 06 – ranking i mapa województwa |
 | `get_gmina_species_evidence(gmina_id, days?)` · `get_species_map(species_id, voivodeship?, period?)` | 07 – „Szanse na wyprawie”, Start – „Najbardziej prawdopodobne tu”, karta gatunku – „Sezon i występowanie” (szczegóły: [Etap 8](#etap-8--szanse-na-gatunki-i-mapa-gatunku)) |
 | `dev_seed_activity(voivodeship?, weeks?)` · `dev_refresh_rankings()` | panel `/dev` – ciche boty z historią znalezisk (tylko lokalnie) |
-| `species_percentile` · `gmina_stats` · `gmina_records` · `gmina_species_share` | stare (tabelaryczne) – zostają dla zgodności, aplikacja używa RPC etapu 4 |
+| ~~`species_percentile` · `gmina_stats` · `gmina_records` · `gmina_species_share`~~ | usunięte w [uszczelnieniach](#uszczelnienia-anty-cheatu) – aplikacja używa RPC etapu 4 |
 | `accept_terms(p_version)` · `complete_onboarding()` | onboarding – akceptacja regulaminu (szczegóły: [Etap 6](#etap-6--konto-e-mail-kod-otp-regulamin-blokowanie-eksport-i-usunięcie)) |
 | `block_user` · `unblock_user` · `get_blocked_users` | „Zablokuj” w mini profilu, Ustawienia → „Zablokowani” |
 | `export_my_data()` · `prepare_account_deletion()` · `delete_my_account()` | Ustawienia → „Pobierz moje dane”, „Usuń konto” (RODO) |
@@ -355,6 +359,7 @@ daty `YYYY-MM-DD`, tablice nigdy `null`:
 **Narzędzia deweloperskie** (panel `/dev`) działają tylko, gdy `app_config.dev_tools = true` – inaczej `P0001 dev_tools_disabled`.
 `app_config` nie ma polityk ani uprawnień dla klientów; flagę ustawia wyłącznie seed lokalny (`npm run db:seed`).
 **W chmurze `dev_tools` nie może być `true`** (patrz [Wdrożenie](#wdrożenie)); sprawdzenie: `select public.dev_tools_enabled()`.
+Od [uszczelnień](#uszczelnienia-anty-cheatu) migracje nie nadają klientom EXECUTE na `dev_*` – nadaje je tylko seed lokalny.
 
 - `dev_import_state(p_state jsonb) → jsonb` – przenosi lokalny stan aplikacji na serwer: kasuje dane gry wywołującego
   (wyprawy, znaleziska ze skanami i rozpoznaniami, księgę XP, atlas, odznaki, osiągnięcia, zadania, wyzwania, wpisy) i wgrywa
@@ -480,7 +485,7 @@ gracza) – działanie jak wcześniej, ale wsadowe wstawianie (generator botów)
 |---|---|
 | `get_ranking(p_period ranking_period, p_voivodeship text = null) → jsonb` | `null` → województwo gminy domowej gracza, bez gminy → `podlaskie`; nazwa bez wielkości liter; nieznane → `P0001 invalid_voivodeship`. Wiersze: tylko gminy województwa z punktami w okresie, od 1. miejsca (bez limitu – województwo ma ≤ 314 gmin). |
 | `get_gmina_stats(p_gmina_id text) → jsonb` | Ekran gminy w jednym wywołaniu; nieznana gmina → `P0002 gmina_not_found`. |
-| `accept_challenge(p_challenge_id uuid) → void` | Idempotentne (już przyjęte → nic, także po końcu). Nieznane → `P0002 challenge_not_found`; nieaktywne / zakończone / nierozpoczęte → `P0001 challenge_inactive`. Ukończenie bez zmian: `claim_find` znaleziska tego gatunku w tej gminie przed końcem (`completedChallengeIds`, XP `challenge`, odznaka). |
+| `accept_challenge(p_challenge_id uuid) → void` | Idempotentne (już przyjęte → nic, także po końcu). Nieznane → `P0002 challenge_not_found`; nieaktywne / zakończone / nierozpoczęte → `P0001 challenge_inactive`. Ukończenie bez zmian: `claim_find` znaleziska tego gatunku w tej gminie przed końcem (`completedChallengeIds`, XP `challenge`, odznaka). Od [uszczelnień](#uszczelnienia-anty-cheatu): tylko gmina domowa / obserwowana (`P0001 challenge_not_allowed`), najwyżej 3 aktywne (`P0001 challenge_limit`), zalicza tylko zweryfikowane znalezisko po przyjęciu, 2 ukończenia na dobę. |
 | `follow_gmina(p_gmina_id text, p_follow boolean) → void` | Idempotentne; nieznana gmina przy obserwowaniu → `P0002 gmina_not_found`, `p_follow = null` → `P0001 invalid_follow`. |
 | `get_species_percentile(p_species_id text, p_gmina_id text, p_weight_g int) → jsonb` | Nieznany gatunek / gmina → `P0002 species_not_found` / `gmina_not_found`. |
 
@@ -701,10 +706,10 @@ pokazywane wprost (`user_blocks` – RLS: tylko moje blokady); B dowie się poś
 | `get_user` / `get_user_by_handle` | A widzi B z `"blocked": true`; B dostaje `P0002 user_not_found` / `null` (jak nieistniejący) – chyba że B też zablokował A |
 | `send_friend_request` | `P0001 blocked` w obie strony |
 | znajomi | `block_user` usuwa znajomość i zaproszenia w obie strony; nowa relacja nie powstanie (wyzwalacz pomija także bezpośredni INSERT / UPDATE `friendships`); odblokowanie jej nie przywraca |
-| RLS `posts`, `post_comments`, `post_reactions` | bezpośredni `select` (poza RPC) też bez treści drugiej strony (`blocked_with_me()`) |
+| RLS `posts`, `post_comments`, `post_reactions` | bezpośredni `select` (poza RPC) też bez treści drugiej strony; od [uszczelnień](#uszczelnienia-anty-cheatu) wprost tylko własne wpisy oraz komentarze / reakcje własne i pod własnymi wpisami (`private.blocked_with_me()` – schemat poza PostgREST) |
 
-Bez zmian: licznik reakcji (reakcje są anonimowe), rankingi i rekordy gmin (agregaty; autor rekordu to nazwa), profil w tabeli
-`profiles` (publiczne pola jak dotąd).
+Bez zmian: licznik reakcji (reakcje są anonimowe), rankingi i rekordy gmin (agregaty; autor rekordu to nazwa). Tabela `profiles` –
+od [uszczelnień](#uszczelnienia-anty-cheatu) wprost tylko własny wiersz (cudze profile przez RPC z blokadami).
 
 | RPC | Opis |
 |---|---|
@@ -833,8 +838,8 @@ Odrzuconego wywołania nie da się zapisać w tabeli (wyjątek wycofuje transakc
 | Po zamknięciu wyprawy: uznany dystans / `[started_at, ended_at]` > 12 km/h (np. postęp z kolejki, a koniec wcześniejszy) | bez zmian – uznanego nie cofamy | `trip_speed` (2, `details.phase = 'finish'`) |
 | `start_trip`: `started_at` starszy niż 24 h (kolejka offline) | – | `trip_backdated` (1) |
 | `submit_find`: rzadkość niższa niż gatunku | → rzadkość gatunku | – |
-| `submit_find`: rzadkość ≥ 2 stopnie powyżej gatunku (np. pospolity jako legendarny) | → gatunek + 1 stopień | `rarity_clamped` (2) |
-| `submit_find`: `xxl` przy kępce, bez wagi albo waga < 1,25 × typowej (jak `isXxl` w aplikacji) | `xxl = false` | `xxl_corrected` (1) |
+| `submit_find`: rzadkość wyższa niż gatunku (od [podpisanego rozpoznania](#podpisane-rozpoznanie) – każda; wcześniej ≥ 2 stopnie, z „+ 1” bez flagi) | → rzadkość gatunku | `rarity_clamped` (2) |
+| `submit_find`: `xxl` z telefonu, którego serwer nie potwierdza (od podpisanego rozpoznania waga i XXL liczone na serwerze z kapelusza – `find_dimensions`) | `xxl` z serwera | `xxl_corrected` (1) |
 | `submit_find`: waga (kępki – na sztukę) > 3 × typowa albo kapelusz > 2,5 × typowy | – | `find_size` (2) |
 | `submit_find`: `found_at` poza `[start wyprawy − 5 min, koniec + 5 min]` | – | `find_outside_trip` (1) |
 | `submit_find`: okaz rzadki+, a w ± 30 min ≥ 10 rzadkich+ albo ≥ 4 epickie+ (bez odrzuconych) | – | `rare_burst` (2) |
@@ -854,7 +859,7 @@ gdy mija czas (np. 15 km po godzinie → 8,67 km, ten sam dystans po 3 h → 15 
 - `submit_find` zwraca i zapisuje poprawione `rarity` / `xxl`, a `claim_find` liczy z nich nagrodę: borowik „XXL” 330 g → bez linii
   „Okaz XXL ×1,5”; podgrzybek zgłoszony jako legendarny → „Bazowe XP (rzadki)” 120 XP. Wyniki rozpoznania są zgodne (rzadkość =
   gatunku, XXL wg `isXxl`, kępki bez XXL) – różnice dałby tylko zmodyfikowany klient. Aplikacja przyjmuje stan
-  z `get_game_state()` jak dotąd.
+  z `get_game_state()` jak dotąd. *Od podpisanego rozpoznania: podgrzybek jako legendarny → „Bazowe XP (pospolity)”, waga z kapelusza.*
 - `distanceM` wyprawy może być mniejszy niż lokalny (przycięty / nieuznany). Sugestia dla aplikacji: nie doliczać odcinków jazdy
   (> ~15 km/h) do dystansu wyprawy – gracz, który włącza wyprawę jeszcze w aucie, dostaje dziś flagę `trip_speed` (2).
 
@@ -889,9 +894,14 @@ Skrypty lokalne (psql, testy): `select set_config('app.anti_cheat_bypass', 'on',
   `trip_tracks` przychodzi na końcu i nie jest weryfikowany (możliwe później: długość śladu vs dystans, gmina z PRG vs `p_gmina_id`).
 - **Zdjęcie zdjęcia / ekranu, zdjęcie z internetu, ten sam plik pod inną nazwą** – model w `identify` odrzuca zdjęcia ekranu / wydruku
   („nie grzyb”), ale zdjęcia z internetu nie rozpozna; hash percepcyjny w Edge Function – później; `photo_reuse` łapie tylko tę samą ścieżkę.
+  *Od [podpisanego rozpoznania](#podpisane-rozpoznanie): osobna ocena `reproduction` (→ odrzucenie), SHA-256 każdego zdjęcia globalnie
+  unikalny (ten sam plik u kogokolwiek – odmowa przed modelem); ponownie zakodowany obraz i zdjęcie z internetu – nadal.*
 - **Gatunek, wymiary i rzadkość podaje telefon** (`submit_find` jest tymczasowe) – rozpoznaje już serwer (`identify`), ale wynik wraca
-  do telefonu i dopiero on go zgłasza. Do zrobienia: `identify` zapisuje `finds` sama albo zwraca podpis wyniku sprawdzany w `submit_find`.
+  do telefonu i dopiero on go zgłasza. *Naprawione: [podpisane rozpoznanie](#podpisane-rozpoznanie) – `submit_find` bierze dane okazu
+  z rekordu zapisanego przez Edge Function; bez niego tylko przy `dev_tools`.*
 - **Cofnięty `started_at` / `found_at`** (kolejka offline – do 14 dni wstecz) – tylko flaga informacyjna; czas do prędkości ≤ 24 h.
+  *Od [uszczelnień](#uszczelnienia-anty-cheatu): start przycięty do 12 h wstecz i do końca poprzedniej wyprawy, czas ≤ 12 h,
+  limity dystansu; `found_at` znaleziska zweryfikowanego – czas serwera (podpisane rozpoznanie).*
 - **„Zaproś → anuluj → zaproś”, „skomentuj → usuń”** – limity liczą istniejące wiersze (usunięte znikają z licznika); licznik zdarzeń –
   gdy dojdą powiadomienia push.
 - **Wiele kont** (farmy kont anonimowych) – limity Auth i CAPTCHA (patrz [Wdrożenie](#konto-e-maile-i-usuwanie-kont-w-chmurze-etap-6)).
@@ -899,6 +909,227 @@ Skrypty lokalne (psql, testy): `select set_config('app.anti_cheat_bypass', 'on',
 
 **Dźwignie na później:** `xp_daily_soft_cap` → malejące XP po progu; ranking bez XP graczy z flagami wagi 3; automatyczne ukrycie
 wpisów / komentarzy przy wielu zgłoszeniach; `trip_speed` → potwierdzenie dystansu śladem GPS.
+
+## Podpisane rozpoznanie
+
+Migracja [`20261015100000_podpisane_rozpoznanie.sql`](../supabase/migrations/20261015100000_podpisane_rozpoznanie.sql), Edge Function
+[`identify`](../supabase/functions/identify/index.ts), test `scripts/db-tests/10-podpisane-rozpoznanie.mjs`, kontrakt
+[docs/rywalizacja.md](rywalizacja.md) §1. Wynik rozpoznania zapisuje **serwer**, a znalezisko powstaje z jego rekordu – telefon
+przekazuje tylko id. To fundament walk o okaz (`finds.verified`, `finds.size_verified`).
+
+```
+telefon: zdjęcie (+ ≤ 3 ujęcia), miesiąc, województwo, lat / lon / accuracyM (jeśli znane, ≤ 15 min)
+  → identify: SHA-256 zdjęć → recognition_begin(uid, skróty, pozycja)   [service_role]
+      · obraz u innego gracza / zużyty → 409 image_reused (bez modelu)
+      · ten sam gracz, to samo zdjęcie, wynik ważny / odrzucony → zapisana odpowiedź (bez modelu, bez limitu)
+      · limity, gmina = gmina_at(lon, lat) – współrzędne nie są zapisywane, model ich nie dostaje
+      · rozpoznanie 'pending' (rezerwacja skrótów) + wiersz identify_calls
+  → zdjęcie główne → Storage scan-photos/{uid}/rec/{id}.jpg (przed modelem; błąd → 503 storage_error, bez kosztu)
+  → model → recognition_finish(wynik, koszt, charged) → status issued | rejected → odpowiedź z rekordu
+  → w tle recognition_cleanup (przeterminowane → expired, porzucone pending → usunięte; pliki do usunięcia)
+telefon: Find.recognitionId / verified / sizeVerified → find.submit { …, recognitionId } → submit_find(…, p_recognition_id)
+```
+
+**`recognitions`** (bez dostępu klientów – RLS bez polityk, bez GRANT; pisze tylko `service_role`): `user_id` (z JWT), `created_at`
+(czas serwera = `found_at` znaleziska), `status` `pending` → `issued` / `rejected` → `consumed` / `expired`, `verdict`, `reason`,
+`species_id` (najlepszy kandydat z katalogu), `candidates`, `confidence` (z bezpiecznikiem sobowtórów jak `safeConfidence`: jadalny
+zwycięzca, groźny kandydat ≥ 15% → ≤ 0,55), `visible_parts`, `count`, `cap_cm` / `height_cm` (tylko przy odniesieniu skali, co 0,5 cm),
+`maturity`, `scale_ref` (none / hand / coin / card / knife / other), `reproduction`, `views`, `image_sha256[]` (główne + ujęcia),
+`photo_path` (od `recognition_begin`), `gmina_id`, `model`, `call_id`, `find_id` (unique – jedno rozpoznanie = jedno znalezisko),
+`expires_at` (+ 14 dni – `recognition_ttl_h` = 336, jak tolerancja kolejki offline),
+`consumed_at`. **`recognition_images`** (`sha256` – klucz główny): każdy obraz w grze raz. `issued` = grzyb z atlasu, nie reprodukcja,
+pewność ≥ 60%; reszta `rejected` (zdjęcie usuwane, odrzucone rekordy – po 30 dniach). Legacy `scans` / `identifications` zostają:
+`submit_find` dalej je zapisuje (`identifications.provider` = `recognition` z modelem rozpoznania albo `client-sim`) – eksport danych
+bez zmian.
+
+**Odpowiedź funkcji** (`IdentifyFunctionResponse`): pola modelu (`verdict`, `reason`, `candidates`, `visibleParts`, `count`, `capCm`,
+`heightCm`, `maturity`, `scaleReference`, `reproduction`) + `recognitionId` (null przy odrzuceniu), `sizeMeasured` (kapelusz przy
+skali, nie reprodukcja), `expiresAt`. Reprodukcja → `unclear` z powodem „To wygląda na zdjęcie ekranu albo wydruku – zrób zdjęcie
+prawdziwego grzyba”. Błędy: + `image_reused` (409, aplikacja → odrzucenie „zrób własne zdjęcie”), `service_busy` (503), `storage_error` (503).
+
+**`submit_find(…, p_recognition_id uuid default null)`** (stary podpis usunięty; wszystkie parametry poza `p_find_id` mają domyślne):
+
+| Przypadek | Wynik |
+|---|---|
+| ponowienie tego samego `p_find_id` | zapisany wiersz (przed sprawdzeniem rozpoznania – kolejka offline) |
+| z id: rozpoznanie gracza `issued`, ważne | gatunek, pewność, kandydaci, części, wymiary, gmina (serwera; bez niej – z telefonu + `gmina_from_client` (1); inna z telefonu → serwera + `gmina_mismatch` (1)), `found_at` = czas rozpoznania, `photo_path` z rekordu; `verified = true`, `size_verified` = kapelusz zmierzony przy skali; rozpoznanie → `consumed` |
+| z id: nie ma / cudze | `P0002 recognition_not_found` |
+| z id: zużyte / po terminie / odrzucone (reprodukcja, < 60%) | `P0001 recognition_used` / `recognition_expired` / `recognition_rejected` (opis po polsku) |
+| bez id, `dev_tools_enabled()` (lokalnie: wymuszony wynik skanu, testy) | dane z telefonu, `verified = false` – poza rankingami, rekordami, percentylem, wyzwaniami i rywalizacją |
+| bez id, produkcja | `P0001 recognition_required` |
+| zawsze | rzadkość = rzadkość gatunku (wyższa z telefonu → `rarity_clamped` 2); waga i XXL – `find_dimensions` (lustro `estimateDimensions`: typowa × (kapelusz / typowy)², bez kapelusza – z wysokości albo typowe, kępki × sztuki; XXL od `xxl_factor`; parytet sprawdza test); `p_rarity`, `p_xxl`, waga z telefonu pomijane |
+
+**Inne funkcje.** `get_species_percentile` – populacja tylko `verified`, k-anonimowość (`percentile_min_finds` = 5 okazów i
+`percentile_min_users` = 3 znalazców, inaczej kształt „brak danych” + `comparable: false`), waga porównywana w progach co 10%
+(`⌊ln(waga) / ln 1,1⌋` – ten sam próg = remis), więc dowolne `p_weight_g` zdradza najwyżej histogram, nie cudze wagi; ekrany bez
+zmian (`comparable: false` → stan bez porównania). `get_gmina_stats` – rekordy tylko z okazów `size_verified`, pojedynczych
+(`pieces` ≤ 1). `set_find_photo` – znalezisko z rozpoznaniem → `P0001 photo_locked` (ta sama ścieżka – bez zmian), ścieżka
+w `{uid}/rec/` → `invalid_path`. `get_game_state().finds[]` + `recognitionId`, `verified`, `sizeVerified`. `wipe_account_data` –
++ rozpoznania (skróty kaskadowo); `user_storage_paths` – + zdjęcia rozpoznań; `export_recognitions(uid) → jsonb` – do podpięcia
+w `export_my_data`. Starsze `identify_begin` / `identify_finish` zostają (starsza wersja funkcji) z nowymi limitami.
+
+**Storage `scan-photos/{uid}/rec/…`.** Polityki: klient nie wstawia i nie podmienia plików w `rec/`; usuwa tylko plik, do którego
+nic się nie odwołuje (`rec_photo_released` – brak rozpoznania i znaleziska z tą ścieżką), czyli po skasowaniu danych. Usunięcie
+konta w aplikacji: po `delete_my_account` druga runda usuwania `{uid}/rec` (token sesji jeszcze działa); Edge Function
+`delete-account` usuwa cały folder kluczem serwisowym. „Nowy gracz” (`dev_reset_player`) rozpoznań nie kasuje – ich zdjęcia zostają.
+
+**Porzucone i sprzątanie.** `pending` starsze niż `recognition_pending_s` = 120 s (Edge Function ubita w trakcie) nie blokuje
+gracza: `recognition_begin` usuwa je (własne i cudze trzymające te obrazy) i zwraca ich pliki w `stalePaths`; funkcja po każdym
+wywołaniu (w tle) usuwa te pliki i woła `recognition_cleanup` (przeterminowane → `expired`, porzucone `pending` i odrzucone
+starsze niż 30 dni → usunięte, wszystko ze ścieżkami plików). Edge Function: model z własnym limitem czasu (20 s, próba ~9 s,
+jedno ponowienie, `max_tokens` 4096) – nie `req.signal`, więc zerwane połączenie aplikacji nie marnuje zapłaconej odpowiedzi
+(„Spróbuj ponownie” dostaje ją z rekordu); aplikacja rozłączona przed modelem → bez modelu i bez kosztu. Treść > 6 MB → 413,
+base64 o długości niepodzielnej przez 4 → 400, każdy nieprzewidziany wyjątek → JSON `internal` z CORS.
+
+**Kolejka offline w aplikacji.** Trwała odmowa `find.submit` z kodem `recognition_*` → toast z `detail`, zdarzenia tego
+znaleziska (`find.claim`, `photo.find`, `find.discard`) wypadają z kolejki, a znalezisko zostaje w telefonie z
+`serverRejected` (niezweryfikowane; scalanie stanu go nie usuwa, odbiór i porzucenie nie idą na serwer). `Find.recognitionExpiresAt`
+– termin z odpowiedzi. W wydaniu (tryb Supabase bez narzędzi dev) grzyb bez `recognitionId` nie staje się znaleziskiem.
+
+**Limity kosztów (audyt #6).** `identify_check_limits`: jedno naraz, `identify_per_day` = 60 w 24 h (konto młodsze niż
+`identify_new_account_h` = 24 h – `identify_new_account_per_day` = 20), globalnie `identify_global_per_day` = 3000 na dobę
+(Europe/Warsaw) → `P0001 service_busy`. Liczą się wywołania w toku, `ok` / `refused` i `failed` z `identify_calls.charged = true`
+(żądanie mogło dojść do modelu: przerwanie przez aplikację, zerwane połączenie, limit czasu, odpowiedź poza schematem); `failed`
+przed modelem (429 / 5xx dostawcy, błąd zapisu zdjęcia) – nie.
+
+**Boty deweloperskie.** Wyzwalacz `finds_bot_verified`: znalezisko bota wstawione z `verified = false` dostaje `verified = true`
+i `size_verified` (gdy jest kapelusz i pojedynczy owocnik) – rankingi, rekordy, percentyl i walki działają na danych testowych.
+Niezweryfikowany bot (test) – zmień flagi po wstawieniu.
+
+**Decyzje.** Skrót = SHA-256 pliku (dokładna kopia; skrót percepcyjny – później). Pozycja tylko do gminy (`gmina_at`; lokalnie
+granice PRG mogą być puste – wtedy gmina z telefonu z flagą informacyjną, gra działa). Zdjęcie zapisywane przed modelem (pewność,
+że znalezisko ma zdjęcie, które ocenił model; koszt – jeden zapis ~100 KB na skan). Ważność 14 dni pokrywa kolejkę offline
+(skan wymaga sieci, `find.submit` może dojść później). Aplikacja nie wysyła znalezisk z pewnością < 60% (serwer ich nie przyjmie).
+Wynik wymuszony w panelu dev jest w trybie Supabase zawsze niezweryfikowany; w trybie mock opcja „z odniesieniem skali”
+symuluje podpisane rozpoznanie (bez serwera).
+
+## Uszczelnienia anty-cheatu
+
+Migracja [`20261015103000_uszczelnienia.sql`](../supabase/migrations/20261015103000_uszczelnienia.sql) – luki z audytu przed
+rywalizacją ([docs/rywalizacja.md](rywalizacja.md); podpisane rozpoznanie – `20261015100000_podpisane_rozpoznanie.sql`). Progi
+w `anti_cheat_params` (klucze poniżej). Test: `scripts/db-tests/20-uszczelnienia.mjs` (atak sprzed naprawy nie działa, uczciwy
+przepływ – także kolejka offline – działa).
+
+| Luka (ważność) | Naprawa |
+|---|---|
+| Funkcje `dev_*` z EXECUTE dla klientów; chroniła je tylko flaga `app_config.dev_tools` z commitowanego seeda (wysoka) | Migracja odbiera EXECUTE na **wszystkich** `public.dev_*` (pętla, także `dev_tools_enabled`). Nadaje je wyłącznie seed lokalny (`scripts/seed-dev.ts` → `supabase/seed.sql`): funkcjom `dev_*`, które same sprawdzają `dev_tools_enabled()`, i samej `dev_tools_enabled`. Seed `--cloud` – flaga `false` i odebranie EXECUTE. Na produkcji nawet przypadkowe `dev_tools = true` nie daje dostępu (panel `/dev` dostaje „nie wiadomo”). |
+| Wyprawy: start bez dolnej granicy (seria „D-60, D-59…”, „Ranny ptaszek” przez start 5:30), 12 km/h bez flagi przy starcie „24 h temu”, czas trwania z telefonu (wysoka) | `start_trip`: czas z telefonu najwyżej `trip_backdated_h` = 12 h wstecz (starszy → przycięty, flaga `trip_backdated` 1), nie w przyszłość i nie przed końcem poprzedniej wyprawy gracza (`trip_overlap` 1; aktywna kończy się w chwili startu nowej). Seria i aktywne dni – z przyciętej daty startu. Wczesne starty (odznaka „Ranny ptaszek”, Skowronek, zadanie „Wyrusz przed 7:00”) tylko, gdy serwer dostał start najwyżej `trip_early_lag_min` = 30 min po nim. `close_trip`: `duration_s` ≤ koniec − start i ≤ `trip_max_duration_s` = 12 h (dłuższy z telefonu → `trip_duration` 1). Dystans: dotychczasowa prędkość + średnia `trip_avg_base_km` 5 km + `trip_avg_kmh` 6 km/h × czas (`trip_distance_avg` 2), twardy limit wyprawy `trip_max_km` 40 km (`trip_distance_cap` 2) i doby `day_max_km` 60 km (wyprawy rozpoczęte tego dnia, `day_distance_cap` 2); czas do prędkości ≤ 12 h. Ślad GPS z telefonu (`p_track_geojson`) ignorowany (`client_track_ignored` 1). |
+| Wyzwania gmin z dowolnej gminy, zaliczane dowolnym znaleziskiem (wysoka) | `accept_challenge`: tylko gmina domowa albo obserwowana (`P0001 challenge_not_allowed`), najwyżej `challenge_active_max` = 3 przyjęte, nieukończone, trwające wyzwania przyjęte w ostatnich 7 dniach (`P0001 challenge_limit`); bezpośredni INSERT do `user_challenges` odebrany. `claim_find`: tylko znalezisko `finds.verified`, znalezione najwcześniej 10 min przed przyjęciem i w oknie wyzwania, odebrane do 6 h po końcu; najwyżej `challenge_completions_per_day` = 2 ukończenia na dobę. Wyzwanie tygodniowe: gatunek liczony tylko ze zweryfikowanych znalezisk. |
+| Rankingi gmin z każdego XP (wysoka) | `refresh_gmina_rankings` przez `ranking_xp_events(od, do)`: źródła `find` (tylko zweryfikowane – `ref_id` = id znaleziska), `challenge`, `contest`, `duel`; bez osiągnięć, zadań, importu i admina; tylko gracze `competition_eligible`. Rekordy – zweryfikowane okazy epickie / legendarne. `get_ranking.userContribution` – te same źródła. Ta sama reguła co ranking grzybiarzy (RB). |
+| Profile czytelne w całości (`using (true)`: `last_active_date`, `total_xp` na żywo, gmina domowa, `is_bot`, `deleted_at`…), cudze odznaki i osiągnięcia z czasem zdobycia (średnia) | Polityki SELECT tylko na własne wiersze: `profiles`, `user_badges`, `user_achievements`, `posts` (cudze wpisy – `get_feed` / `get_post`), komentarze i reakcje – własne i pod własnymi wpisami. Cudze profile wyłącznie przez RPC (`author_json`, `social_user_json`, `get_user`… – blokady, `deleted_at`, `listed`). UPDATE własnego profilu (aplikacja: nick, nazwa, imię, gmina, avatar) bez zmian. |
+| Spam: tytuł wpisu, nazwa / imię bez limitu, nicki podszywające się, reakcje bez limitu (każda woła `sync_achievements`) (średnia) | `clean_text`: bez znaków sterujących, pojedyncze spacje – nazwa i imię ≤ 40 (wyzwalacz `profiles_sanitize`, puste imię → null), tytuł ≤ 80. Nicki zarezerwowane (`reserved_handle`: admin, moderator, grzybobranie, support, oficjalny…): zmiana → `23505 handle_reserved` (aplikacja: „nick zajęty”), nowe konto → `grzybiarz_…`. „Darz grzyb!”: > `reaction_per_10min` = 60 włączeń w 10 min albo > `reaction_per_day` = 600 na dobę → `rate_limited` (wyzwalacz + dziennik `rate_events`, więc „włącz–wyłącz” też się liczy); reakcje tylko przez `toggle_reaction`. `publish_trip` nie publikuje trasy. |
+| Stare funkcje z init, wyrocznia blokad `blocked_with_me` jako RPC, bezpośredni zapis `scans` (niska) | `species_percentile`, `gmina_stats`, `gmina_records`, `gmina_species_share` usunięte. Polityki RLS wołają `private.blocked_with_me` (schemat `private` poza `api.schemas` PostgREST – wykonalny w RLS, niewywoływalny przez `/rpc`); `public.blocked_with_me` bez EXECUTE. `scans`: bez INSERT / UPDATE dla klientów. |
+| Status w rywalizacji (doprecyzowanie) | `competition_eligible` (ta sama sygnatura): profil nieusuwany, brak aktywnego `review` / `banned`, mniej niż `competition_flag_hits` = 3 **incydentów** (wierszy flag – powtórzenia jednej flagi w 24 h to jeden incydent) wagi 3 poza `rate_limited` w 30 dniach i po ostatnim „ok” moderatora. `flag()`: 3. incydent → `player_standing` `review` na 30 dni (`updated_by = 'auto:<rodzaj>'`, kolejne przedłużają); decyzji moderatora (ręczne `review` / `banned`) nie nadpisuje. |
+| Limit anonimowych logowań 30 / h z IP | `config.toml`: `anonymous_users = 10` (nowa instalacja = jedno konto); w chmurze Dashboard → Authentication → Rate Limits, przy farmach – CAPTCHA (Turnstile). |
+
+**Reguła dla nowych funkcji `dev_*`** (np. `dev_seed_rivalry`, `dev_rivalry_act`, `dev_finalize_rivalry`): w migracji tylko
+`revoke all … from public, anon, authenticated` – **bez** `grant execute … to authenticated`; funkcja wołana z aplikacji sama sprawdza
+`dev_tools_enabled()` (wtedy seed lokalny nada jej EXECUTE – pętla po `public.dev_%`, więc obejmuje też przyszłe funkcje), wewnętrzny
+pomocnik `dev_*` – nie sprawdza (zostaje bez EXECUTE). `db:test` sprawdza po migracjach, przed seedem, że żadna `dev_*` nie ma EXECUTE
+dla `authenticated` / `anon`. Lokalnie po nowej migracji z `dev_*`: `npm run db:seed` i wgranie seeda.
+
+**Decyzje.** Seria i aktywne dni liczą się z daty startu przyciętego przez serwer (nie z `created_at`): uczciwa kolejka offline
+wysłana do 12 h po starcie (np. wieczorem z domu) nie traci dnia, a cofnięcie startu o dni nic nie daje (zostaje: gracz grający rano
+może „domknąć” poprzedni wieczór – najwyżej jeden dzień na raz). Wczesne starty potrzebują potwierdzenia serwera (30 min), bo inaczej
+start „5:30” wysłany o 17:00 byłby w oknie 12 h. Twarde limity dystansu i średnia przycinają, ale nie blokują (flaga 2 – poza
+`competition_eligible`); czasu w lesie i dystansu bez śladu GPS nie da się sprawdzić, a osiągnięcia z nich nie liczą się do rankingów.
+Ślad z telefonu nie jest przechowywany (minimalizacja danych) – aplikacja go nie wysyła. Rankingi po wdrożeniu startują od
+zweryfikowanych znalezisk (stare XP ze znalezisk bez podpisu – poza rankingami).
+
+**Zmiany widoczne dla aplikacji:** przyjęcie wyzwania – lokalnie ta sama reguła (`src/utils/challenges.ts`: gmina domowa / obserwowana,
+3 aktywne; toast z powodem, ekran gminy zostaje), odrzucenie z kolejki (`challenge_not_allowed` / `challenge_limit`) – toast z `detail`;
+`rate_limited` przy reakcjach – jak inne limity; nick zarezerwowany – toast „nick zajęty”; feed bez tras wypraw. Panel `/dev`: liczba
+profili w podglądzie bazy = 1 (RLS – tylko własny).
+
+## Rywalizacja – walki o okaz, pojedynki, ranking grzybiarzy
+
+Migracja [`20261015110000_rywalizacja.sql`](../supabase/migrations/20261015110000_rywalizacja.sql), specyfikacja i kontrakt:
+[docs/rywalizacja.md](rywalizacja.md) (§2–§5, §7). Odpowiedzi – jsonb o kształcie typów TS z `src/types.ts` (sekcja „Rywalizacja”),
+autorzy (`author` / `user` / `actor`) – surowe `author_json`. Błędy: `28000`, `P0001` / `P0002` z kodem w `message` i **zdaniem dla
+gracza** w `detail` (aplikacja pokazuje je wprost). Test: `scripts/db-tests/30-rywalizacja.mjs`.
+
+**Tabele** (RLS bez polityk, bez GRANT – wszystko przez RPC; `on delete cascade` do `profiles`):
+
+| Tabela | Zawartość |
+|---|---|
+| `contests` | walki tygodnia: `'{pon}:okaz'` (sort 0) i `'{pon}:{gatunek}'` (sort 1, 2); `starts_at` / `ends_at` (pon 00:00 Europe/Warsaw), `results_at` = koniec + `contest_results_delay_h`, `finalized_at`, `next_check_at` (rozstrzygnięcie odłożone). Tworzone leniwie (`ensure_contest_week`) przy pierwszym odczycie tygodnia – tylko od bieżącego do `contest_history_weeks` (52) tygodni wstecz. |
+| `contest_entries` | zgłoszone okazy z migawką wyniku (gatunek, gmina, `cap_cm`, `relative_pct`, `score`, `found_at`); `status` active / review / withdrawn / rejected; jeden aktywny lub w weryfikacji na gracza i walkę (indeks częściowy); `shown_since` – od kiedy autor nie jest ukryty (okno publiczności); `final_rank_gmina` / `_wojewodztwo` / `_polska` – miejsca zapisane przy rozstrzygnięciu (migawka tablicy). `visible_from` i `photo_path` – na bieżąco ze znaleziska. |
+| `contest_reports` | „Zgłoś okaz”: powód – kod `reproduction` / `wrong_species` / `other`; raz na gracza i okaz. |
+| `contest_awards` | podia (trofea): zasięg, miejsce 1–3, XP (> 0 tylko przy najwyższej nagrodzie gracza w walce). |
+| `contest_overtakes` | pierwsza obserwacja wyprzedzenia (aktywność `contest_overtaken`): czas i moje miejsce w tej chwili. |
+| `duels` | pojedynki (id z telefonu), wyniki i najlepsze okazy zapisane przy rozstrzygnięciu, XP stron. |
+| `duel_rewards` | księga nagrodzonych pojedynków (gracz, przeciwnik, tydzień `ends_at`) – limity przeciw farmom; wpisy z przeciwnikiem zostają po usunięciu jego konta. |
+| `rivalry_public_photos` / `rivalry_duel_photos` | ścieżki zdjęć czytelnych dla innych: okaz aktywny w walce / najlepszy okaz pojedynku „największy okaz” (dla przeciwnika); same ścieżki – `private.rivalry_photo_paths` (wyzwalacze) do odsiewu w polityce Storage. |
+| `rivalry_params` | progi (`rivalry_param(k)`; jak `anti_cheat_params` – nowe klucze `insert … on conflict do update`): `rivalry_queue_grace_h` 6, `contest_results_delay_h` 48, `contest_min_gmina` / `_wojewodztwo` / `_polska` 3 / 5 / 10, `contest_xp_<zasięg>_<miejsce>`, `contest_public_before_results_h` 24, `contest_review_max_delay_h` 168, `contest_history_weeks` 52, `contest_report_threshold` 3, `contest_report_per_day` 30, `contest_report_min_account_days` 7, `duel_invite_h` 48, `duel_max_open` 3, `duel_per_day` 5, `duel_xp_win` 100, `duel_xp_draw` 30, `duel_rewarded_per_week` 3, `duel_rewarded_pair_per_week` 1. |
+
+`profiles.show_in_rankings` (domyślnie true) – zapis tylko przez `set_ranking_visibility`.
+
+**RPC** (tylko `authenticated`; parametry i kształty – tabela w docs/rywalizacja.md §7):
+
+| RPC | Działanie |
+|---|---|
+| `get_contest_week(p_week_start)` | walki tygodnia (data → jej poniedziałek; przyszły tydzień → `P0001 invalid_week`; sprzed historii → `P0002 contest_not_found`), `mine` – okaz gracza w każdej walce z miejscem w województwie gminy okazu, `leaders` – najlepszy okaz widoczny dla gracza w województwie gminy domowej (bez gminy domowej – null), `previousWeekStart` – ostatni rozstrzygnięty tydzień z finalistami |
+| `get_contest_board(p_contest_id, p_scope, p_scope_id)` | do 50 okazów (miejsca globalne wśród walczących; własny niewalczący – z `rank = null`; walka rozstrzygnięta – migawka), `mine`, `total`; zasięg i `scopeId` jak w §7 (`invalid_scope`, `gmina_not_found`, `invalid_voivodeship`, `contest_not_found`) |
+| `get_contest_eligibility(p_find_id)` / `enter_contest(p_find_id)` | warunki okazu (pierwszy niespełniony – powód po polsku), pasujące walki z wynikiem, `projectedRank` (gmina / województwo / Polska – wśród okazów walczących teraz, bez własnych), `entered`, `currentBest`; zgłoszenie do wszystkich pasujących walk tygodnia znaleziska (zastępuje inny okaz gracza – stary `withdrawn`), odmowa → `not_eligible` / `contest_closed` / `entry_in_review` |
+| `withdraw_contest_entry(p_contest_id)` | do końca tygodnia + 6 h (`contest_closed`); okaz w weryfikacji – `entry_in_review`; brak okazu – nic |
+| `report_contest_entry(p_entry_id, p_reason)` | tylko okaz widoczny dla zgłaszającego (`entry_not_found`), nie własny (`invalid_entry`), walka nierozstrzygnięta (`contest_closed`); limit `contest_report_per_day` (`rate_limited`); ≥ 3 różnych zgłaszających (od ostatniej moderacji) z kontem zabezpieczonym, w rywalizacji i starszym niż 7 dni → `review` |
+| `admin_review_contest_entry(p_entry_id, p_approve, p_note)` | **tylko service_role**: przywrócenie (zgłoszenia sprzed decyzji przestają się liczyć) albo odrzucenie – znalezisko odpada ze wszystkich walk (`rejected`) + flaga 3 `contest_fake`; walka odłożona przez ten okaz rozstrzyga się przy najbliższym odczycie |
+| `get_trophies(p_user)` | złoto / srebro / brąz + 20 najnowszych; cudze – bez blokady (`user_not_found`), gracz ukryty – tylko dla znajomych |
+| `get_duels()` / `get_duel(p_duel_id)` | pojedynki gracza (aktywne – wynik na żywo, rozstrzygnięte – zapisany), bilans; bez par w blokadzie (`get_duel` → `duel_not_found`) |
+| `create_duel` / `respond_duel` / `cancel_duel` | wyzwanie znajomego (`not_friends`, `invalid_duel`, `duel_limit` – para, 3 w toku u gracza i u znajomego, 5 wyzwań na dobę; ponowienie id – zapisany pojedynek, także po wyczerpaniu limitu; cudze id – `duel_id_conflict`; blokady doradcze obu graczy), przyjęcie (start od teraz) / odrzucenie, anulowanie oczekującego (`duel_closed` po odpowiedzi) |
+| `get_player_ranking(p_scope, p_period, p_scope_id)` | ranking grzybiarzy (§4); miejsca `rank()` globalne (remis – to samo miejsce; gracz w blokadzie z widzem tylko znika z jego listy – jak na tablicach walk); `total` – wiersze widoczne dla gracza |
+| `set_ranking_visibility(p_visible)` · `get_rivalry_status()` | widoczność (+ `shown_since` okazów w nierozstrzygniętych walkach); status (`banned` pokazywany jako `review`), konto zabezpieczone |
+| `get_activity` | + `duel_invite`, `duel_accepted`, `duel_finished`, `contest_award`, `contest_overtaken`; pola `refId`, `meta` (null dla dotychczasowych rodzajów) |
+
+**Rozstrzyganie – leniwie, idempotentnie.** `ensure_contests_final()` (tani test po indeksie, blokada doradcza) w każdym RPC walk,
+rankingu i aktywności: walki po `results_at` (i po `next_check_at`) → `finalize_contest` (blokada wiersza walki). Kandydaci
+(`contest_candidates`): aktywne okazy, autor w rywalizacji i nie ukryty, konto nieusuwane, okaz **publiczny** (widoczny dla innych
+i nieukryty) co najmniej `contest_public_before_results_h` = 24 h przed `results_at` – ukrycie albo otwarta wyprawa do ostatniej
+chwili nie omija okna zgłoszeń. Zasięgi gminy i województwa – tylko okazy z gminą wyznaczoną przez serwer
+(`recognitions.gmina_id` = gmina okazu; boty dev – tak), Polska – wszystkie. Okaz w weryfikacji, który stałby na podium któregoś
+zasięgu, **odkłada** rozstrzygnięcie (`next_check_at` + 15 min; decyzja moderatora sprawdza od razu), najwyżej
+`contest_review_max_delay_h` = 7 dni po `results_at` (potem bez niego). Miejsca finalistów → `final_rank_*` (tablica rozstrzygniętej
+walki to migawka – okaz, który stał się widoczny później, nie wskakuje na podium). Podium 1–3 (remis: wcześniejszy `found_at`)
+z minimalną liczbą uczestników; XP tylko za najwyższą nagrodę gracza i tylko z kontem zabezpieczonym (reszta – trofea z `xp = 0`);
+księga: źródło `contest`, `ref_id` = id walki, gmina okazu. Pojedynki: `settle_duels(gracz)` w RPC pojedynków i aktywności –
+zaproszenia po 48 h → `expired`, para w blokadzie → `cancelled`, aktywne po `ends_at + 6 h` → `finish_duel` (wynik z okna
+`found_at` i `created_at ≤ koniec + 6 h`; XP: źródło `duel`, `ref_id` = id pojedynku, bez gminy – liczy się w rankingu Polski
+i znajomych, nie gmin; limity tygodnia wg `ends_at` z księgi `duel_rewards`).
+
+**Prywatność.** Tablice: cudze okazy od `rivalry_visible_at` = `visible_from` (koniec wyprawy + 24 h), najpóźniej 48 h po znalezieniu
+(niezamknięta wyprawa nie ukrywa okazu w nieskończoność; także wśród znajomych – zdjęcie i gmina są wtedy publiczne), własny zawsze
+(`visibleFrom` = ten termin – stały); ukryci – tylko w zasięgu znajomych; poza rywalizacją – widzi siebie, inni nie; blokady w obie
+strony (zablokowany znika z listy, miejsca innych – globalne, jak na podium); `review` widzi tylko autor. Ranking: publiczne zasięgi
+z XP starszych niż 24 h, znajomi na żywo. `contest_overtaken`: tylko województwo, trwające walki; przy odczycie aktywności serwer
+zapisuje pierwszą obserwację najnowszego wyprzedzającego każdy mój okaz (`contest_overtakes`) – czas = chwila obserwacji (zawsze po
+poprzednim odczycie), id `contest_overtaken:<moje zgłoszenie>:<jego zgłoszenie>`, `meta.rank` = moje nowe miejsce w tej chwili
+(stałe). **Storage:** polityka „rywalizacja: odczyt zdjec okazow” (SELECT na `scan-photos`): najpierw `exists` w
+`private.rivalry_photo_paths` (schemat poza API, SELECT dla authenticated – sama ścieżka), dopiero przy trafieniu
+`rivalry_photo_readable(name)`: zdjęcie znaleziska zgłoszonego do walki (aktywne, widoczne, autor w rywalizacji i nie ukryty –
+ukryty tylko dla znajomych, bez blokady) albo najlepszego okazu strony pojedynku „największy okaz” dla przeciwnika. Adres podpisuje
+klient. Pomiar (PGlite, 2000 obiektów): pliki spoza rywalizacji 268 → 7 ms; same trafienia ok. 0,2 ms na plik (sprawdzenia
+dopuszczenia i blokad zostają – kompromis: liczba trafień = zdjęcia okazów w walkach).
+
+**Wydajność.** Gracze poza rywalizacją liczeni zbiorowo (`rivalry_ineligible_users()` – lustro `competition_eligible`, test
+zgodności) i anty-złączenie zamiast funkcji na wiersz; tablice, kandydaci, ranking i aktywność – CTE `materialized`. Pomiar
+(PGlite, 2000 okazów, przed → po): `get_contest_week` 1017 → 106 ms, `get_contest_board` 573 → 59 ms,
+`get_contest_eligibility` 1002 → 40 ms, `get_activity` 154 → 27 ms. Indeksy: `xp_events (created_at)` dla źródeł rywalizacji
+(ranking – także XP pojedynków bez gminy), `contest_entries (user_id, contest_id)` aktywne, `(find_id, status)`,
+`duel_rewards (user_id, week_start)`.
+
+**Narzędzia deweloperskie** (EXECUTE tylko z seeda lokalnego – migracja go nie nadaje; bez `dev_tools` → `dev_tools_disabled`;
+wynik – klucze po polsku, panel `/dev` pokazuje je wprost):
+`dev_seed_rivalry(p_voivodeship)` – 12 botów `rb<TERYT woj.>.<imię>` (konta nieanonimowe) z widocznymi, zweryfikowanymi okazami
+w walkach bieżącego i poprzedniego tygodnia (publiczne od znalezienia), 3 boty-znajomi, wyzwanie bota (biggest) i aktywny pojedynek
+(count) z okazami bota → `{wojewodztwo, grzybiarze, okazy, znajomi, pojedynki}`; `dev_rivalry_act()` – boty przyjmują wyzwania
+gracza, dokładają okazy w pojedynkach, wyprzedzają gracza w trwających walkach (+8%) → `{przyjęte, okazy, wyprzedzenia}`;
+`dev_finalize_rivalry()` – rozstrzyga od razu zakończone tygodnie (bez czekania na moderację i okna publiczności) i pojedynki
+(aktywne pojedynki gracza kończą się teraz) → `{walki, trofea, pojedynki}`. Pomocnik `rivalry_bot_find` celowo bez prefiksu `dev_`.
+
+**Dane gracza:** `wipe_rivalry_data(uuid)` (zgłoszenia, trofea, wyprzedzenia, zdjęcia publiczne, okazy w walkach, pojedynki – także
+po stronie przeciwnika, własne wpisy `duel_rewards`, widoczność → domyślna) i `export_rivalry_data(uuid) → jsonb` (`showInRankings`,
+`contestEntries`, `contestReports`, `trophies`, `duels` z nickiem przeciwnika) – podpięte w `wipe_account_data` / `export_my_data`
+(`20261015120000_rywalizacja_konto.sql`). XP z walk i pojedynków jest w księdze.
 
 ## Etap 8 – szanse na gatunki i mapa gatunku
 
@@ -944,13 +1175,17 @@ Migracja [`20261014100000_identify.sql`](../supabase/migrations/20261014100000_i
 
 - **Żądanie** (`POST /functions/v1/identify`, sesja gracza – JWT, także konto anonimowe; bez tokenu → 401): `{ image: JPEG w base64,
   views?: [{ image, view: 'side' | 'top' | 'low' }] (skan 3D – ≤ 3 dodatkowe ujęcia, razem ≤ 4 mln znaków base64), month?: 1–12,
-  voivodeship?: '<z listy 16>' }`. Ujęcia idą do modelu w jednej wiadomości z podpisami („Ujęcie 2 – z góry:”). Odpowiedź 200: `{ verdict: 'mushroom' | 'not_mushroom' | 'unclear', reason, candidates:
-  [{ speciesId, confidence }] (≤ 3, enum id z katalogu), visibleParts, count, capCm, heightCm, maturity }`. Błędy: `{ error, message?,
-  retryAfter? }` – `bad_request` (400), `rate_limited` (429), `not_configured` / `model_unavailable` (503), `model_error` (502), `internal` (500).
+  voivodeship?: '<z listy 16>', lat?, lon?, accuracyM? }` (pozycja – tylko do gminy, nie do modelu). Ujęcia idą do modelu w jednej wiadomości z podpisami („Ujęcie 2 – z góry:”). Odpowiedź 200: `{ verdict: 'mushroom' | 'not_mushroom' | 'unclear', reason, candidates:
+  [{ speciesId, confidence }] (≤ 3, enum id z katalogu), visibleParts, count, capCm, heightCm, maturity, scaleReference, reproduction,
+  recognitionId, sizeMeasured, expiresAt }` ([podpisane rozpoznanie](#podpisane-rozpoznanie)). Błędy: `{ error, message?,
+  retryAfter? }` – `bad_request` (400), `image_reused` (409), `rate_limited` (429), `not_configured` / `model_unavailable` /
+  `service_busy` / `storage_error` (503), `model_error` (502), `internal` (500).
 - **Model:** `IDENTIFY_MODEL` (domyślnie `claude-opus-5-5`), `effort: low`, structured outputs (`output_config.format` – schemat
   z `contract.ts`), serwerowy fallback przy odmowie (`fallbacks: "default"`), prompt systemowy stały (cache) z katalogiem 360 gatunków (enum `speciesId` w schemacie – 360 wartości).
   Odmowa modelu → 200 z `verdict: 'unclear'`. Odpowiedź modelu i odpowiedź funkcji (w aplikacji) przechodzą przez `normalizeIdent`.
-- **Limit (`identify_begin(p_user)` → id wywołania, przed modelem):** jedno rozpoznanie naraz (niezamknięty wiersz młodszy niż
+- **Limit (`identify_begin(p_user)` → id wywołania, przed modelem; od podpisanego rozpoznania funkcja woła `recognition_begin` /
+  `recognition_finish` z tymi samymi limitami + globalnym i dla nowych kont, a `failed` liczy się, gdy dotarło do modelu):**
+  jedno rozpoznanie naraz (niezamknięty wiersz młodszy niż
   `identify_busy_s` = 60 s) i `identify_per_day` = 60 w kroczącym oknie 24 h (bez `failed`); odrzucenie jak w etapie 7: `P0001 rate_limited`,
   opis po polsku w `detail`, `hint` = `retry_after=<ISO>` (najstarsze liczone wywołanie + 24 h), flaga `rate_limited` (ref `identify`) przy
   wyczerpaniu. Wywołania jednego gracza są szeregowane (`pg_advisory_xact_lock`).
@@ -975,7 +1210,9 @@ Aplikacja przełącza się na bazę przez `.env.local` (wzór w `.env.example`):
 Po zmianie `.env.local` zrestartuj `npx expo start`. Bez dostępu do bazy aplikacja wraca do mocków; status połączenia
 jest w panelu `/dev` → „Backend”.
 
-Seed lokalny włącza narzędzia deweloperskie (`app_config.dev_tools = true`) – import stanu, reset gracza i boty z panelu `/dev`.
+Seed lokalny włącza narzędzia deweloperskie (`app_config.dev_tools = true` i EXECUTE na RPC `dev_*` – migracje go nie nadają) –
+import stanu, reset gracza i boty z panelu `/dev`. Po nowej migracji z funkcją `dev_*` uruchom `npm run db:seed` i wgraj seed
+(`npx supabase db reset` albo `psql … -f supabase/seed.sql`).
 
 E-maile (kody OTP) lokalnie nie wychodzą – podgląd w Mailpit: `http://<IP komputera>:54324` (szczegóły: [Etap 6](#konto-e-mail--kod-otp-bez-linków-i-haseł)).
 Po zmianie `supabase/config.toml` (Auth, szablony e-maili) – `npx supabase stop`, potem `npx supabase start` (dane zostają).
@@ -1016,7 +1253,8 @@ npx supabase init
 npx supabase link --project-ref <ref-projektu>
 ```
 
-Seed do chmury generuj z `--cloud` (`dev_tools = false` – import stanu i reset gracza wyłączone), a po wgraniu wróć do lokalnego:
+Seed do chmury generuj z `--cloud` (`dev_tools = false` i odebrany EXECUTE na wszystkich `dev_*` – import stanu, reset gracza i boty
+wyłączone podwójnie), a po wgraniu wróć do lokalnego:
 
 ```bash
 npm run db:seed -- --cloud
@@ -1031,7 +1269,8 @@ npm run db:seed
 ```
 
 W SQL Editor sprawdź, że `select public.dev_tools_enabled()` zwraca `false` – **w chmurze nigdy nie ustawiaj `dev_tools` na `true`**
-(każdy gracz mógłby skasować i nadpisać swój stan gry).
+(każdy gracz mógłby skasować i nadpisać swój stan gry). Od uszczelnień nawet wtedy klienci nie mają EXECUTE na `dev_*`; sprawdzenie:
+`select proname from pg_proc where proname like 'dev\_%' and has_function_privilege('authenticated', oid, 'execute')` – pusto.
 
 Potem w Dashboard → Database → Extensions włącz `pg_cron` i uruchom raz:
 
@@ -1158,6 +1397,35 @@ trzeci → dane, 10 znalezisk jednego gracza → pusto, znalezisko wchodzi po `v
 województwo bez wielkości liter i z gminy domowej, okres domyślny, pusta mapa, `P0002` / `P0001 invalid_voivodeship` / `invalid_period`),
 bez sesji `28000`, `anon` bez uprawnień. Na Dockerze (supabase-js, konto anonimowe): zbiory Supraśla z botów (`total` 119, min. 2 znalazców),
 mapy podgrzybka (podlaskie, sezon / tydzień) i borowika (mazowieckie), `invalid_period`, `42501` bez sesji.
+Uszczelnienia (moduł `scripts/db-tests/20-uszczelnienia.mjs` + przed seedem: żadna `dev_*` z EXECUTE dla klientów): seed lokalny / `--cloud`
+(EXECUTE tylko RPC strzeżonych `dev_tools_enabled()`, w chmurze `permission denied` mimo `dev_tools = true`); start „sprzed 60 dni” i seria
+z cofniętych startów, wyprawy bez nakładania, uczciwa kolejka offline bez flag, czas trwania, ślad z telefonu, średnia / limit wyprawy /
+limit doby, wczesny start tylko potwierdzony; wyzwania (gmina domowa / obserwowana, limit 3, bezpośredni INSERT, zaliczenie tylko
+zweryfikowanym znaleziskiem po przyjęciu, 2 na dobę, gatunek wyzwania tygodniowego); ranking (źródła, zweryfikowane, gracz poza
+rywalizacją, rekordy, `userContribution`); RLS własnych wierszy (profil z `total_xp`, odznaki, osiągnięcia, wpisy, komentarze / reakcje
+z blokadą), `private.blocked_with_me`, nazwa / imię / nicki / tytuł, limit reakcji (także przełączanie), stare funkcje, `scans`;
+`competition_eligible` i automatyczne `review` (incydenty, „ok” moderatora, ban, konto w usuwaniu), limit anonimowych logowań.
+Celowe zmiany starych testów: trasa i ślad z `finish_trip` (pominięte; eksport – ślad sprzed zmiany wstawiony wprost), seria (start
+2 h temu zamiast „sprzed dnia”), wyzwania (obserwowanie gmin, znalezisko zweryfikowane i po przyjęciu), rankingi (XP `challenge`,
+znaleziska zweryfikowane), prędkość offline (osobny gracz – bez nakładania wypraw), cudze osiągnięcia czytane jako serwer.
+Rywalizacja (moduł `scripts/db-tests/30-rywalizacja.mjs`): gatunki tygodnia – SQL = algorytm ze specyfikacji (JS na `SPECIES`,
+20 tygodni, wszystkie miesiące) = `contestSpeciesForWeek` z `src/utils/contests.ts`; walki tygodnia (leniwie, raz, granice
+Europe/Warsaw); powód odmowy dla każdego warunku okazu (+ flaga `contest_size`); zgłoszenie / ponowienie / zastąpienie / wycofanie;
+tablice (24 h, własny z `visibleFrom`, remis, zasięgi, znajomi, blokady w obie strony, ukryci, poza rywalizacją, bez gminy domowej,
+błędy), `mine` / `leaders` / `entrants`; Storage (zgłoszony – tak; niezgłoszony, wycofany, odrzucony, przed `visible_from`, blokada,
+poza rywalizacją – nie; ukryty – tylko znajomi; najlepszy okaz pojedynku – tylko uczestnik); zgłoszenia (kody, konto anonimowe się
+nie liczy, próg 3, limit dzienny) i moderacja `service_role`; `contest_overtaken`; rozstrzygnięcie (progi uczestników, remis,
+najwyższa nagroda, konto anonimowe, ukryci / poza rywalizacją / w weryfikacji, XP w księdze, idempotentność, trofea, `contest_award`,
+`judging` → `final`); pojedynki (cały cykl, limity, wygaśnięcie, wynik na żywo, okno i kolejka 6 h, XP, farmy: para i gracz na
+tydzień, wynik 0, remis, konto anonimowe, blokada w trakcie, aktywność); ranking (źródła, verified, 24 h i `pendingXp`, zasięgi
+w województwie bez innych danych, remis, ukryci, poza rywalizacją, blokady, widoczność, status); uprawnienia (tabele, funkcje
+wewnętrzne, `anon`); kształty (klucze jak w typach TS); eksport / czyszczenie; boty deweloperskie. Po przeglądzie: okno publiczności
+przed rozstrzygnięciem (ukrycie / otwarta wyprawa do ostatniej chwili), rozstrzygnięcie wstrzymane przez okaz z podium w weryfikacji
+(przywrócenie, limit 7 dni), zgłaszający liczeni do progu (świeże konto, poza rywalizacją), zgłoszenia po rozstrzygnięciu, podium gminy
+tylko z gminą z serwera, migawka tablicy rozstrzygniętej walki, dolna granica tygodni, miejsca globalne mimo blokad, pierwsza obserwacja
+wyprzedzenia (stary znacznik czasu), księga `duel_rewards` po usunięciu danych przeciwnika, `get_duel` przy blokadzie, ponowienie
+`create_duel` po limicie, `rivalry_ineligible_users()` = `competition_eligible`, ścieżki zdjęć w `private.rivalry_photo_paths`.
+Celowe zmiany starych testów: `get_activity` z `refId` / `meta`, nowa polityka Storage poza listą czterech polityk własnego folderu.
 Na Dockerze (jednorazowe testy supabase-js): pełny przepływ e-mail / OTP z kodami z Mailpit (zabezpieczenie konta → `is_anonymous`
 false w użytkowniku i JWT, logowanie drugim klientem → ten sam `user.id` i stan gry, zły / powtórny kod, adres zajęty, nieznany adres,
 zbyt częsta wysyłka), blokowanie na dwóch kontach przez PostgREST, eksport, `delete_my_account` (auth.users, profil, refresh token)

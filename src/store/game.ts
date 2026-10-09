@@ -21,6 +21,7 @@ import type {
   User,
 } from '@/types';
 import { ACHIEVEMENT_BY_ID, evaluateAchievements, newlyReached, tierKind, TIER_LABEL } from '@/utils/achievements';
+import { challengeAcceptBlock } from '@/utils/challenges';
 import {
   countActiveDay,
   countFind,
@@ -32,6 +33,7 @@ import {
   type SocialEvent,
 } from '@/utils/counters';
 import { isDataUri, trimPhotoBudget } from '@/utils/findPhoto';
+import { LOW_CONFIDENCE } from '@/utils/identify';
 import { uuid } from '@/utils/random';
 import { isPhotoOnlySpecies, isPoisonousEdibility, isProtectedSpecies } from '@/utils/species';
 import { applyXp, computeFindXp } from '@/utils/xp';
@@ -395,6 +397,12 @@ export function noteSocial(e: SocialEvent) {
  * Znalezisko z rozpoznania zdjęcia (IdentifyOutcome „mushroom”). `parts` – części owocnika widoczne na zdjęciu
  * (podpowiedź na Analizie, wysyłane z rozpoznaniem na serwer jako ujęcia skanu). `views` – ujęcia skanu 3D
  * (podgląd 3D, tylko w telefonie; web ich nie zapisuje – localStorage ma miejsce na jedno zdjęcie).
+ *
+ * Podpisane rozpoznanie (docs/backend.md): `recognitionId` z odpowiedzi serwera trafia do znaleziska i `find.submit` –
+ * serwer bierze gatunek, wymiary, gminę, czas i zdjęcie ze swojego rekordu (zdjęcie ma już u siebie, więc bez
+ * `photo.find`). `verified` = jest rozpoznanie (w mockach także symulacja z panelu dev), `sizeVerified` = do tego
+ * kapelusz zmierzony przy odniesieniu skali i zdjęcie nie jest reprodukcją; serwer potwierdza je w stanie gry.
+ * Znalezisko z pewnością < 60% nie idzie na serwer – nie da się go odebrać (Analiza: „Nie jestem pewien”).
  */
 export function createPendingFind(
   id: Identification,
@@ -404,6 +412,7 @@ export function createPendingFind(
   const species = catalog().speciesById[id.speciesId];
   // Trujący albo chroniony → tylko zdjęcie (serwer: submit_find liczy collected tak samo).
   const photoOnly = !!species && isPhotoOnlySpecies(species);
+  const verified = !!id.recognitionId || id.simulated === true;
   const find: Find = {
     id: uuid(),
     tripId: useTripStore.getState().activeTripId,
@@ -420,6 +429,10 @@ export function createPendingFind(
     ...(opts?.parts?.length ? { visibleParts: opts.parts } : {}),
     photoUri: opts?.photoUri,
     ...(opts?.views?.length && !isDataUri(opts.views[0].uri) ? { views: opts.views } : {}),
+    ...(id.recognitionId ? { recognitionId: id.recognitionId } : {}),
+    ...(id.recognitionId && id.expiresAt ? { recognitionExpiresAt: id.expiresAt } : {}),
+    verified,
+    sizeVerified: verified && !!id.sizeMeasured && !id.reproduction,
   };
   useTripStore.getState().upsertFind(find);
   // Web: zdjęcia (data URI) siedzą w localStorage – najstarsze oddają miejsce nowym.
@@ -427,8 +440,8 @@ export function createPendingFind(
     const trimmed = trimPhotoBudget(useTripStore.getState().finds);
     if (trimmed) useTripStore.getState().patch({ finds: trimmed });
   }
-  // Wynik rozpoznania (Edge Function `identify`) przekazuje telefon – serwer go nie podpisuje (do zrobienia: identify
-  // zapisuje znalezisko sama albo zwraca podpis wyniku, który sprawdzi submit_find – docs/backend.md, etap 7).
+  if (find.confidence < LOW_CONFIDENCE) return find;
+  // Dane okazu idą dla zgodności ze starszym serwerem; przy `recognitionId` serwer bierze je z rozpoznania.
   emit({
     type: 'find.submit',
     payload: {
@@ -443,10 +456,12 @@ export function createPendingFind(
       candidates: id.candidates,
       parts: opts?.parts ?? [],
       foundAt: find.foundAt,
+      ...(find.recognitionId ? { recognitionId: find.recognitionId } : {}),
     },
   });
-  // Zdjęcie do prywatnego Storage – po skanie (FIFO); bajty silnik czyta przy wysyłce, w kolejce tylko id.
-  if (find.photoUri) emit({ type: 'photo.find', payload: { findId: find.id } });
+  // Zdjęcie do prywatnego Storage – po skanie (FIFO); bajty silnik czyta przy wysyłce, w kolejce tylko id. Przy
+  // rozpoznaniu serwer ma już zdjęcie (to, które widział model) – zdjęcie w telefonie zostaje tylko do wyświetlania.
+  if (find.photoUri && !find.recognitionId) emit({ type: 'photo.find', payload: { findId: find.id } });
   return find;
 }
 
@@ -456,9 +471,11 @@ export function discardPendingFind(findId: string) {
     useTripStore.getState().removeFind(findId);
     deleteFindPhoto(f.photoUri);
     deleteScanViews(f.views);
-    emit({ type: 'find.discard', payload: { findId } });
-    // Zdjęcie zdążyło trafić na serwer – usuwamy je też ze Storage (kolejką, więc także po powrocie sieci).
-    if (f.photoPath) emit({ type: 'photo.delete', payload: { bucket: 'scan-photos', paths: [f.photoPath] } });
+    // Znalezisko, które nigdy nie poszło na serwer (pewność < 60%) albo serwer je odrzucił – nie ma czego porzucać.
+    if (f.confidence >= LOW_CONFIDENCE && !f.serverRejected) emit({ type: 'find.discard', payload: { findId } });
+    // Zdjęcie zdążyło trafić na serwer – usuwamy je też ze Storage (kolejką, więc także po powrocie sieci). Zdjęcia
+    // z rozpoznania (scan-photos/{uid}/rec/…) klient nie usuwa – zostaje przy rozpoznaniu na serwerze.
+    if (f.photoPath && !f.recognitionId) emit({ type: 'photo.delete', payload: { bucket: 'scan-photos', paths: [f.photoPath] } });
   }
 }
 
@@ -583,7 +600,8 @@ export function claimFind(findId: string): Find | null {
   tsNow.upsertFind(claimed);
   tsNow.upsertTrip({ ...tripNow, findIds: [...tripNow.findIds, claimed.id], xp: tripNow.xp + xp.total });
   if (after.levelUps.length || unlocked.length || unlockedAchievements.length) successHaptic();
-  emit({ type: 'find.claim', payload: { findId } });
+  // Odrzucone przez serwer (podpisane rozpoznanie) – odbiór liczy się tylko w telefonie.
+  if (!find.serverRejected) emit({ type: 'find.claim', payload: { findId } });
   return claimed;
 }
 
@@ -601,10 +619,20 @@ export function toggleFollow(gminaId: string): boolean {
 /**
  * „Przyjmij wyzwanie”: od razu w zadaniach dnia (ukończenie liczy claimFind lokalnie), w trybie Supabase
  * przyjęcie idzie kolejką (`accept_challenge`) – przed odbiorem znaleziska, więc serwer zaliczy je tak samo.
+ * Jak serwer (uszczelnienia, AC2): tylko gmina domowa albo obserwowana i najwyżej 3 aktywne – inaczej toast z powodem
+ * i false (ekran gminy wtedy nie potwierdza przyjęcia).
  */
 export function acceptChallenge(gminaId: string, challenge: GminaChallenge): boolean {
   const u = useUserStore.getState();
   if (u.challenges.some((c) => c.id === challenge.id)) return false;
+  const block = challengeAcceptBlock(
+    { homeGminaId: u.user.homeGminaId, homeGminaPending: u.homeGminaPending, followedGminy: u.followedGminy, challenges: u.challenges },
+    gminaId,
+  );
+  if (block) {
+    ui.toast(block, 'flag');
+    return false;
+  }
   u.patch({ challenges: [...u.challenges, { ...challenge, gminaId, acceptedAt: new Date().toISOString() }] });
   emit({ type: 'challenge.accept', payload: { challengeId: challenge.id, gminaId } });
   return true;

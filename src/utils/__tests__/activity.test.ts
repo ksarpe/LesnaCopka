@@ -42,6 +42,52 @@ describe('aktywność → powiadomienia', () => {
     expect(activityEntry(item({ kind: 'friend_accepted', actor: actor('Kasia_P'), postId: null })).title).toBe('Kasia_P przyjęła Twoje zaproszenie');
   });
 
+  it('rywalizacja: kategoria „rivalry”, treść z `meta`, tapnięcie – pojedynek albo walka', () => {
+    const invite = activityEntry(item({ kind: 'duel_invite', id: 'duel_invite:d1', postId: null, refId: 'd1', meta: { kind: 'biggest', days: 3 } }));
+    expect(invite).toEqual({
+      key: 'activity.duel_invite:d1',
+      kind: 'rivalry',
+      title: 'Ola_W wyzywa Cię na pojedynek',
+      body: '„Największy okaz” · 3 dni. Przyjmij wyzwanie, zanim wygaśnie (48 h).',
+      icon: 'bolt',
+      href: '/rywalizacja/pojedynek/d1',
+      createdAt: '2026-10-06T10:00:00.000Z',
+    });
+    expect(activityEntry(item({ kind: 'duel_accepted', actor: actor('Marek_K'), refId: 'd2', meta: { kind: 'count', days: 1 } }))).toMatchObject({
+      title: 'Marek_K przyjął Twoje wyzwanie',
+      body: 'Pojedynek „Najwięcej grzybów” · 1 dzień trwa – liczą się znaleziska od teraz.',
+    });
+    const won = activityEntry(item({ kind: 'duel_finished', refId: 'd3', meta: { outcome: 'won', xp: 100 } }));
+    expect(won).toMatchObject({ title: 'Wygrywasz pojedynek z Ola_W!', body: 'Gratulacje! +100 XP. Zobacz wynik.', icon: 'trophy', href: '/rywalizacja/pojedynek/d3' });
+    expect(activityEntry(item({ kind: 'duel_finished', refId: 'd3', meta: { outcome: 'lost', xp: 0 } })).title).toBe('Ola_W wygrała Wasz pojedynek');
+    expect(activityEntry(item({ kind: 'duel_finished', refId: 'd3', meta: { outcome: 'draw', xp: 30 } })).body).toBe('+30 XP. Zobacz wynik.');
+    // Bez wyniku (symulacja w mockach) i bez id – ogólnie, lista pojedynków.
+    expect(activityEntry(item({ kind: 'duel_finished', refId: null, meta: null }))).toMatchObject({
+      title: 'Pojedynek z Ola_W dobiegł końca',
+      href: '/rywalizacja/pojedynki',
+    });
+    const award = activityEntry(
+      item({ kind: 'contest_award', refId: '2026-10-05:okaz', meta: { place: 2, scope: 'wojewodztwo', scopeName: 'podlaskie', xp: 150, title: 'Okaz tygodnia' } }),
+    );
+    expect(award).toMatchObject({
+      kind: 'rivalry',
+      title: '2. miejsce: Okaz tygodnia',
+      body: 'podlaskie. +150 XP. Zobacz tablicę wyników.',
+      icon: 'workspace_premium',
+      href: '/rywalizacja/walka/2026-10-05%3Aokaz',
+    });
+    expect(
+      activityEntry(item({ kind: 'contest_overtaken', actor: actor('Jurek_z_Puszczy'), refId: 'c1', meta: { scope: 'wojewodztwo', rank: 3, title: 'Największy borowik szlachetny' } })),
+    ).toMatchObject({
+      title: 'Jurek_z_Puszczy wyprzedził Cię: Największy borowik szlachetny',
+      body: 'Jesteś teraz 3. w województwie. Masz jeszcze czas na większy okaz!',
+      href: '/rywalizacja/walka/c1',
+    });
+    expect(activityEntry(item({ kind: 'contest_overtaken', refId: 'c1', meta: { scope: 'wojewodztwo' } })).title).toBe('Ola_W wyprzedziła Cię w walce o okaz');
+    // Społeczność bez zmian – kategoria „social”.
+    expect(activityEntry(item({ kind: 'reaction' })).kind).toBe('social');
+  });
+
   it('heurystyka imion i skracanie cytatu', () => {
     expect(['Ola_W', 'Ewa.las', 'MagdaLeśna', 'Zosia_Kania', 'ania.rydz'].every(looksFeminine)).toBe(true);
     expect(['Marek_K', 'Kuba', 'Bartek', 'Jurek_z_Puszczy', 'Grzybiarz', 'x', ''].some(looksFeminine)).toBe(false);

@@ -8,7 +8,7 @@ import type { PostAuthor } from '@/types';
 import { plural } from './format';
 import { hashString } from './random';
 
-export type NotifCategory = 'streak' | 'visible' | 'social' | 'gminy' | 'weekly' | 'longTrip';
+export type NotifCategory = 'streak' | 'visible' | 'social' | 'rivalry' | 'gminy' | 'weekly' | 'longTrip';
 /** 'system' = wpisy techniczne (test, powitanie) – nie podlegają przełącznikom kategorii. */
 export type NotifKind = NotifCategory | 'system';
 
@@ -39,6 +39,12 @@ export const NOTIF_CATEGORIES: NotifCategoryDef[] = [
     icon: 'favorite',
   },
   {
+    id: 'rivalry',
+    label: 'Rywalizacja',
+    description: 'Wyzwania na pojedynki, ich wyniki i miejsca w walkach o okaz.',
+    icon: 'military_tech',
+  },
+  {
     id: 'gminy',
     label: 'Wyzwania w obserwowanych gminach',
     description: 'Nowe wyzwania tygodnia w gminach, które obserwujesz.',
@@ -67,6 +73,7 @@ export const DEFAULT_NOTIF_PREFS: Record<NotifCategory, boolean> = {
   streak: true,
   visible: true,
   social: true,
+  rivalry: true,
   gminy: true,
   weekly: true,
   longTrip: true,

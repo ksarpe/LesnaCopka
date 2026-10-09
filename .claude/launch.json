@@ -37,6 +37,21 @@
         "8090"
       ],
       "port": 8090
+    },
+    {
+      "name": "expo-web-mock",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "expo",
+        "start",
+        "--web",
+        "--port",
+        "8083"
+      ],
+      "env": {
+        "EXPO_PUBLIC_BACKEND": "mock"
+      },
+      "port": 8083
     }
   ]
 }

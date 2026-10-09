@@ -183,6 +183,12 @@ function AppStack() {
           <Stack.Screen name="ustawienia/zablokowani" />
           <Stack.Screen name="ustawienia/usun-konto" />
           <Stack.Screen name="ustawienia/mapy-offline" />
+          {/* Rywalizacja (docs/rywalizacja.md): hub, walka o okaz, pojedynki, pojedynek, ranking grzybiarzy. */}
+          <Stack.Screen name="rywalizacja/index" />
+          <Stack.Screen name="rywalizacja/walka/[contestId]" />
+          <Stack.Screen name="rywalizacja/pojedynki" />
+          <Stack.Screen name="rywalizacja/pojedynek/[duelId]" />
+          <Stack.Screen name="rywalizacja/ranking" />
         </Stack.Protected>
         {/* Zawsze dostępne: dokumenty prawne (link z onboardingu) i panel /dev. */}
         <Stack.Screen name="ustawienia/regulamin" />

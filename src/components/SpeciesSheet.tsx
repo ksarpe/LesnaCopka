@@ -372,6 +372,12 @@ export function StatGrid({ items }: { items: { label: string; value: string }[] 
 /** Brak okazów gatunku w gminie w tym sezonie (tryb Supabase, `collected = 0`) – domyślnie: skanowany okaz jest pierwszy. */
 export const FIRST_IN_GMINA = 'Pierwszy taki okaz w gminie w tym sezonie!';
 
+/**
+ * Okazy są, ale za mało, żeby porównać bez zdradzania cudzych (`comparable: false` – serwer porównuje dopiero od 5
+ * zweryfikowanych okazów 3 grzybiarzy).
+ */
+export const TOO_FEW_IN_GMINA = 'Za mało okazów w gminie, żeby porównać – zbierz więcej!';
+
 /** Karta „W gminie X w tym sezonie” ze skalą percentyla. */
 export function GminaSeasonCard({
   gminaName,
@@ -409,7 +415,7 @@ export function GminaSeasonCard({
           <Bone w="100%" h={12} r={6} />
           <Bone w="60%" h={13} />
         </View>
-      ) : data.collected === 0 ? (
+      ) : data.collected === 0 || data.comparable === false ? (
         <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
           <View
             style={{
@@ -425,10 +431,12 @@ export function GminaSeasonCard({
           </View>
           <View style={{ flex: 1, gap: 2 }}>
             <Txt f="n8" size={14} color={colors.primaryText}>
-              {emptyText}
+              {data.comparable === false ? TOO_FEW_IN_GMINA : emptyText}
             </Txt>
             <Txt f="n7" size={12} color={colors.muted}>
-              Porównanie z innymi okazami pojawi się, gdy grzybiarze zbiorą tu ten gatunek.
+              {data.comparable === false
+                ? 'Porównanie pojawi się, gdy w gminie będzie więcej zmierzonych okazów tego gatunku.'
+                : 'Porównanie z innymi okazami pojawi się, gdy grzybiarze zbiorą tu ten gatunek.'}
             </Txt>
           </View>
         </View>

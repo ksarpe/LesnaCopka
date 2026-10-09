@@ -46,7 +46,8 @@ export async function serviceCall(fn: string, params?: Record<string, unknown>, 
   await ensureOnline();
   let r = await rpc(fn, params, ms);
   if (r.error && classifyError(r.error) === 'auth' && (await establishSession())) r = await rpc(fn, params, ms);
-  if (r.error) throw toServiceError(r.error);
+  // Nazwa funkcji: w RPC rywalizacji polski opis z serwera ma pierwszeństwo (feedMap.ts → toServiceError).
+  if (r.error) throw toServiceError(r.error, fn);
   return r.data;
 }
 

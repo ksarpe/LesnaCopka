@@ -204,6 +204,26 @@ async function ensureOnline(reason: SyncReason): Promise<string | null> {
   return null;
 }
 
+/** Odmowy `submit_find` dotyczące podpisanego rozpoznania (P0001 / P0002) – znalezisko nie powstanie na serwerze. */
+const RECOGNITION_REJECT = /^recognition_/;
+
+/**
+ * `find.submit` trwale odrzucony z powodu rozpoznania: toast z polskim opisem serwera, zależne zdarzenia tego
+ * znaleziska (odbiór, zdjęcie, porzucenie) wypadają z kolejki, a znalezisko zostaje w telefonie oznaczone
+ * `serverRejected` (niezweryfikowane). Inaczej `find.claim` dostałby find_not_found, a scalenie stanu z serwera
+ * usunęłoby odebrane znalezisko bez słowa.
+ */
+export function rejectLocalFind(findId: string, err: SyncError) {
+  const reason = err.details?.trim() || 'Serwer nie potwierdził rozpoznania tego znaleziska.';
+  ob()
+    .items.filter((x) => x.type !== 'find.submit' && 'findId' in x.payload && x.payload.findId === findId)
+    .forEach((x) => ob().remove(x.id));
+  const ts = useTripStore.getState();
+  const f = ts.finds[findId];
+  if (f) ts.upsertFind({ ...f, verified: false, sizeVerified: false, serverRejected: { code: err.message, reason, at: nowIso() } });
+  ui.toast(`Znalezisko nie trafiło na serwer: ${reason}`, 'cloud_off');
+}
+
 /** Wysyła kolejkę po kolei. true = pusta. */
 async function drain(reason: SyncReason, uid: string, report: SyncReport): Promise<boolean> {
   const ignoreBackoff = reason === 'manual' || reason === 'connect' || reason === 'appActive';
@@ -239,9 +259,15 @@ async function drain(reason: SyncReason, uid: string, report: SyncReport): Promi
       if (item.type === 'photo.avatar') ui.toast('Serwer nie przyjął zdjęcia profilowego – inni widzą poprzedni avatar', 'error');
       // Publikacja odrzucona (np. koniec wyprawy nie dotarł na serwer) – wpis znika z feedu, można spróbować ponownie.
       if (item.type === 'trip.publish') rejectLocalPublish(item.payload.tripId);
+      // Podpisane rozpoznanie odrzucone (wygasło, zużyte, nieznane, wymagane) – znalezisko zostaje oznaczone w telefonie.
+      if (item.type === 'find.submit' && RECOGNITION_REJECT.test(err.message)) rejectLocalFind(item.payload.findId, err);
       // Wyzwanie zakończyło się, zanim przyjęcie dotarło na serwer – zniknie z zadań przy pobraniu stanu.
       if (item.type === 'challenge.accept' && err.message.includes('challenge_inactive')) {
         ui.toast('To wyzwanie gminy już się zakończyło', 'flag');
+      }
+      // Uszczelnienia: gmina spoza domowej / obserwowanych albo limit aktywnych – powód po polsku z serwera (`detail`).
+      if (item.type === 'challenge.accept' && /challenge_(not_allowed|limit)/.test(err.message)) {
+        ui.toast(err.details || 'Serwer nie przyjął wyzwania gminy', 'flag');
       }
       report.dropped += 1;
       continue;

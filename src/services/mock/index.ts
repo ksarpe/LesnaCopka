@@ -38,6 +38,10 @@ import {
   type WeatherService,
 } from '../types';
 import { liveCamera } from '../live/camera';
+import { mockContests } from './contests';
+import { useContestsDb } from './contestsDb';
+import { mockDuels } from './duels';
+import { useMockDuelsDb } from './duelsDb';
 import { liveIdentify } from '../live/identify';
 import { liveMap } from '../live/map';
 import { liveWeather } from '../live/weather';
@@ -445,7 +449,15 @@ async function mockInit() {
 
 export const mockServices: Services = {
   init: mockInit,
-  dev: { reset: (opts) => useMockDb.getState().reset(opts) },
+  dev: {
+    reset: (opts) => {
+      useMockDb.getState().reset(opts);
+      // Zgłoszenia okazów do walk (./contestsDb.ts) – też dane „serwera” mocków.
+      useContestsDb.getState().reset(opts);
+      // Pojedynki z botami i widoczność w rankingach (./duelsDb.ts).
+      useMockDuelsDb.getState().reset(opts);
+    },
+  },
   permissions: mockPermissions,
   location: mockLocation,
   map: mockMap,
@@ -454,5 +466,7 @@ export const mockServices: Services = {
   stats: mockStats,
   feed: mockFeed,
   catalog: mockCatalog,
+  contests: mockContests,
+  duels: mockDuels,
 };
 

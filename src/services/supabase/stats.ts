@@ -1,6 +1,7 @@
 /**
  * Statystyki gmin na RPC Supabase (etap 4): ranking województwa (`get_ranking`), szczegóły gminy (`get_gmina_stats`)
- * i porównanie okazu (`get_species_percentile`). Mapowanie odpowiedzi: ./statsMap.ts (czyste funkcje).
+ * i porównanie okazu (`get_species_percentile` – tylko okazy zweryfikowane przez serwer, k-anonimowo: bez porównania
+ * przy < 5 okazach albo < 3 znalazcach; waga porównywana w progach co 10%). Mapowanie odpowiedzi: ./statsMap.ts.
  * Bez sieci metody rzucają ServiceError('NETWORK') – ekrany pokazują swoje stany offline, bez cichego powrotu
  * do mocków. Rankingi liczy serwer z XP starszych niż 24 h (prywatność) – świeża wyprawa dochodzi później.
  *

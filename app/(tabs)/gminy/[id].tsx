@@ -202,7 +202,8 @@ function Body({ gminaId, d }: { gminaId: string; d: GminaStats }) {
       router.navigate('/');
       return;
     }
-    acceptChallenge(gminaId, d.challenge);
+    // Gmina spoza domowej / obserwowanych albo limit aktywnych wyzwań – acceptChallenge pokazał powód, zostajemy tu.
+    if (!acceptChallenge(gminaId, d.challenge)) return;
     router.navigate('/');
     setTimeout(() => ui.toast('Wyzwanie przyjęte! Znajdziesz je w zadaniach dnia', 'flag'), 350);
   };

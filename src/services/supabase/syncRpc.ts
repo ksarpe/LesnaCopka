@@ -110,6 +110,8 @@ export function rpcFor(item: OutboxItem): { fn: string; params: Record<string, u
           p_candidates: (p.candidates ?? []).map((c) => ({ species_id: c.speciesId, confidence: clamp(c.confidence, 0, 1) })),
           p_parts: p.parts ?? [],
           p_found_at: p.foundAt,
+          // Podpisane rozpoznanie – tylko gdy jest (starszy serwer bez parametru przyjmuje resztę jak dotąd).
+          ...(p.recognitionId ? { p_recognition_id: p.recognitionId } : {}),
         },
       };
     }

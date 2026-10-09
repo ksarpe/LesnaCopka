@@ -111,6 +111,11 @@ export interface ServerFind {
   reward: unknown;
   /** Etap 5: zdjęcie w prywatnym koszyku `scan-photos` (null = brak); undefined = serwer sprzed Storage. */
   photoPath?: string | null;
+  /** Podpisane rozpoznanie (null = znalezisko bez rozpoznania); undefined = starszy serwer. */
+  recognitionId?: string | null;
+  /** Serwer potwierdza flagi z telefonu (undefined = starszy serwer – zostają lokalne). */
+  verified?: boolean;
+  sizeVerified?: boolean;
 }
 
 /** Wyzwanie gminy przyjęte przez gracza (etap 4). */
@@ -268,6 +273,9 @@ export function parseGameState(raw: unknown): ServerGameState {
         xp: num(f.xp),
         reward: f.reward ?? null,
         ...('photoPath' in f ? { photoPath: strOrNull(f.photoPath) } : {}),
+        ...('recognitionId' in f ? { recognitionId: strOrNull(f.recognitionId) } : {}),
+        ...(typeof f.verified === 'boolean' ? { verified: f.verified } : {}),
+        ...(typeof f.sizeVerified === 'boolean' ? { sizeVerified: f.sizeVerified } : {}),
       }))
       .filter((f) => f.id),
     challenges: Array.isArray(r.challenges)
@@ -356,6 +364,8 @@ export function mapReward(raw: unknown): { xp?: XpBreakdown; reward?: NonNullabl
 /**
  * Znalezisko z serwera; zdjęcie, ujęcia skanu 3D i alternatywy z rozpoznania zostają z telefonu. `photoPath` (zdjęcie na serwerze)
  * – z serwera (starszy serwer bez pola → z telefonu); znacznik `sb-photo:` innej ścieżki niż serwerowa znika.
+ * Podpisane rozpoznanie: `recognitionId`, `verified`, `sizeVerified` – z serwera (potwierdza flagi telefonu); starszy
+ * serwer bez pól → z telefonu.
  */
 export function mapFind(sf: ServerFind, local?: Find): Find {
   const { xp, reward } = mapReward(sf.reward);
@@ -380,6 +390,12 @@ export function mapFind(sf: ServerFind, local?: Find): Find {
     foundAt: sf.foundAt,
   };
   if (local?.candidates) find.candidates = local.candidates;
+  const recognitionId = sf.recognitionId === undefined ? local?.recognitionId : (sf.recognitionId ?? undefined);
+  if (recognitionId) find.recognitionId = recognitionId;
+  const verified = sf.verified ?? local?.verified;
+  if (verified !== undefined) find.verified = verified;
+  const sizeVerified = sf.sizeVerified ?? local?.sizeVerified;
+  if (sizeVerified !== undefined) find.sizeVerified = sizeVerified;
   const photoPath = sf.photoPath === undefined ? local?.photoPath : (sf.photoPath ?? undefined);
   if (photoPath) find.photoPath = photoPath;
   const marker = remotePhotoPath(local?.photoUri);
@@ -480,7 +496,8 @@ export function mergeTripsAndFinds(local: TripsSnapshot, state: ServerGameState,
   Object.values(local.finds).forEach((f) => {
     if (serverFindIds.has(f.id)) return;
     const keepOld = mode === 'merge' && f.status === 'claimed' && ms(f.foundAt) < oldestFind;
-    if (f.status === 'pending' || (f.tripId && keptTrips[f.tripId]) || keepOld) finds[f.id] = f;
+    // Odrzucone przez serwer (podpisane rozpoznanie) zostają w telefonie z oznaczeniem – nie znikają bez słowa.
+    if (f.status === 'pending' || f.serverRejected || (f.tripId && keptTrips[f.tripId]) || keepOld) finds[f.id] = f;
   });
 
   const claimedByTrip = new Map<string, string[]>();
@@ -518,7 +535,7 @@ export interface DerivedCounters {
  * przychodzą z serwera – liczniki służą tylko do paska postępu w aplikacji.
  */
 export function deriveCounters(finds: Find[], gminaById: Record<string, Gmina>): DerivedCounters {
-  const claimed = finds.filter((f) => f.status === 'claimed');
+  const claimed = finds.filter((f) => f.status === 'claimed' && !f.serverRejected);
   return {
     borowikiKnyszynska: claimed.filter(
       (f) => f.collected && f.speciesId === 'borowik-szlachetny' && gminaById[f.gminaId]?.forest === 'Puszcza Knyszyńska',

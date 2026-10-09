@@ -1,7 +1,8 @@
 /**
  * Kontrakt rozpoznawania (supabase/functions/identify/contract.ts) – wspólny dla Edge Function i aplikacji:
  * katalog w funkcji = katalog aplikacji, schemat structured outputs, stały prompt (cache), kontekst żądania
- * bez wstrzyknięć, walidacja żądania i normalizacja odpowiedzi modelu.
+ * bez wstrzyknięć (pozycja nie trafia do modelu), walidacja żądania, normalizacja odpowiedzi modelu (odniesienie
+ * skali, reprodukcja) i części od serwera (podpisane rozpoznanie).
  */
 import { describe, expect, it } from '@jest/globals';
 
@@ -11,10 +12,14 @@ import {
   buildRequestText,
   buildSystemPrompt,
   DEFAULT_REASON,
+  IDENT_SCALE_REFS,
+  MAX_BODY_BYTES,
   MAX_CANDIDATES,
   MAX_REASON,
   normalizeIdent,
+  normalizeRecognition,
   parseRequestBody,
+  REPRODUCTION_REASON,
   requestImages,
   VOIVODESHIPS,
 } from '../../../../supabase/functions/identify/contract';
@@ -59,14 +64,28 @@ describe('schemat odpowiedzi (structured outputs)', () => {
       expect(n.additionalProperties).toBe(false);
       expect([...(n.required as string[])].sort()).toEqual(Object.keys(n.properties as object).sort());
     }
-    expect(schema.required).toEqual(['verdict', 'reason', 'candidates', 'visibleParts', 'count', 'capCm', 'heightCm', 'maturity']);
+    // Reprodukcja przed werdyktem, odniesienie skali przed wymiarami (kolejność generowania).
+    expect(schema.required).toEqual([
+      'reproduction',
+      'verdict',
+      'reason',
+      'candidates',
+      'visibleParts',
+      'count',
+      'scaleReference',
+      'capCm',
+      'heightCm',
+      'maturity',
+    ]);
   });
 
-  it('speciesId = enum id z katalogu; werdykty i części jako enum', () => {
+  it('speciesId = enum id z katalogu; werdykty, części i odniesienie skali jako enum; reprodukcja – boolean', () => {
     const item = schema.properties.candidates.items;
     expect(item.properties.speciesId.enum).toEqual(IDS);
     expect(schema.properties.verdict.enum).toEqual(['mushroom', 'not_mushroom', 'unclear']);
     expect(schema.properties.visibleParts.items.enum).toEqual(['cap', 'underside', 'stem', 'base']);
+    expect(schema.properties.scaleReference.enum).toEqual(['none', 'hand', 'coin', 'card', 'knife', 'other']);
+    expect(schema.properties.reproduction.type).toBe('boolean');
   });
 
   it('bez słów kluczowych, których structured outputs nie obsługują (zakresy przycina kod)', () => {
@@ -97,6 +116,15 @@ describe('prompt systemowy', () => {
   it('skan 3D: kilka ujęć tego samego owocnika, oceniany ten z pierwszego ujęcia', () => {
     expect(prompt).toContain('kilka ujęć (skan 3D)');
     expect(prompt).toContain('Oceniasz owocnik z pierwszego ujęcia');
+  });
+
+  it('reprodukcja (ekran, wydruk, zdjęcie zdjęcia) i odniesienie skali – wymiary tylko przy skali', () => {
+    expect(prompt).toContain('reproduction: true');
+    expect(prompt).toContain('zdjęcie zdjęcia');
+    expect(prompt).toContain('W razie');
+    expect(prompt).toContain('scaleReference');
+    for (const ref of IDENT_SCALE_REFS) expect(prompt).toContain(`"${ref}"`);
+    expect(prompt).toContain('TYLKO wtedy, gdy scaleReference nie jest "none"');
   });
 });
 
@@ -148,6 +176,20 @@ describe('kontekst żądania', () => {
     ).toEqual({ ok: false, message: 'Zdjęcia są za duże' });
   });
 
+  it('parseRequestBody: pozycja tylko jako para lat / lon w zakresie (z dokładnością); model jej nie dostaje', () => {
+    expect(parseRequestBody({ image: JPEG, month: 10, lat: 53.25, lon: 23.35, accuracyM: 12 })).toEqual({
+      ok: true,
+      body: { image: JPEG, month: 10, lat: 53.25, lon: 23.35, accuracyM: 12 },
+    });
+    expect(parseRequestBody({ image: JPEG, lat: 53.25 })).toEqual({ ok: true, body: { image: JPEG } });
+    expect(parseRequestBody({ image: JPEG, lat: 95, lon: 23 })).toEqual({ ok: true, body: { image: JPEG } });
+    expect(parseRequestBody({ image: JPEG, lat: '53', lon: 23 })).toEqual({ ok: true, body: { image: JPEG } });
+    expect(parseRequestBody({ image: JPEG, lat: 53.2, lon: 23.3, accuracyM: -5 })).toEqual({ ok: true, body: { image: JPEG, lat: 53.2, lon: 23.3 } });
+    const text = buildRequestText({ month: 10, voivodeship: 'podlaskie', lat: 53.25, lon: 23.35 } as never);
+    expect(text).toBe('Oceń zdjęcie z telefonu gracza. Miesiąc: październik. Województwo: podlaskie.');
+    expect(text).not.toMatch(/53|23\.3/);
+  });
+
   it('parseRequestBody: JPEG w base64, limit rozmiaru, kontekst odfiltrowany', () => {
     expect(parseRequestBody({ image: JPEG, month: 4, voivodeship: 'śląskie' })).toEqual({
       ok: true,
@@ -155,6 +197,11 @@ describe('kontekst żądania', () => {
     });
     expect(parseRequestBody({ image: `data:image/jpeg;base64,${JPEG}`, month: 0, voivodeship: 'x' })).toEqual({ ok: true, body: { image: JPEG } });
     expect(parseRequestBody({ image: 'iVBORw0KGgo=' }).ok).toBe(false); // PNG
+    // Długość base64 niepodzielna przez 4 – atob w Edge Function rzuciłby wyjątek → 400, nie 500.
+    expect(parseRequestBody({ image: `${JPEG}A` }).ok).toBe(false);
+    expect(parseRequestBody({ image: JPEG, views: [{ image: `${JPEG}AB`, view: 'top' }] }).ok).toBe(false);
+    // Limit treści żądania (413 przed parsowaniem) mieści 4 zdjęcia w limicie base64.
+    expect(MAX_BODY_BYTES).toBeGreaterThan(4_000_000);
     expect(parseRequestBody({ image: '/9j/<script>' }).ok).toBe(false);
     expect(parseRequestBody({ image: `/9j/${'A'.repeat(1_500_000)}` }).ok).toBe(false);
     expect(parseRequestBody(null).ok).toBe(false);
@@ -179,9 +226,11 @@ describe('normalizeIdent', () => {
         ],
         visibleParts: ['stem', 'cap', 'stem', 'kapelusz'],
         count: 2.6,
+        scaleReference: 'hand',
         capCm: 14.2,
         heightCm: 400,
         maturity: 'old',
+        reproduction: false,
       },
       known,
     );
@@ -198,6 +247,8 @@ describe('normalizeIdent', () => {
       capCm: 14,
       heightCm: null,
       maturity: 'old',
+      scaleReference: 'hand',
+      reproduction: false,
     });
   });
 
@@ -215,6 +266,8 @@ describe('normalizeIdent', () => {
       capCm: null,
       heightCm: null,
       maturity: 'unknown',
+      scaleReference: 'none',
+      reproduction: false,
     });
     expect(normalizeIdent({ verdict: 'unclear', reason: 'Za ciemno – podejdź bliżej.' }, known)?.reason).toBe('Za ciemno – podejdź bliżej.');
   });
@@ -232,7 +285,37 @@ describe('normalizeIdent', () => {
       capCm: null,
       heightCm: null,
       maturity: 'unknown',
+      scaleReference: 'none',
+      reproduction: false,
     });
+  });
+
+  it('odniesienie skali: „none” → bez wymiarów; nieznane / brak pola (starszy serwer) – skala jest, gdy są wymiary', () => {
+    const base = { verdict: 'mushroom', candidates: [{ speciesId: 'borowik-szlachetny', confidence: 0.9 }], capCm: 14, heightCm: 16 };
+    expect(normalizeIdent({ ...base, scaleReference: 'none' }, known)).toMatchObject({ scaleReference: 'none', capCm: null, heightCm: null });
+    expect(normalizeIdent({ ...base, scaleReference: 'coin' }, known)).toMatchObject({ scaleReference: 'coin', capCm: 14, heightCm: 16 });
+    expect(normalizeIdent(base, known)).toMatchObject({ scaleReference: 'other', capCm: 14 });
+    expect(normalizeIdent({ ...base, capCm: null, heightCm: null, scaleReference: 'linijka' }, known)).toMatchObject({ scaleReference: 'none' });
+  });
+
+  it('reprodukcja (ekran / wydruk / zdjęcie zdjęcia) → „unclear” z powodem po polsku, bez kandydatów i wymiarów', () => {
+    const r = normalizeIdent(
+      { verdict: 'mushroom', reproduction: true, reason: '', candidates: [{ speciesId: 'borowik-szlachetny', confidence: 0.97 }], scaleReference: 'hand', capCm: 30 },
+      known,
+    );
+    expect(r).toEqual({
+      verdict: 'unclear',
+      reason: REPRODUCTION_REASON,
+      candidates: [],
+      visibleParts: [],
+      count: 0,
+      capCm: null,
+      heightCm: null,
+      maturity: 'unknown',
+      scaleReference: 'none',
+      reproduction: true,
+    });
+    expect(normalizeIdent({ verdict: 'mushroom', reproduction: 'true' }, known)?.reproduction).toBe(false);
   });
 
   it('nie da się użyć: zły werdykt, nie obiekt', () => {
@@ -240,5 +323,49 @@ describe('normalizeIdent', () => {
     expect(normalizeIdent('{"verdict":"mushroom"}', known)).toBeNull();
     expect(normalizeIdent(null, known)).toBeNull();
     expect(normalizeIdent([], known)).toBeNull();
+  });
+});
+
+describe('normalizeRecognition – podpisane rozpoznanie z odpowiedzi serwera', () => {
+  const RID = '6f1c2b0a-3d4e-4f50-8a6b-7c8d9e0f1a2b';
+  const grzyb = normalizeIdent(
+    { verdict: 'mushroom', candidates: [{ speciesId: 'borowik-szlachetny', confidence: 0.9 }], scaleReference: 'hand', capCm: 15.5 },
+    known,
+  )!;
+
+  const top = [{ speciesId: 'borowik-szlachetny', confidence: 0.9 }];
+
+  it('id (UUID), termin i zmierzony kapelusz przy grzybie z gatunkiem', () => {
+    expect(normalizeRecognition({ candidates: top, recognitionId: RID, sizeMeasured: true, expiresAt: '2026-10-12T10:00:00.000Z' }, grzyb)).toEqual({
+      recognitionId: RID,
+      sizeMeasured: true,
+      expiresAt: '2026-10-12T10:00:00.000Z',
+    });
+  });
+
+  it('bez id: zły format, starszy serwer, odrzucenie, reprodukcja; „zmierzony” bez skali – nie', () => {
+    expect(normalizeRecognition({ candidates: top, recognitionId: 'x', expiresAt: '2026-10-12T10:00:00.000Z' }, grzyb)).toEqual({
+      recognitionId: null,
+      sizeMeasured: false,
+      expiresAt: null,
+    });
+    expect(normalizeRecognition({}, grzyb)).toEqual({ recognitionId: null, sizeMeasured: false, expiresAt: null });
+    expect(normalizeRecognition(null, grzyb).recognitionId).toBeNull();
+    const repro = normalizeIdent({ verdict: 'mushroom', reproduction: true }, known)!;
+    expect(normalizeRecognition({ candidates: top, recognitionId: RID, sizeMeasured: true }, repro)).toEqual({ recognitionId: null, sizeMeasured: false, expiresAt: null });
+    const noScale = normalizeIdent({ verdict: 'mushroom', candidates: [{ speciesId: 'borowik-szlachetny', confidence: 0.9 }], scaleReference: 'none' }, known)!;
+    expect(normalizeRecognition({ candidates: top, recognitionId: RID, sizeMeasured: true }, noScale)).toMatchObject({ recognitionId: RID, sizeMeasured: false });
+  });
+
+  it('najlepszy kandydat serwera ≠ najlepszy znany aplikacji (np. gatunek spoza katalogu telefonu) → bez rozpoznania', () => {
+    const raw = {
+      candidates: [{ speciesId: 'nowy-gatunek', confidence: 0.95 }, ...top],
+      recognitionId: RID,
+      sizeMeasured: true,
+      expiresAt: '2026-10-12T10:00:00.000Z',
+    };
+    // Telefon nie zna „nowy-gatunek” – jego najlepszy to borowik, a serwer zapisał inny gatunek.
+    expect(normalizeRecognition(raw, grzyb)).toMatchObject({ recognitionId: null, expiresAt: null });
+    expect(normalizeRecognition({ ...raw, candidates: undefined }, grzyb).recognitionId).toBeNull();
   });
 });

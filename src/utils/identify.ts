@@ -2,12 +2,14 @@
  * Rozpoznanie zdjęcia → wynik gry – czyste funkcje (testy: src/utils/__tests__/identify.test.ts).
  *
  *  · toIdentifyOutcome: znormalizowana odpowiedź Edge Function `identify` + katalog gatunków → IdentifyOutcome
- *    (gatunek, pewność z bezpiecznikiem sobowtórów, wymiary, XXL, widoczne części) albo odrzucenie z powodem;
+ *    (gatunek, pewność z bezpiecznikiem sobowtórów, wymiary, XXL, widoczne części, podpisane rozpoznanie: id,
+ *    zmierzony kapelusz) albo odrzucenie z powodem;
  *  · estimateDimensions: wymiary tylko z odniesienia skali na zdjęciu, bez niego – typowe dla gatunku (bez losowania);
  *  · partsHint: podpowiedź na Analizie, gdy na zdjęciu brakuje części ważnej dla odróżnienia sobowtóra;
- *  · devScanOutcome: wymuszony wynik skanu z panelu dev (ta sama ścieżka mapowania co prawdziwy wynik).
+ *  · devScanOutcome: wymuszony wynik skanu z panelu dev (ta sama ścieżka mapowania co prawdziwy wynik; w trybie mock
+ *    z odniesieniem skali – symulacja podpisanego rozpoznania).
  */
-import type { IdentifyResponse } from '../../supabase/functions/identify/contract';
+import type { IdentifyFunctionResponse, IdentifyResponse } from '../../supabase/functions/identify/contract';
 import type { Dimensions, IdentifyOutcome, ScanPart, Species } from '@/types';
 import { isPoisonousEdibility, speciesLookalikes } from './species';
 import { isXxl } from './xp';
@@ -70,11 +72,19 @@ export function safeConfidence(
   return danger ? Math.min(top.confidence, DANGER_CAP) : top.confidence;
 }
 
+/** Podpisane rozpoznanie z odpowiedzi serwera (normalizeRecognition) – brak = wynik niezweryfikowany. */
+export type SignedPart = Partial<Pick<IdentifyFunctionResponse, 'recognitionId' | 'sizeMeasured' | 'expiresAt'>>;
+
 /**
  * Odpowiedź rozpoznania → wynik gry. Werdykt „nie grzyb” / „niewyraźne” → odrzucenie z powodem; grzyb bez gatunku
  * z atlasu (puste / nieznane id kandydatów) → „niewyraźne” z powodem modelu albo NO_SPECIES_REASON.
+ * `signed` – podpisane rozpoznanie serwera: id (do `find.submit`), zmierzony kapelusz, termin ważności.
  */
-export function toIdentifyOutcome(r: IdentifyResponse, speciesById: Record<string, Species | undefined>): IdentifyOutcome {
+export function toIdentifyOutcome(
+  r: IdentifyResponse,
+  speciesById: Record<string, Species | undefined>,
+  signed: SignedPart = {},
+): IdentifyOutcome {
   if (r.verdict !== 'mushroom') return { kind: r.verdict, reason: r.reason };
   const candidates = r.candidates.filter((c) => !!speciesById[c.speciesId]);
   const top = candidates[0];
@@ -82,6 +92,8 @@ export function toIdentifyOutcome(r: IdentifyResponse, speciesById: Record<strin
   if (!top || !species) return { kind: 'unclear', reason: r.reason || NO_SPECIES_REASON };
   const dimensions = estimateDimensions(species, r);
   const confidence = safeConfidence(candidates, speciesById);
+  // Serwer wydaje rozpoznanie tylko od 60% pewności (z tym samym bezpiecznikiem) – poniżej id nie ma znaczenia.
+  const recognitionId = confidence >= LOW_CONFIDENCE ? signed.recognitionId ?? undefined : undefined;
   return {
     kind: 'mushroom',
     identification: {
@@ -92,6 +104,9 @@ export function toIdentifyOutcome(r: IdentifyResponse, speciesById: Record<strin
       dimensions,
       lookalikes: speciesLookalikes(species),
       candidates: candidates.map((c, i) => (i === 0 ? { ...c, confidence } : c)),
+      ...(recognitionId ? { recognitionId, ...(signed.expiresAt ? { expiresAt: signed.expiresAt } : {}) } : {}),
+      sizeMeasured: !!signed.sizeMeasured && r.capCm != null && r.scaleReference !== 'none' && !r.reproduction,
+      reproduction: !!r.reproduction,
     },
     visibleParts: r.visibleParts,
   };
@@ -133,6 +148,12 @@ export interface ScanOverride {
   xxl: boolean;
   /** Pewność < 60% → „Nie jestem pewien” z kandydatami. */
   lowConfidence: boolean;
+  /**
+   * Z odniesieniem skali na zdjęciu (kapelusz zmierzony). W trybie mock – symulacja podpisanego rozpoznania
+   * (znalezisko zweryfikowane i zmierzone: walki o okaz na botach); w trybie Supabase wynik wymuszony jest zawsze
+   * niezweryfikowany (serwer nie ma jego rozpoznania). Brak w starym zapisie panelu = false.
+   */
+  scaleRef?: boolean;
 }
 
 export const NO_SCAN_OVERRIDE: ScanOverride = { force: 'off', speciesId: null, xxl: false, lowConfidence: false };
@@ -150,9 +171,10 @@ function devAlternatives(species: Species, catalog: Species[]): string[] {
 
 /**
  * Wymuszony wynik (deterministyczny, bez zdjęcia i sieci) przez to samo mapowanie co odpowiedź modelu.
- * null = wymuszenie wyłączone albo pusty katalog.
+ * null = wymuszenie wyłączone albo pusty katalog. `simulateSigned` (tylko tryb mock): z odniesieniem skali wynik
+ * udaje podpisane rozpoznanie (`simulated` – znalezisko zweryfikowane, kapelusz zmierzony).
  */
-export function devScanOutcome(o: ScanOverride, catalog: Species[]): IdentifyOutcome | null {
+export function devScanOutcome(o: ScanOverride, catalog: Species[], opts: { simulateSigned?: boolean } = {}): IdentifyOutcome | null {
   if (o.force === 'off') return null;
   if (o.force === 'not_mushroom') return { kind: 'not_mushroom', reason: `Nie widzę tu grzyba – to wygląda na liść.${DEV_SUFFIX}` };
   if (o.force === 'unclear') {
@@ -162,15 +184,23 @@ export function devScanOutcome(o: ScanOverride, catalog: Species[]): IdentifyOut
   if (!species) return null;
   const confs = o.lowConfidence ? [0.48, 0.34, 0.21] : [0.93, 0.05];
   const ids = [species.id, ...devAlternatives(species, catalog)];
+  const scale = o.xxl ? 1.35 : 1;
+  const measured = o.xxl || !!o.scaleRef;
   const response: IdentifyResponse = {
     verdict: 'mushroom',
     reason: '',
     candidates: ids.slice(0, o.lowConfidence ? 3 : 1).map((speciesId, i) => ({ speciesId, confidence: confs[i] })),
     visibleParts: ['cap', 'underside', 'stem', 'base'],
     count: species.clustered ? 8 : 1,
-    capCm: o.xxl ? Math.round(species.typical.capCm * 1.35) : null,
-    heightCm: o.xxl ? Math.round(species.typical.heightCm * 1.35) : null,
+    capCm: measured ? Math.round(species.typical.capCm * scale) : null,
+    heightCm: measured ? Math.round(species.typical.heightCm * scale) : null,
     maturity: 'mature',
+    scaleReference: measured ? 'hand' : 'none',
+    reproduction: false,
   };
-  return toIdentifyOutcome(response, Object.fromEntries(catalog.map((s) => [s.id, s])));
+  const out = toIdentifyOutcome(response, Object.fromEntries(catalog.map((s) => [s.id, s])), { sizeMeasured: measured });
+  if (out.kind !== 'mushroom') return out;
+  // Tryb mock: „z odniesieniem skali” = symulacja podpisanego rozpoznania; inaczej wynik wymuszony jest niezweryfikowany.
+  const simulated = !!opts.simulateSigned && !!o.scaleRef && out.identification.confidence >= LOW_CONFIDENCE;
+  return simulated ? { ...out, identification: { ...out.identification, simulated: true } } : out;
 }

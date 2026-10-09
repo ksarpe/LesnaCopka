@@ -168,18 +168,28 @@ export function mapGminaStats(raw: unknown, gminaId: string, now = Date.now()): 
 /* ───────────────────────── Percentyl okazu ───────────────────────── */
 
 /** `get_species_percentile` → SpeciesPercentile; `collected = 0` = brak danych w gminie w tym sezonie. */
+/**
+ * `get_species_percentile` → SpeciesPercentile. `comparable: false` (k-anonimowość – za mało zweryfikowanych okazów
+ * albo znalazców) → liczby jak przy braku danych (`collected` 0), więc ekrany pokazują stan bez porównania.
+ */
 export function mapPercentile(raw: unknown, ids: { speciesId: string; gminaId: string }): SpeciesPercentile {
   const r = parse(raw);
   const o = isObj(r) ? r : {};
+  const speciesId = str(o.speciesId) || ids.speciesId;
+  const gminaId = str(o.gminaId) || ids.gminaId;
+  if (o.comparable === false) {
+    return { speciesId, gminaId, collected: 0, mushroomers: 0, sizeRank: 1, percentile: 100, biggerCount: 0, comparable: false };
+  }
   const collected = Math.max(0, Math.round(num(o.collected)));
   return {
-    speciesId: str(o.speciesId) || ids.speciesId,
-    gminaId: str(o.gminaId) || ids.gminaId,
+    speciesId,
+    gminaId,
     collected,
     mushroomers: Math.max(0, Math.round(num(o.mushroomers))),
     sizeRank: Math.max(1, Math.round(num(o.sizeRank, 1))),
     percentile: Math.max(0, Math.min(100, Math.round(num(o.percentile)))),
     biggerCount: Math.max(0, Math.round(num(o.biggerCount))),
+    ...(o.comparable === true ? { comparable: true } : {}),
   };
 }
 

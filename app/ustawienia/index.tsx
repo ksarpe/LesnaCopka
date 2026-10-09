@@ -7,6 +7,7 @@ import { Card } from '@/components/Card';
 import { Icon } from '@/components/Icon';
 import { IconButton } from '@/components/IconButton';
 import { LEGAL_HREF, LEGAL_ICON } from '@/components/LegalDocView';
+import { RankingVisibilityRow } from '@/components/PlayerRankVisibility';
 import { Screen } from '@/components/Screen';
 import { SettingsGroup, SettingsRow } from '@/components/Settings';
 import { Toggle } from '@/components/Toggle';
@@ -186,6 +187,7 @@ export default function SettingsScreen() {
               />
             }
           />
+          <RankingVisibilityRow />
           <SettingsRow
             icon="block"
             iconBg={colors.chip}
